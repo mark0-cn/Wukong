@@ -12,13 +12,21 @@ Windows 使用当前用户 NSIS EXE，Linux 使用 AppImage。平台配置由 Ta
 显式配置、已有便携配置继续优先；卸载程序不默认删除分析数据或 Docker 资源。
 Linux 支持范围以桌面安装验收矩阵为准，AppImage 不承诺兼容所有发行版。
 
+<a id="bundled-worker-setup"></a>
+
+## 内置 Worker 安装程序
+
+Windows 安装包构建还会附带离线 Worker 安装程序。`build-installer.yml` 的 Windows 打包步骤在 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，把生成的 `wukong-worker.exe` 暂存为 `target/worker-setup/WukongWorkerSetup.exe`，在步骤摘要中记录 SHA256 与大小，并通过 `--config` 资源覆盖以 `worker-setup/WukongWorkerSetup.exe` 加入 NSIS 载荷。该覆盖使 `tauri.windows.conf.json` 不包含仅构建期存在的文件，复用共享配置的未签名验收安装包仍可在没有它的情况下完成构建。本地 Windows 打包默认使用同一覆盖：`cargo package-local` 在打包前运行 `python -m scripts.release.worker_setup --output target/worker-setup`，因此其安装包同样包含 `worker-setup/WukongWorkerSetup.exe`，并需要自动发现的 x64 MSVC 生成工具。已按 Tauri CLI 2.12.4 验证：资源目标路径相对于安装目录，因此安装后的文件位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`（默认当前用户安装为 `%LOCALAPPDATA%\Wukong\worker-setup\WukongWorkerSetup.exe`）。NSIS 卸载会删除该文件、升级会替换它，因此 `packaging/windows/uninstall-hooks.nsh` 无需额外清理。
+
+安装包只包含这个可执行文件。离线介质模板（已暂存的载荷、二进制与依赖，发布归档约 458 MB）不随安装包分发，而是独立的签名发布附件；`wukong lab provision` 校验已下载的介质模板并使用控制端密钥 finalize。安装后的安装程序可在不提权时执行 `verify-enrollment`，提权后配合准备好的介质在专用可丢弃 VM 上执行 `install-reviewed`；参见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。
+
 <a id="trust-and-state"></a>
 
 ## 信任与状态
 
 `updates/manifest.rs` 验证清单和文件签名、版本、大小、SHA256、固定镜像 digest、运行协议与数据 schema。
 发布目录中的 `latest.json` 同时供 Tauri 和环境管理使用；应用先验证其独立签名，再将同一份内容传给 Tauri `restore_update`，避免两次查询得到不同版本。
-清单仅允许当前项目对应版本的 HTTPS 附件和公开 `hlmark0/wukong` digest。签名密钥不是模型密钥，也不进入镜像。
+清单仅允许当前项目对应版本的 HTTPS 附件和公开 `hlmark0/wukong` digest。签名密钥不是模型密钥，也不进入镜像。开发用 `cargo package-local` 构建属于本地发布安装包：只有首次引导读取内置的未签名 `local-release.json` 描述文件，所有在线更新路径仍使用签名目录（[本地发布构建](local-builds.zh-CN.md)）。
 
 `interfaces/desktop/updates.rs` 处理检查、下载、独立候选自检、安装和 GUI 进度。准备阶段不替换现用 worker。
 安装前缓存并验证当前版本安装文件，原子保存恢复助手与 `updates/pending.json`。新进程只有在版本匹配且配套环境 doctor 通过后才将记录转为 `previous.json`。
@@ -59,7 +67,7 @@ Windows 子进程保留原 PATH；标准 Docker CLI 不可见时尝试已存在�
 
 `build-installer.yml` 生成并签名 NSIS/AppImage，Windows 和 Linux 均复用已验证的桌面 Release 二进制；Linux 桌面构建与打包使用 Ubuntu 22.04，验收 CLI 是独立产物。
 原生安装/卸载只在隔离 runner 中执行；Linux 用 Xvfb 启动真实 WebView。
-`desktop_manifest` 汇总镜像验收和安装文件，`wukong verify-update --directory dist` 校验整个发行集。
+`desktop_manifest` 汇总镜像验收和安装文件，`python -m scripts.release.verify_update --directory dist` 校验签名清单和每个安装文件。
 正式 Release 发布完成后才推进稳定入口；手动演练不改变用户更新通道。
 
 本地检查覆盖真实签名篡改拒绝、维护互斥、清单来源、前端按钮流程和布局。

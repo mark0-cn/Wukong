@@ -600,6 +600,8 @@ fn resource_record(connection: &Connection, id: Option<&str>) -> Result<Option<R
 
 fn regular(file: &fs::File, maximum: u64) -> Result<()> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `file` is a live borrowed `File`, so its handle stays open across this call, and
+    // `info` is a zeroed `BY_HANDLE_FILE_INFORMATION` out-param on this stack frame.
     security::check(unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) })?;
     ensure!(
         info.nNumberOfLinks == 1

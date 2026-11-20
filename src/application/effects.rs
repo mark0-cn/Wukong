@@ -140,6 +140,14 @@ impl<'a> DurableEffects<'a> {
                     return Ok(Decision::Finish(existing.clone(), raw, true, CallState::Uncertain));
                 }
             }
+            if let Some(existing) = &existing
+                && existing.side_effecting
+                && existing.state == CallState::Uncertain
+            {
+                anyhow::bail!(
+                    "call {call} has an uncertain side effect; reconcile the worker receipt before retrying"
+                );
+            }
             let mut record = existing.unwrap_or(ToolCallRecord {
                 id: call.into(),
                 run_id: agent.run_id.clone(),
@@ -311,7 +319,10 @@ fn finish_record(
 ) -> Result<EffectOutcome> {
     let bytes = serde_json::to_vec(&raw)?;
     let run: RunRecord = store.load(&record.run_id)?;
-    let evidence=store.artifact(&record.run_id,&record.agent_id,&record.id,&record.name,&bytes,"application/json",json!({"raw_tool_output":true,"tool":record.name,"is_error":is_error,"target_sha256":run.target_sha256,"tool_protocol_version":1}))?;
+    // Evidence, the settled call and its ledger event commit together: a crash between
+    // them used to leave a committed evidence row, a still-running call and no finish event.
+    store.transaction(|tx| {
+    let evidence = store.tx_artifact(tx, &record.run_id, &record.agent_id, &record.id, &record.name, &bytes, "application/json", json!({"raw_tool_output":true,"tool":record.name,"is_error":is_error,"target_sha256":run.target_sha256,"tool_protocol_version":1}))?;
     let envelope_overhead = serde_json::to_vec(&json!({"result":null,"evidence_id":evidence.id,"truncated":false,"total_bytes":bytes.len()}))?.len().saturating_sub(4);
     let truncated = bytes.len().saturating_add(envelope_overhead) > limit;
     let result = if truncated {
@@ -375,8 +386,10 @@ fn finish_record(
     record.result = Some(serde_json::to_value(&outcome)?);
     record.evidence_id = Some(evidence.id);
     record.updated_at = now();
-    store.finish_call(&record)?;
+    Store::tx_put(tx, "call", &record.id, &record.run_id, &record)?;
+    Store::tx_event(tx, &record.run_id, Some(&record.agent_id), "tool.finished", json!({"call_id":record.id,"name":record.name,"state":record.state,"evidence_id":record.evidence_id}))?;
     Ok(outcome)
+    })
 }
 
 /// Resolve an unknown effect from operator-supplied evidence without opening
@@ -443,11 +456,14 @@ pub fn reconcile_record(
 }
 
 pub(crate) fn prefix_utf8(bytes: &[u8], limit: usize) -> String {
-    let mut end = bytes.len().min(limit);
-    while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
-        end -= 1;
-    }
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    let end = bytes.len().min(limit);
+    // One validation pass; the error reports the byte length of the valid prefix,
+    // so invalid bytes anywhere ahead of the cut are ignored instead of re-scanning.
+    let valid = match std::str::from_utf8(&bytes[..end]) {
+        Ok(_) => end,
+        Err(error) => error.valid_up_to(),
+    };
+    String::from_utf8_lossy(&bytes[..valid]).into_owned()
 }
 
 #[cfg(test)]

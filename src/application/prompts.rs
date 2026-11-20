@@ -286,7 +286,10 @@ pub(crate) fn tool_directory_prompt() -> String {
             .trim()
             .to_owned();
         if short.chars().count() > 110 {
-            short = short.chars().take(107).collect::<String>() + "…";
+            if let Some((cut, _)) = short.char_indices().nth(107) {
+                short.truncate(cut);
+            }
+            short.push('…');
         }
         text.push_str(&format!("- {}: {}\n", definition.name, short));
     }

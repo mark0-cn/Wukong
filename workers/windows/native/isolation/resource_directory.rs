@@ -17,7 +17,7 @@ use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
 use windows_sys::Win32::{
     Security::{
         Authorization::{GetSecurityInfo, SetSecurityInfo},
-        GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, SYSTEM_MANDATORY_LABEL_ACE,
+        GetSecurityDescriptorSacl, LABEL_SECURITY_INFORMATION, SID, SYSTEM_MANDATORY_LABEL_ACE,
     },
     Storage::FileSystem::{
         DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_WRITE, FILE_LIST_DIRECTORY,
@@ -144,12 +144,18 @@ impl ResourceDirectory {
         let descriptor = SecurityDescriptor::from_sddl(&format!("{sddl}S:(ML;OICI;NW;;;LW)"))?;
         let (mut dacl, mut sacl) = (null_mut(), null_mut());
         let (mut present, mut defaulted) = (0, 0);
+        // SAFETY: descriptor.0.0 is the Local-owned self-relative descriptor built by
+        // SecurityDescriptor::from_sddl; present, dacl and defaulted are writable stack locals.
         check(unsafe {
             GetSecurityDescriptorDacl(descriptor.0.0, &mut present, &mut dacl, &mut defaulted)
         })?;
+        // SAFETY: descriptor.0.0 is the same live Local-owned descriptor as above; present, sacl
+        // and defaulted are writable stack locals, so GetSecurityDescriptorSacl may fill them in.
         check(unsafe {
             GetSecurityDescriptorSacl(descriptor.0.0, &mut present, &mut sacl, &mut defaulted)
         })?;
+        // SAFETY: handle is the directory handle opened above with WRITE_DAC/WRITE_OWNER, and dacl
+        // and sacl point into descriptor, whose Local keeps the descriptor alive past this call.
         let status = unsafe {
             SetSecurityInfo(
                 handle.as_raw_handle(),
@@ -182,6 +188,8 @@ impl ResourceDirectory {
         children: &std::collections::BTreeMap<String, u32>,
     ) -> Result<()> {
         let mut actual = null_mut();
+        // SAFETY: self.handle is the live held root handle; actual starts null, and on success
+        // GetSecurityInfo allocates the descriptor that Local adopts and LocalFree's below.
         let status = unsafe {
             GetSecurityInfo(
                 self.handle.as_raw_handle(),
@@ -201,25 +209,46 @@ impl ResourceDirectory {
         let actual = Local(actual);
         verify_descriptor_with_children(actual.0, &policy.owner, &policy.grants, true, children)?;
         let (mut sacl, mut present, mut defaulted) = (null_mut(), 0, 0);
+        // SAFETY: actual.0 is the Local-owned descriptor returned by GetSecurityInfo just above;
+        // present, sacl and defaulted are writable stack locals for GetSecurityDescriptorSacl.
         check(unsafe {
             GetSecurityDescriptorSacl(actual.0, &mut present, &mut sacl, &mut defaulted)
         })?;
         ensure!(
+            // SAFETY: the checked GetSecurityDescriptorSacl above succeeded, and this condition
+            // requires present != 0 and a non-null sacl before dereferencing AceCount.
             present != 0 && !sacl.is_null() && unsafe { (*sacl).AceCount } == 1,
             "ambiguous sandbox directory integrity label"
         );
         let mut ace = null_mut();
+        // SAFETY: the ensure! above proves sacl is non-null with AceCount == 1, so index 0 is in
+        // range; GetAce writes a pointer into the still-live actual descriptor.
         check(unsafe { GetAce(sacl, 0, &mut ace) })?;
+        // SAFETY: GetAce succeeded above, so ace points at an ACE whose first bytes are an
+        // ACE_HEADER; the shared borrow ends inside verify, before actual is dropped.
         let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+        // The label ACE embeds a SID at SidStart whose length depends on the
+        // sub-authority count, so the whole SID must fit inside AceSize, not just
+        // the fixed part of the struct.
+        let ace_size = header.AceSize as usize;
+        let sid_offset = std::mem::offset_of!(SYSTEM_MANDATORY_LABEL_ACE, SidStart);
+        const SID_HEADER: usize = 8;
         ensure!(
-            header.AceType == 0x11
-                && header.AceSize as usize >= size_of::<SYSTEM_MANDATORY_LABEL_ACE>(),
+            header.AceType == 0x11 && ace_size >= sid_offset + SID_HEADER,
             "invalid sandbox integrity ACE"
         );
+        // SAFETY: the ensure! above proved AceType 0x11 and room for the mask plus the SID
+        // header, so both the struct read and the header read stay inside the ACE.
         let label = unsafe { &*ace.cast::<SYSTEM_MANDATORY_LABEL_ACE>() };
+        let sid = addr_of!(label.SidStart).cast::<SID>();
+        // SAFETY: the SID header is inside the ACE, so its sub-authority count is readable.
+        let sub_authorities = unsafe { (*sid).SubAuthorityCount as usize };
         ensure!(
-            label.Mask == 1
-                && sid_text(addr_of!(label.SidStart).cast_mut().cast())? == "S-1-16-4096",
+            sid_offset + SID_HEADER + sub_authorities * 4 <= ace_size,
+            "truncated sandbox integrity SID"
+        );
+        ensure!(
+            label.Mask == 1 && sid_text(sid.cast_mut().cast())? == "S-1-16-4096",
             "sandbox label is not low/no-write-up"
         );
         Ok(())
@@ -235,9 +264,13 @@ impl ResourceDirectory {
         let descriptor = self.original.descriptor(false)?;
         let (mut present, mut defaulted) = (0, 0);
         let mut dacl = null_mut();
+        // SAFETY: descriptor is the Local owning the SDDL-built self-relative descriptor for the
+        // original policy; dacl, present and defaulted are stack out-params for this call.
         check(unsafe {
             GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted)
         })?;
+        // SAFETY: self.handle is the still-open root handle with WRITE_DAC, and dacl points into
+        // descriptor, the live Local above that outlives the SetSecurityInfo call.
         let status = unsafe {
             SetSecurityInfo(
                 self.handle.as_raw_handle(),
@@ -252,6 +285,8 @@ impl ResourceDirectory {
         };
         ensure!(status == 0, "cannot reclaim sandbox directory: {status}");
         let mut actual = null_mut();
+        // SAFETY: self.handle is the live held root handle; actual starts null, and on success
+        // GetSecurityInfo allocates the descriptor that Local adopts and LocalFree's below.
         let status = unsafe {
             GetSecurityInfo(
                 self.handle.as_raw_handle(),
@@ -332,6 +367,8 @@ pub(crate) fn probe_root(path: &Path) -> Result<()> {
             }
             buffer.extend([0u8; 4]);
             let mut returned = 0;
+            // SAFETY: directory is the live probe-root handle; buffer is a fully initialized
+            // FSCTL_SET_REPARSE_POINT input passed with buffer.len(), and returned is a stack u32.
             let result = unsafe {
                 DeviceIoControl(
                     directory.as_raw_handle(),
@@ -365,6 +402,8 @@ mod tests {
     fn inert_app_sid(name: &str) -> Result<String> {
         let name = wide(std::ffi::OsStr::new(name))?;
         let mut app = null_mut();
+        // SAFETY: name is the NUL-terminated wide buffer from wide(), app starts null, and the
+        // hr >= 0 check below gates Free, which releases the returned SID with FreeSid.
         let hr = unsafe {
             windows_sys::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName(
                 name.as_ptr(),
@@ -375,6 +414,8 @@ mod tests {
         struct Free(PSID);
         impl Drop for Free {
             fn drop(&mut self) {
+                // SAFETY: Free owns the SID DeriveAppContainerSidFromAppContainerName returned,
+                // gated by the hr >= 0 check; Drop runs once, so FreeSid releases it exactly once.
                 unsafe {
                     windows_sys::Win32::Security::FreeSid(self.0);
                 }
@@ -392,6 +433,8 @@ mod tests {
         const OTHER: &str = "S-1-15-2-201-202-203-204-205-206-207";
         let temporary = tempfile::tempdir()?;
         let mut original = null_mut();
+        // SAFETY: GetCurrentProcess returns a valid pseudo-handle, original is a stack out-param,
+        // and check() rejects failure before Handle adopts and CloseHandle's the returned token.
         check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut original) })?;
         let token = Handle(original);
         let logon = token_logon_sid(&token)?;
@@ -570,6 +613,8 @@ mod tests {
     -> Result<()> {
         let root = tempfile::tempdir()?;
         let mut token = null_mut();
+        // SAFETY: GetCurrentProcess returns a valid pseudo-handle, token is a stack out-param,
+        // and check() rejects failure before Handle adopts and CloseHandle's the returned token.
         check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
         let token = Handle(token);
         let logon = token_logon_sid(&token)?;

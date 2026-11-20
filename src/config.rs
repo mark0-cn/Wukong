@@ -100,6 +100,10 @@ pub struct WindowsLabVm {
     pub environment: Option<String>,
     /// Administrative channel used only for service/driver installation media.
     pub admin: Option<WindowsLabAdmin>,
+    /// Offline disk-injection tooling for `lab provision`. Absent configuration
+    /// is an actionable error; the controller never assumes a host tool layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offline: Option<WindowsLabOffline>,
     pub baseline_snapshot: String,
     pub snapshot_prefix: String,
     /// Upper bound for one VMware host operation (snapshot, revert, start).
@@ -113,12 +117,38 @@ impl Default for WindowsLabVm {
             vmrun: PathBuf::from("vmrun"),
             environment: None,
             admin: None,
+            offline: None,
             baseline_snapshot: "wukong-lab-baseline".into(),
             snapshot_prefix: "wukong-lab".into(),
             operation_timeout_seconds: 300,
             start_after_restore: false,
         }
     }
+}
+/// Host tooling used to provision the powered-off lab VM without booting it:
+/// WSL provides libguestfs/hivexsh and the Windows host provides mkisofs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsLabOffline {
+    /// Windows Subsystem for Linux launcher (usually `C:\Windows\System32\wsl.exe`).
+    pub wsl_executable: PathBuf,
+    /// Registered distribution that provides the tools below. Commands run as
+    /// its root user because libguestfs requires privilege.
+    pub wsl_distribution: String,
+    /// Absolute POSIX path of `guestfish` inside the distribution.
+    pub guestfish: String,
+    /// Absolute POSIX path of `hivexsh` inside the distribution.
+    pub hivexsh: String,
+    /// Absolute Windows path of the `mkisofs` executable that builds the CD image.
+    pub mkisofs: PathBuf,
+    /// Upper bound for one WSL/libguestfs command (60–1800 seconds).
+    pub timeout_seconds: u64,
+}
+fn valid_posix_tool(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() <= 4096
+        && !path.contains(['\n', '\r', '\0'])
+        && !path.split('/').any(|component| component == "..")
 }
 fn valid_snapshot_name(name: &str) -> bool {
     !name.is_empty()
@@ -204,6 +234,34 @@ impl AppConfig {
                             .bytes()
                             .all(|b| b.is_ascii_alphanumeric() || b == b'_'),
                     "windows_lab VM {id} admin password_env must name an environment variable"
+                );
+            }
+            if let Some(offline) = &vm.offline {
+                ensure!(
+                    offline.wsl_executable.is_absolute(),
+                    "windows_lab VM {id} offline.wsl_executable must be an absolute path"
+                );
+                ensure!(
+                    !offline.wsl_distribution.is_empty()
+                        && offline.wsl_distribution.len() <= 64
+                        && !offline.wsl_distribution.starts_with('-')
+                        && offline
+                            .wsl_distribution
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)),
+                    "windows_lab VM {id} offline.wsl_distribution must name one WSL distribution"
+                );
+                ensure!(
+                    valid_posix_tool(&offline.guestfish) && valid_posix_tool(&offline.hivexsh),
+                    "windows_lab VM {id} offline guestfish and hivexsh must be absolute POSIX paths inside WSL"
+                );
+                ensure!(
+                    offline.mkisofs.is_absolute(),
+                    "windows_lab VM {id} offline.mkisofs must be an absolute path"
+                );
+                ensure!(
+                    (60..=1800).contains(&offline.timeout_seconds),
+                    "windows_lab VM {id} offline.timeout_seconds must be 60–1800 seconds"
                 );
             }
         }
@@ -297,6 +355,10 @@ impl AppConfig {
         for vm in self.windows_lab.vms.values_mut() {
             resolve(base, &mut vm.vmx);
             resolve(base, &mut vm.vmrun);
+            if let Some(offline) = &mut vm.offline {
+                resolve(base, &mut offline.wsl_executable);
+                resolve(base, &mut offline.mkisofs);
+            }
         }
         resolve(base, &mut self.analysis.ghidra_cache_dir);
         if let Some(p) = &mut self.skills_dir {
@@ -355,6 +417,15 @@ impl AppConfig {
                 && self.budget.max_wall_seconds > 0,
             "run budgets must be positive"
         );
+        // Shares multiply the run token budget; a non-finite or out-of-range value
+        // would silently saturate `Budget::role_token_cap` (inf -> u64::MAX,
+        // NaN -> the 10k floor) instead of failing the configuration.
+        for (role, share) in &self.budget.role_token_shares {
+            ensure!(
+                share.is_finite() && *share > 0.0 && *share <= 1.0,
+                "budget.role_token_shares.{role:?} must be within (0, 1]"
+            );
+        }
         ensure!(
             self.tools.max_output_bytes >= 1024
                 && self.tools.max_evidence_read_bytes > 0
@@ -532,5 +603,89 @@ mod tests {
                 .to_string()
                 .contains("must cover analysis_timeout_seconds")
         );
+    }
+
+    fn offline_vm(offline: Option<WindowsLabOffline>) -> WindowsLabVm {
+        WindowsLabVm {
+            vmx: std::path::absolute("lab.vmx").unwrap(),
+            vmrun: std::path::absolute("vmrun.exe").unwrap(),
+            offline,
+            ..Default::default()
+        }
+    }
+
+    fn offline_tooling() -> WindowsLabOffline {
+        WindowsLabOffline {
+            wsl_executable: std::path::absolute("wsl.exe").unwrap(),
+            wsl_distribution: "Ubuntu".into(),
+            guestfish: "/usr/bin/guestfish".into(),
+            hivexsh: "/usr/bin/hivexsh".into(),
+            mkisofs: std::path::absolute("mkisofs.exe").unwrap(),
+            timeout_seconds: 600,
+        }
+    }
+
+    #[test]
+    fn windows_lab_offline_tooling_is_operator_configuration() {
+        let mut config = AppConfig::default();
+        config
+            .windows_lab
+            .vms
+            .insert("lab".into(), offline_vm(Some(offline_tooling())));
+        config.validate().unwrap();
+
+        let cases: [fn(&mut WindowsLabOffline); 5] = [
+            |offline| offline.wsl_executable = PathBuf::from("wsl.exe"),
+            |offline| offline.wsl_distribution = "-u root".into(),
+            |offline| offline.guestfish = "guestfish".into(),
+            |offline| offline.hivexsh = "/usr/bin/../bin/hivexsh".into(),
+            |offline| offline.mkisofs = PathBuf::from("mkisofs.exe"),
+        ];
+        for mutate in cases {
+            let mut config = AppConfig::default();
+            let mut offline = offline_tooling();
+            mutate(&mut offline);
+            config
+                .windows_lab
+                .vms
+                .insert("lab".into(), offline_vm(Some(offline)));
+            assert!(config.validate().is_err());
+        }
+        let mut config = AppConfig::default();
+        let mut offline = offline_tooling();
+        offline.timeout_seconds = 10;
+        config
+            .windows_lab
+            .vms
+            .insert("lab".into(), offline_vm(Some(offline)));
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn offline_tooling_paths_resolve_against_the_configuration_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("wukong.toml");
+        fs::write(
+            &path,
+            r#"
+[windows_lab.vms.lab]
+vmx = "lab.vmx"
+vmrun = "vmrun.exe"
+[windows_lab.vms.lab.offline]
+wsl_executable = "tools/wsl.exe"
+wsl_distribution = "Ubuntu"
+guestfish = "/usr/bin/guestfish"
+hivexsh = "/usr/bin/hivexsh"
+mkisofs = "tools/mkisofs.exe"
+timeout_seconds = 600
+"#,
+        )
+        .unwrap();
+        let config = AppConfig::load(Some(&path)).unwrap();
+        let base = fs::canonicalize(directory.path()).unwrap();
+        let offline = config.windows_lab.vms["lab"].offline.as_ref().unwrap();
+        assert_eq!(offline.wsl_executable, base.join("tools/wsl.exe"));
+        assert_eq!(offline.mkisofs, base.join("tools/mkisofs.exe"));
+        assert_eq!(offline.guestfish, "/usr/bin/guestfish");
     }
 }

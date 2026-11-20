@@ -8,6 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A build or image save that produces more than this is treated as runaway.
+const MAX_LOG_BYTES: u64 = 256 * 1024 * 1024;
+/// Upper bound for a streamed Docker command that has no cancellation token.
+const MAX_STREAM_TIME: Duration = Duration::from_secs(2 * 60 * 60);
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LayerProgress {
     pub id: String,
@@ -101,6 +106,14 @@ pub(super) fn monitor(
     let mut revision = 0;
     report(parser.progress.clone());
     loop {
+        if started.elapsed() > MAX_STREAM_TIME {
+            let _ = child.kill();
+            anyhow::bail!("Docker command exceeded {MAX_STREAM_TIME:?}");
+        }
+        if file.metadata().map(|meta| meta.len()).unwrap_or(0) > MAX_LOG_BYTES {
+            let _ = child.kill();
+            anyhow::bail!("Docker log exceeds {MAX_LOG_BYTES} bytes");
+        }
         super::cancellation::check(cancel)?;
         let exit = child.try_wait()?;
         // Drain incrementally. No raw-output buffers or unbounded lines in the DTO.
@@ -113,12 +126,16 @@ pub(super) fn monitor(
             }
             parser.feed(&chunk[..count]);
         }
-        parser.progress.elapsed_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        parser.progress.elapsed_ms =
+            u64::try_from(started.elapsed().as_millis().min(u64::MAX as u128))
+                .expect("clamped to u64::MAX above");
         if revision != parser.revision {
             revision = parser.revision;
             last_change = Instant::now();
         }
-        parser.progress.quiet_ms = last_change.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        parser.progress.quiet_ms =
+            u64::try_from(last_change.elapsed().as_millis().min(u64::MAX as u128))
+                .expect("clamped to u64::MAX above");
         if let Some(status) = exit
             && drained
         {

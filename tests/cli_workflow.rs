@@ -1,4 +1,8 @@
 //! Exercises the real CLI, scheduler, SQLite and Rig over a local HTTP wire.
+#![allow(
+    clippy::unwrap_used,
+    reason = "a fixture that cannot be built should fail the test immediately"
+)]
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc, time::Duration};
@@ -304,7 +308,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         ensure!(paused_calls == 1, "paused checkpoint repeated model work");
         let output = cli_with_base(
             &config_path,
-            &["resume", &run.id, "--max-tokens", "10000"],
+            &["analyze", "--resume", &run.id, "--max-tokens", "10000"],
             Some("http://127.0.0.1:1/v1"),
         )
         .await?;

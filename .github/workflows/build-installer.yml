@@ -54,6 +54,14 @@ jobs:
           path: client
           run-id: ${{ inputs.client_run || github.run_id }}
           github-token: ${{ github.token }}
+      - name: Build and stage Windows worker setup executable
+        id: worker_setup
+        if: inputs.target == 'windows' && inputs.installer_artifact_id == ''
+        shell: pwsh
+        timeout-minutes: 40
+        run: |
+          python -m scripts.release.worker_setup --output target/worker-setup --cache target/windows-offline-cache
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Bundle verified Windows client without recompilation
         if: inputs.target == 'windows' && inputs.installer_artifact_id == ''
         shell: pwsh
@@ -67,7 +75,9 @@ jobs:
           Copy-Item client/wukong.exe target/release/wukong.exe
           npm ci
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npx --no-install tauri bundle --ci --features custom-protocol --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          # The worker setup executable is added by this packaging build only; unsigned
+          # acceptance bundles reuse the shared config and intentionally omit it.
+          npx --no-install tauri bundle --ci --features custom-protocol --config '{"bundle":{"createUpdaterArtifacts":true,"resources":{"target/worker-setup/WukongWorkerSetup.exe":"worker-setup/WukongWorkerSetup.exe"}}}'
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Bundle verified Linux desktop client without recompilation
         if: inputs.target == 'linux' && inputs.installer_artifact_id == ''

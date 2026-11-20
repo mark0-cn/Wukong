@@ -44,25 +44,40 @@ pub(super) fn prepare_spawns(
                 .unwrap_or_else(|| format!("rig-spawn:{}", effect.id()));
             let result = application.runner.create_agent(&agent, &call_id, &args)?;
             let child: AgentMetadata = serde_json::from_value(result["agent"].clone())?;
-            let existing = ids.iter().find(|(_, id)| id.0 == child.id);
-            if let Some((existing, _)) = existing {
-                commands.entity(entity).insert((
-                    SpawnedAgent(existing),
-                    Outcome::custom(json!({"agent":child.id})),
-                ));
+            let child_id = child.id.clone();
+            // The child record is already durable. Any failure from here must fail it:
+            // a non-terminal child without a runtime agent blocks the root forever.
+            let admitted = (|| -> Result<()> {
+                let existing = ids.iter().find(|(_, id)| id.0 == child.id);
+                if let Some((existing, _)) = existing {
+                    commands.entity(entity).insert((
+                        SpawnedAgent(existing),
+                        Outcome::custom(json!({"agent":child_id})),
+                    ));
+                }
+                request.id = Some(AgentId(child_id.clone()));
+                request.model = None;
+                request.tools = None;
+                request.system_prompt = Some(
+                    application
+                        .runner
+                        .preamble(&child, &application.runner.run(&child.run_id)?)?,
+                );
+                commands.entity(entity).insert(SpawnAdmission {
+                    id: child_id.clone(),
+                    fresh: existing.is_none(),
+                });
+                Ok(())
+            })();
+            if let Err(error) = admitted {
+                let _ = application.runner.fail_agent(
+                    &child_id,
+                    format!("spawn admission failed: {error:#}"),
+                    None,
+                    crate::domain::FailureCause::Error,
+                );
+                return Err(error);
             }
-            request.id = Some(AgentId(child.id.clone()));
-            request.model = None;
-            request.tools = None;
-            request.system_prompt = Some(
-                application
-                    .runner
-                    .preamble(&child, &application.runner.run(&child.run_id)?)?,
-            );
-            commands.entity(entity).insert(SpawnAdmission {
-                id: child.id,
-                fresh: existing.is_none(),
-            });
             Ok(())
         })();
         if let Err(error) = result {
@@ -288,7 +303,10 @@ pub(super) fn gate_models(
                             agent
                                 .task_result
                                 .as_ref()
-                                .map(|result| serde_json::to_string(result).unwrap())
+                                .map(|result| {
+                                    serde_json::to_string(result)
+                                        .expect("serializing a JSON value cannot fail")
+                                })
                                 .or(agent.summary)
                                 .unwrap_or_default(),
                         )],
@@ -329,6 +347,7 @@ pub(super) fn gate_models(
                             &agent.id,
                             "agent model budget reached".into(),
                             None,
+                            crate::domain::FailureCause::Budget,
                         )?;
                         commands.trigger(StopTurn::new(from.0));
                     } else {

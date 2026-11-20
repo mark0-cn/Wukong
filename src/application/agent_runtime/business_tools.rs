@@ -17,7 +17,10 @@ pub(super) fn prepare_calls(
         };
         let mut args = Value::Object(request.call.function.arguments.clone());
         crate::application::tools::normalize_integer_arguments(&mut args, &def.0.parameters);
-        request.call.function.arguments = args.as_object().unwrap().clone();
+        let Value::Object(arguments) = args else {
+            continue;
+        };
+        request.call.function.arguments = arguments;
         handler.0 = rig_ecs::effects::Handler(ErasedHandler::new(BusinessTool {
             application: application.clone(),
             definition: (*def.0).clone(),

@@ -330,11 +330,11 @@ async fn drive_bounded(runner: &AssessmentRunner, run_id: &str) -> RunRecord {
             .into_iter()
             .map(|agent| {
                 (
-                    agent.id.clone(),
-                    agent.role,
-                    agent.status,
-                    agent.turns,
-                    agent.generation,
+                    agent.metadata.id.clone(),
+                    agent.metadata.role,
+                    agent.metadata.status,
+                    agent.metadata.turns,
+                    agent.metadata.generation,
                 )
             })
             .collect::<Vec<_>>();
@@ -445,9 +445,12 @@ async fn native_lifecycle_rejects_a_second_plain_answer() {
     let result = drive_bounded(&runner, &run.id).await;
     assert_eq!(result.status, Status::Failed);
     let root: AgentSnapshot = runner.store.require("agent", &run.root_id).unwrap();
-    assert!(root.error.as_ref().unwrap().contains("lifecycle"));
-    assert_eq!(root.summary.as_deref(), Some("still no accepted result"));
-    assert_eq!(root.total_tokens, 24);
+    assert!(root.metadata.error.as_ref().unwrap().contains("lifecycle"));
+    assert_eq!(
+        root.metadata.summary.as_deref(),
+        Some("still no accepted result")
+    );
+    assert_eq!(root.metadata.total_tokens, 24);
     server.await.unwrap();
     drop(dir);
 }
@@ -513,8 +516,11 @@ async fn native_skills_and_usage_survive_rig_memory_compaction() {
         .await
         .unwrap();
     let mut root: AgentSnapshot = runner.store.require("agent", &run.root_id).unwrap();
-    root.skills = vec!["formats".into()];
-    runner.store.put("agent", &root.id, &run.id, &root).unwrap();
+    root.metadata.skills = vec!["formats".into()];
+    runner
+        .store
+        .put("agent", &root.metadata.id, &run.id, &root)
+        .unwrap();
     runner.config.execution.compact_after_chars = 100;
     runner.config.execution.keep_recent_messages = 2;
     let note = SharedDocument {
@@ -750,7 +756,7 @@ async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
                         .list::<AgentSnapshot>("agent", &rid)
                         .unwrap()
                         .into_iter()
-                        .find(|agent| agent.role == Role::Analyst)
+                        .find(|agent| agent.metadata.role == Role::Analyst)
                         .unwrap()
                 };
                 let output = match roots {
@@ -758,20 +764,26 @@ async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
                         "task",
                         json!({"description":"format analyst","prompt":"Explain the format","role":"analyst","scope":"input format","inherit_context":false}),
                     ),
-                    1 => reply("wait_for_agents", json!({"agent_ids":[child().id]})),
+                    1 => reply(
+                        "wait_for_agents",
+                        json!({"agent_ids":[child().metadata.id]}),
+                    ),
                     2 => reply(
                         "send_message_to_agent",
-                        json!({"agent_id":child().id,"message":"For reference only","kind":"information"}),
+                        json!({"agent_id":child().metadata.id,"message":"For reference only","kind":"information"}),
                     ),
                     3 => {
                         assert_eq!(children, 1, "information reopened the child");
-                        assert_eq!(child().status, Status::Completed);
+                        assert_eq!(child().metadata.status, Status::Completed);
                         reply(
                             "follow_up_agent",
-                            json!({"agent_id":child().id,"message":"Clarify the length field","recipient_generation":0}),
+                            json!({"agent_id":child().metadata.id,"message":"Clarify the length field","recipient_generation":0}),
                         )
                     }
-                    4 => reply("wait_for_agents", json!({"agent_ids":[child().id]})),
+                    4 => reply(
+                        "wait_for_agents",
+                        json!({"agent_ids":[child().metadata.id]}),
+                    ),
                     5 => reply(
                         "finish_scan",
                         json!({"result":{"outcome":"success","answer":"two accepted results"}}),
@@ -811,7 +823,7 @@ async fn native_messages_do_not_reopen_work_and_followups_keep_history() {
         .list::<AgentSnapshot>("agent", &run.id)
         .unwrap()
         .into_iter()
-        .find(|agent| agent.role == Role::Analyst)
+        .find(|agent| agent.metadata.role == Role::Analyst)
         .unwrap();
     assert_eq!(child.generation, 1);
     assert_eq!(child.summary.as_deref(), Some("clarified result"));
@@ -1292,7 +1304,7 @@ async fn informational_mail_from_the_awaited_agent_does_not_release_native_wait(
                         .list::<AgentSnapshot>("agent", &rid)
                         .unwrap()
                         .into_iter()
-                        .find(|agent| agent.role == Role::Analyst)
+                        .find(|agent| agent.metadata.role == Role::Analyst)
                         .unwrap();
                     reply("wait_for_agents", json!({"agent_ids":[child.id]}))
                 };

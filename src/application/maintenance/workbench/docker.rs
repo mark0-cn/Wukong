@@ -72,9 +72,12 @@ impl Docker {
         )?;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr);
-            if error.to_ascii_lowercase().contains("no such ")
-                || error.contains(&format!("network {name} not found"))
-            {
+            // Only a real "this kind of object is missing" reply means absence; a daemon
+            // or socket failure must surface instead of reading as a missing resource.
+            // The CLI prefixes its own errors with "Error: ", daemon responses read
+            // "Error response from daemon: ", and volumes answer "get <name>: no such
+            // volume", so match the kind-specific phrase itself.
+            if missing_resource(kind, name, &error) {
                 return Ok(None);
             }
             anyhow::bail!(
@@ -101,6 +104,21 @@ impl Docker {
     ) -> Result<()> {
         self.logged_internal(&["pull", image], log, Some(&mut report))
     }
+    /// Pull one explicit platform with the same credential check, bounded log and
+    /// cancellation handling as [`Docker::pull_observed`].
+    pub fn pull_observed_platform(
+        &self,
+        image: &str,
+        platform: &str,
+        log: &Path,
+        mut report: impl FnMut(super::pull_progress::PullProgress),
+    ) -> Result<()> {
+        self.logged_internal(
+            &["pull", "--platform", platform, image],
+            log,
+            Some(&mut report),
+        )
+    }
     fn logged_internal(
         &self,
         args: &[&str],
@@ -108,8 +126,10 @@ impl Docker {
         report: Option<&mut dyn FnMut(super::pull_progress::PullProgress)>,
     ) -> Result<()> {
         if args.first() == Some(&"pull")
-            && let Some(image) = args.get(1)
+            && let Some(image) = args.last()
         {
+            // The image reference is the last argument; options such as
+            // `--platform` precede it.
             self.check_credentials(image)?;
         }
         fs::create_dir_all(log.parent().context("log needs parent")?)?;
@@ -120,17 +140,19 @@ impl Docker {
             .stdout(Stdio::from(file.try_clone()?))
             .stderr(Stdio::from(file))
             .spawn()?;
+        // Every streaming command goes through the bounded monitor, which enforces the
+        // log-size cap and the elapsed deadline in addition to cancellation. A bare
+        // child.wait() here had neither.
         let result = match report {
             Some(report) => {
                 super::pull_progress::monitor(&mut child, log, report, self.cancellation.as_ref())
             }
-            None if self.cancellation.is_some() => super::pull_progress::monitor(
+            None => super::pull_progress::monitor(
                 &mut child,
                 log,
                 &mut |_| {},
                 self.cancellation.as_ref(),
             ),
-            None => child.wait().map_err(anyhow::Error::from),
         };
         if result.is_err() {
             let _ = child.kill();
@@ -238,5 +260,69 @@ mod tests {
         assert!(detail.len() <= 4096 && detail.lines().count() <= 30);
         assert_eq!(std::fs::read_to_string(&log).unwrap(), content);
         assert!(message.args.contains_key("log"));
+    }
+}
+
+/// Docker reports a missing resource in several shapes: the CLI writes
+/// `Error: No such container: x`, daemon responses write
+/// `Error response from daemon: No such container: x`, and volumes answer
+/// `get x: no such volume`. Only these kind-specific phrases mean absence; a
+/// daemon or socket failure must surface instead of reading as a missing object.
+fn missing_resource(kind: &str, name: &str, stderr: &str) -> bool {
+    let lowered = stderr.to_ascii_lowercase();
+    let missing = match kind {
+        "container" => "no such container",
+        "image" => "no such image",
+        "volume" => "no such volume",
+        "network" => "no such network",
+        _ => "",
+    };
+    (!missing.is_empty() && lowered.contains(missing))
+        || lowered.contains(&format!("network {} not found", name.to_lowercase()))
+}
+
+#[cfg(test)]
+mod missing_resource_tests {
+    use super::missing_resource;
+
+    #[test]
+    fn recognises_cli_and_daemon_absence_messages() {
+        assert!(missing_resource(
+            "container",
+            "x",
+            "Error: No such container: wukong-1-tools"
+        ));
+        assert!(missing_resource(
+            "container",
+            "x",
+            "Error response from daemon: No such container: wukong-1-tools"
+        ));
+        assert!(missing_resource(
+            "image",
+            "x",
+            "Error response from daemon: No such image: sha256:abc"
+        ));
+        assert!(missing_resource(
+            "volume",
+            "x",
+            "Error response from daemon: get wukong-1-state: no such volume"
+        ));
+        assert!(missing_resource(
+            "network",
+            "wukong-1-offline",
+            "Error response from daemon: network wukong-1-offline not found"
+        ));
+    }
+
+    #[test]
+    fn leaves_daemon_and_socket_failures_visible() {
+        for stderr in [
+            "permission denied while trying to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine",
+            "Cannot connect to the Docker daemon at npipe:////./pipe/docker_engine",
+            "open /x: no such file or directory",
+            "error during connect: The system cannot find the file specified",
+        ] {
+            assert!(!missing_resource("container", "x", stderr), "{stderr}");
+        }
     }
 }

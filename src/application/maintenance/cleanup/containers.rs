@@ -52,13 +52,14 @@ fn docker(home: &Path) -> Result<Docker> {
         files::safe(&path)?;
         let raw: toml::Value = toml::from_str(&std::fs::read_to_string(path)?)
             .map_err(|_| anyhow::anyhow!("cannot inspect Docker configuration"))?;
-        raw.get("runtime")
+        raw.get("workbench")
             .and_then(|v| v.get("docker_executable"))
             .and_then(toml::Value::as_str)
-            .unwrap_or("docker")
-            .to_owned()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(crate::adapters::worker::default_docker_executable)
     } else {
-        "docker".into()
+        crate::adapters::worker::default_docker_executable()
     };
     Ok(Docker::new(&executable))
 }

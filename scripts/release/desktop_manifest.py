@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import os
 from scripts._lib.versioning import version
+from scripts.release.release_metadata import worker_media
 from scripts.release.release_notes import update_summary, validate
 
 
@@ -25,6 +26,8 @@ def generate(directory, validation, content_path):
         or report["image"] != reference
     ):
         raise ValueError("Image acceptance identity mismatch")
+    # Optional: a rehearsal may not stage the offline Windows worker template.
+    media = worker_media(directory, number)
     platforms = {}
     for target, pattern in [("windows-x86_64", "*.exe"), ("linux-x86_64", "*.AppImage")]:
         files = list(directory.glob(pattern))
@@ -51,6 +54,9 @@ def generate(directory, validation, content_path):
         source_revision=revision,
         platforms=platforms,
     )
+    if media is not None:
+        # The desktop catalog is the signed source of truth for the optional template.
+        manifest["worker_media"] = media
     output = directory / "latest.json"
     output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     release = dict(
@@ -65,6 +71,8 @@ def generate(directory, validation, content_path):
         runtime_protocol=3,
         data_schema=5,
     )
+    if media is not None:
+        release["worker_media"] = media
     (directory / "release.json").write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
     subprocess.run(
         [

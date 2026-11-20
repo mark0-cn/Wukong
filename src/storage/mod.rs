@@ -38,9 +38,17 @@ impl Store {
         fs::create_dir_all(root.join("artifacts"))?;
         let conn = Connection::open(root.join("state.sqlite3"))?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+        // SQLite keeps the previous journal mode and does not fail when the directory
+        // cannot support WAL, while the reader connection's non-blocking snapshot
+        // contract depends on WAL actually being active.
+        let mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
+        anyhow::ensure!(
+            mode.eq_ignore_ascii_case("wal"),
+            "state directory does not support WAL (journal_mode={mode}); choose a local directory"
+        );
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-          CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            "CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
           INSERT OR IGNORE INTO meta VALUES('schema_version','5');
           ",
         )?;
@@ -400,7 +408,10 @@ impl Store {
             Self::tx_enqueue_message(tx, run_id, sender, recipient, content, key, &envelope)?;
         Ok(inserted)
     }
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the message columns inserted by one statement"
+    )]
     pub(crate) fn tx_enqueue_message(
         tx: &Connection,
         run_id: &str,
@@ -457,8 +468,11 @@ impl Store {
         })
     }
     // The provenance tuple and payload deliberately stay explicit at call sites.
-    #[allow(clippy::too_many_arguments)]
-    pub fn artifact(
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the artifact columns inserted by one statement"
+    )]
+    fn publish_artifact(
         &self,
         run_id: &str,
         agent_id: &str,
@@ -503,7 +517,50 @@ impl Store {
             metadata,
             created_at: now(),
         };
-        self.put("evidence", &evidence.id, run_id, &evidence)?;
+        Ok(evidence)
+    }
+    // The provenance tuple and payload deliberately stay explicit at call sites.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the artifact columns inserted by one statement"
+    )]
+    pub fn artifact(
+        &self,
+        run_id: &str,
+        agent_id: &str,
+        call_id: &str,
+        source: &str,
+        bytes: &[u8],
+        media_type: &str,
+        metadata: Value,
+    ) -> Result<Evidence> {
+        self.transaction(|tx| {
+            self.tx_artifact(
+                tx, run_id, agent_id, call_id, source, bytes, media_type, metadata,
+            )
+        })
+    }
+    /// Publish the blob and insert the evidence row inside the caller's transaction, so a
+    /// committed evidence row cannot exist without the state that references it.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the artifact columns inserted by one statement"
+    )]
+    pub fn tx_artifact(
+        &self,
+        tx: &Connection,
+        run_id: &str,
+        agent_id: &str,
+        call_id: &str,
+        source: &str,
+        bytes: &[u8],
+        media_type: &str,
+        metadata: Value,
+    ) -> Result<Evidence> {
+        let evidence = self.publish_artifact(
+            run_id, agent_id, call_id, source, bytes, media_type, metadata,
+        )?;
+        Self::tx_put(tx, "evidence", &evidence.id, run_id, &evidence)?;
         Ok(evidence)
     }
     pub fn read_evidence(&self, run_id: &str, evidence_id: &str) -> Result<Vec<u8>> {

@@ -1,6 +1,7 @@
 pub mod cleanup;
 pub mod lab;
 pub mod workbench;
+pub mod worker;
 use crate::{
     adapters::binary,
     application::assessment::{AssessmentService, PreparedAssessment},
@@ -9,7 +10,7 @@ use crate::{
     interfaces::report,
     storage::Store,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -43,13 +44,6 @@ pub enum Command {
         #[command(subcommand)]
         command: crate::interfaces::cli::cleanup::Command,
     },
-    /// Restore the last desktop installation without opening the webview.
-    RecoverUpdate,
-    /// Validate the signed desktop release and all installer files before publication.
-    VerifyUpdate {
-        #[arg(long)]
-        directory: PathBuf,
-    },
     /// Manage the portable tool environment on the Docker host.
     Env {
         #[command(subcommand)]
@@ -65,15 +59,16 @@ pub enum Command {
         #[command(subcommand)]
         command: crate::interfaces::cli::lab::Command,
     },
+    /// Generate finalized offline Windows worker media with the built-in Rust finalizer.
+    Worker {
+        #[command(subcommand)]
+        command: crate::interfaces::cli::worker::Command,
+    },
     /// Write a configuration without overwriting an existing file.
     Init {
         #[arg(default_value = "wukong.toml")]
         path: PathBuf,
     },
-    /// Print the built-in tool catalog without opening state or connecting to a model.
-    ToolCatalog,
-    /// Print built-in skill provenance and mechanism coverage without opening state.
-    SkillCatalog,
     /// Inspect model settings and installed analysis capabilities without calling a model.
     Doctor,
     /// Parse a binary without running it or calling a model.
@@ -82,58 +77,35 @@ pub enum Command {
         #[arg(long)]
         strings: bool,
     },
-    /// Start a real model-driven multi-agent assessment. TARGET may be a
-    /// binary or a directory bundle; directories are scanned automatically.
+    /// Start a real model-driven multi-agent assessment, or resume saved work.
+    /// TARGET may be a binary or a directory bundle; directories are scanned
+    /// automatically. Use --resume instead of TARGET to continue nonterminal work.
     Analyze {
-        target: PathBuf,
+        /// Binary or directory bundle; omitted when resuming.
+        #[arg(required_unless_present = "resume")]
+        target: Option<PathBuf>,
+        /// Resume nonterminal work using its saved configuration and checkpoints.
+        #[arg(long, conflicts_with = "target", value_name = "RUN_ID")]
+        resume: Option<String>,
         #[arg(long, default_value = DEFAULT_TASK)]
         task: String,
         #[arg(long)]
         output: Option<PathBuf>,
-    },
-    /// Resume nonterminal work using its saved configuration and checkpoints.
-    Resume {
-        run_id: String,
-        #[arg(long)]
+        /// Cumulative token limit; only with --resume.
+        #[arg(long, conflicts_with = "target")]
         max_tokens: Option<u64>,
-        #[arg(long)]
+        /// Cumulative cost limit in USD; only with --resume.
+        #[arg(long, conflicts_with = "target")]
         max_usd: Option<f64>,
-        #[arg(long)]
-        output: Option<PathBuf>,
     },
-    Runs,
-    Status {
-        run_id: String,
-        #[arg(long, default_value_t = 20)]
-        events: usize,
-    },
-    Message {
-        agent_id: String,
-        text: String,
-        #[arg(long, default_value="information", value_parser=["information","question","reply","follow_up","result","blocked"])]
-        kind: String,
-        #[arg(long)]
-        reply_to: Option<i64>,
-        #[arg(long)]
-        generation: Option<u64>,
-        #[arg(long)]
-        correlation_id: Option<String>,
-    },
-    Pause {
-        run_id: String,
-    },
-    Stop {
-        agent_id: String,
-        #[arg(long, default_value = "operator stopped task")]
-        reason: String,
-    },
-    Report {
-        run_id: String,
-        #[arg(long)]
-        output: PathBuf,
-    },
-    VerifyBundle {
-        path: PathBuf,
+    /// List saved assessments, or inspect one and its recent events with --run.
+    Runs {
+        /// Inspect one saved assessment instead of listing all.
+        #[arg(long, value_name = "RUN_ID")]
+        run: Option<String>,
+        /// Maximum recent events included with --run.
+        #[arg(long, requires = "run")]
+        events: Option<usize>,
     },
     /// Resolve an uncertain external effect using an operator-reviewed result and evidence.
     Reconcile {
@@ -146,73 +118,22 @@ pub enum Command {
         error: bool,
     },
     /// Open the desktop workspace, optionally selecting a saved assessment.
-    Gui {
-        run_id: Option<String>,
-    },
+    Gui { run_id: Option<String> },
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
     let locale = cli.resolved_locale();
-    // Catalog files are reproducible English by default, independent of the OS.
-    let catalog_locale = if cli.locale == "zh-CN" {
-        crate::i18n::Locale::ZhCn
-    } else {
-        crate::i18n::Locale::EnUs
-    };
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
     if let Command::Cleanup { command } = command {
         return crate::interfaces::cli::cleanup::run(command, cli.json);
     }
-    if matches!(command, Command::RecoverUpdate) {
-        return crate::application::maintenance::updates::recovery::recover();
-    }
-    if let Command::VerifyUpdate { directory } = &command {
-        let manifest = crate::application::maintenance::updates::manifest::Manifest::parse(
-            &std::fs::read(directory.join("latest.json"))?,
-            &std::fs::read_to_string(directory.join("latest.json.sig"))?,
-        )?;
-        for artifact in manifest.platforms.values() {
-            let filename = artifact.url.rsplit('/').next().unwrap();
-            crate::application::maintenance::updates::manifest::verify_file(
-                &directory.join(filename),
-                artifact,
-            )?;
-        }
-        println!(
-            "{}",
-            crate::i18n::Message::new("cli-release-verified")
-                .arg("version", manifest.version)
-                .render(locale)
-        );
+    if let Command::Worker { command } = command {
+        print_json(&crate::interfaces::cli::worker::run(command)?)?;
         return Ok(());
     }
     if let Command::Init { path } = &command {
         AppConfig::write_example(path)?;
         println!("{}", json!({"config":path}));
-        return Ok(());
-    }
-    if matches!(command, Command::SkillCatalog) {
-        if cli.json {
-            print_json(&crate::application::agents::skill_catalog(None)?)?;
-        } else {
-            print!(
-                "{}",
-                crate::application::agents::skill_coverage_markdown_for_locale(catalog_locale)?
-            );
-        }
-        return Ok(());
-    }
-    if matches!(command, Command::ToolCatalog) {
-        if cli.json {
-            print_json(&serde_json::to_value(
-                crate::application::tools::builtin_tool_definitions(),
-            )?)?;
-        } else {
-            print!(
-                "{}",
-                crate::application::tools::builtin_catalog_markdown_for_locale(catalog_locale)?
-            );
-        }
         return Ok(());
     }
     // Explicit/portable configurations remain supported. New desktop installs
@@ -263,16 +184,13 @@ pub async fn run(cli: Cli) -> Result<()> {
     let store = Store::open(&config.state_dir)?;
     let service = AssessmentService::new(config.clone(), store.clone());
     match command {
-        Command::VerifyUpdate { .. }
-        | Command::Cleanup { .. }
-        | Command::RecoverUpdate
+        Command::Cleanup { .. }
         | Command::Init { .. }
         | Command::Inspect { .. }
-        | Command::ToolCatalog
-        | Command::SkillCatalog
         | Command::Env { .. }
         | Command::Challenge { .. }
-        | Command::Lab { .. } => unreachable!(),
+        | Command::Lab { .. }
+        | Command::Worker { .. } => unreachable!(),
         Command::Doctor => {
             let registry = crate::adapters::environments::EnvironmentRegistry::new(
                 config.environments.clone(),
@@ -304,39 +222,32 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Analyze {
             target,
+            resume,
             task,
             output,
-        } => {
-            let prepared = service.start(&target, &task).await?;
-            let run = prepared.run().clone();
-            println!(
-                "{}",
-                json!({"run_id":run.id,"root_agent_id":run.root_id,"state_dir":store.root()})
-            );
-            let result = drive_with_events(prepared, cli.json).await?;
-            if let Some(path) = output {
-                print_json(&serde_json::to_value(report::export_with_locale(
-                    &store, &run.id, &path, locale,
-                )?)?)?;
-            }
-            print_json(&serde_json::to_value(&result)?)?;
-            require_completed(result.status)?;
-        }
-        Command::Resume {
-            run_id,
             max_tokens,
             max_usd,
-            output,
         } => {
-            let run: RunRecord = store.require("run", &run_id)?;
-            let mut budget = run.budget.clone();
-            if let Some(tokens) = max_tokens {
-                budget.max_total_tokens = tokens;
-            }
-            if let Some(usd) = max_usd {
-                budget.max_usd = Some(usd);
-            }
-            let prepared = service.resume(&run_id, Some(budget)).await?;
+            let (prepared, run_id) = if let Some(run_id) = resume {
+                let run: RunRecord = store.require("run", &run_id)?;
+                let mut budget = run.budget.clone();
+                if let Some(tokens) = max_tokens {
+                    budget.max_total_tokens = tokens;
+                }
+                if let Some(usd) = max_usd {
+                    budget.max_usd = Some(usd);
+                }
+                (service.resume(&run_id, Some(budget)).await?, run_id)
+            } else {
+                let target = target.context("a target is required without --resume")?;
+                let prepared = service.start(&target, &task).await?;
+                let run = prepared.run().clone();
+                println!(
+                    "{}",
+                    json!({"run_id":run.id,"root_agent_id":run.root_id,"state_dir":store.root()})
+                );
+                (prepared, run.id)
+            };
             let result = drive_with_events(prepared, cli.json).await?;
             if let Some(path) = output {
                 print_json(&serde_json::to_value(report::export_with_locale(
@@ -346,46 +257,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             print_json(&serde_json::to_value(&result)?)?;
             require_completed(result.status)?;
         }
-        Command::Runs => print_json(&serde_json::to_value(
-            crate::queries::AssessmentQueries::new(&store).runs()?,
-        )?)?,
-        Command::Status { run_id, events } => print_json(&serde_json::to_value(
-            crate::queries::AssessmentQueries::new(&store).status(&run_id, events)?,
-        )?)?,
-        Command::Message {
-            agent_id,
-            text,
-            kind,
-            reply_to,
-            generation,
-            correlation_id,
-        } => {
-            let receipt = service.message(
-                &agent_id,
-                &text,
-                MessageOptions {
-                    kind: serde_json::from_value(json!(kind))?,
-                    reply_to,
-                    recipient_generation: generation,
-                    correlation_id,
-                    ..Default::default()
-                },
-            )?;
-            print_json(&serde_json::to_value(receipt)?)?;
-        }
-        Command::Pause { run_id } => {
-            service.pause(&run_id, "operator paused assessment")?;
-            let run: RunRecord = store.require("run", &run_id)?;
-            println!("{}", json!({"run_id":run_id,"status":run.status}));
-        }
-        Command::Stop { agent_id, reason } => {
-            print_json(&json!({"stopped_agents":service.stop(&agent_id,&reason)?}))?
-        }
-        Command::Report { run_id, output } => print_json(&serde_json::to_value(
-            report::export_with_locale(&store, &run_id, &output, locale)?,
-        )?)?,
-        Command::VerifyBundle { path } => {
-            print_json(&serde_json::to_value(report::verify_bundle(&path)?)?)?
+        Command::Runs { run, events } => {
+            let queries = crate::application::queries::AssessmentQueries::new(&store);
+            match run {
+                Some(run_id) => print_json(&serde_json::to_value(
+                    queries.status(&run_id, events.unwrap_or(20))?,
+                )?)?,
+                None => print_json(&serde_json::to_value(queries.runs()?)?)?,
+            }
         }
         Command::Reconcile {
             call_id,

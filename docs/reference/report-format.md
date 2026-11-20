@@ -4,7 +4,7 @@
 
 English · [简体中文](report-format.zh-CN.md)
 
-CLI `analyze` and `resume` export requested bundles and print the stored result before checking completion. Only `completed` exits 0; paused, stopped, crashed, failed or otherwise incomplete assessments exit 1 and identify their status on stderr. Inspect the structured result's `status` to distinguish a resumable budget pause from failure. Export success and bundle integrity do not establish analysis completion or semantic correctness.
+CLI `analyze` (including `--resume`) exports a requested bundle and prints the stored result before checking completion. Only `completed` exits 0; paused, stopped, crashed, failed or otherwise incomplete assessments exit 1 and identify their status on stderr. Inspect the structured result's `status` to distinguish a resumable budget pause from failure. Export success and bundle integrity do not establish analysis completion or semantic correctness.
 
 `wukong::report::export(store, run_id, output)` exports one transactional run snapshot to a **new directory**. Export reads and hashes the original target and each evidence artifact; it never executes the sample. A verified staging directory is renamed to the destination only after all payloads pass verification. Existing destinations are refused.
 

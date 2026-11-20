@@ -30,13 +30,13 @@
 
 ## 生成目录
 
-工具与 Skill 清单从注册元数据生成。默认英文且不随系统语言改变；显式 `--locale zh-CN` 生成中文 Markdown。`--json` 在两种语言下完全相同。命令不打开工作区配置/状态、不连接模型。
+工具与 Skill 清单由仅供开发使用的 example 程序从注册元数据生成。默认英文且不随系统语言改变；显式 `--locale zh-CN` 生成中文 Markdown。`--json` 在两种语言下完全相同。该 example 不读取工作区配置/状态、不连接模型。
 
 ```sh
-cargo run -- tool-catalog > docs/reference/tool-catalog.md
-cargo run -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
-cargo run -- skill-catalog > docs/reference/skill-coverage.md
-cargo run -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
+cargo run --example export_catalogs -- tool-catalog > docs/reference/tool-catalog.md
+cargo run --example export_catalogs -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
+cargo run --example export_catalogs -- skill-catalog > docs/reference/skill-coverage.md
+cargo run --example export_catalogs -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
 cargo test --test tool_catalog
 ```
 

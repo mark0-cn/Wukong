@@ -11,11 +11,15 @@ pub(super) fn page(mut rows: Vec<Value>, args: &Value, key: &str) -> Result<Valu
     if let Some(after) = after {
         rows.retain(|row| row["id"].as_str().is_some_and(|id| id > after));
     }
-    let limit = number(args, "limit", 10) as usize;
+    let limit = crate::application::tools::host_usize(number(args, "limit", 10));
     ensure!((1..=20).contains(&limit), "limit must be between 1 and 20");
     let more = rows.len() > limit;
     rows.truncate(limit);
-    let next = more.then(|| rows.last().unwrap()["id"].clone());
+    let next = if more {
+        rows.last().map(|row| row["id"].clone())
+    } else {
+        None
+    };
     Ok(json!({key:rows,"next_cursor":next}))
 }
 
@@ -66,7 +70,9 @@ pub(super) fn coverage(
                 row[key] = json!(short(row[key].as_str().unwrap_or_default()));
             }
             row["evidence_count"] = json!(row["evidence_ids"].as_array().map_or(0, Vec::len));
-            row.as_object_mut().unwrap().remove("evidence_ids");
+            if let Some(object) = row.as_object_mut() {
+                object.remove("evidence_ids");
+            }
         }
     }
     result["full_evidence_id"] = json!(evidence.id);

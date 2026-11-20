@@ -80,7 +80,10 @@ impl StateSession<'_> {
     ) -> Result<bool> {
         Store::tx_message(self.connection, run, sender, recipient, content, key)
     }
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parameters mirror the message columns inserted by one statement"
+    )]
     pub(crate) fn enqueue_message(
         &self,
         run: &str,

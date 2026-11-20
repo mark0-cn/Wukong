@@ -118,6 +118,7 @@ fn config(dir: &Path) -> WindowsLabVm {
         vmrun: dir.join("vmrun.exe"),
         environment: None,
         admin: None,
+        offline: None,
         baseline_snapshot: "baseline".into(),
         snapshot_prefix: "lab".into(),
         operation_timeout_seconds: 30,
@@ -319,7 +320,8 @@ async fn controller_restart_requires_reconciliation_for_a_pending_effect() {
         owner: "analyst".into(),
         purpose: "first".into(),
         spec_sha256: lease.spec_sha256.clone(),
-        spec: spec(),
+        spec: Some(spec()),
+        provision: None,
         package_sha256: None,
         install_sha256: None,
         snapshot: lease.snapshot.clone(),
@@ -771,7 +773,11 @@ async fn assessment_connection_blocks_vm_mutations_but_not_status() {
     let lease = lab.prepare("owner", "purpose", spec()).await.unwrap();
     let guard_path =
         crate::adapters::environments::lab_guard::path(&config(dir.path()).vmx).unwrap();
-    let _worker = crate::adapters::environments::lab_guard::acquire(&guard_path, false).unwrap();
+    let _worker = crate::adapters::environments::lab_guard::acquire(
+        &guard_path,
+        crate::adapters::environments::lab_guard::LockMode::Shared,
+    )
+    .unwrap();
     assert!(lab.restore(&lease.lab_id, lease.generation).await.is_err());
     assert_eq!(lab.status().await.unwrap()["state"]["phase"], "ready");
     assert!(!host.calls().iter().any(|call| call.starts_with("revert")));

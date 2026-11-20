@@ -77,9 +77,7 @@ impl Coordinator {
                 && a.role == request.role
                 && a.environment_id == environment_id
                 && a.status.terminal()
-                && a.error
-                    .as_deref()
-                    .is_some_and(|error| error.contains("budget"))
+                && a.failure_cause == Some(crate::domain::FailureCause::Budget)
         }) {
             bail!(
                 "scope '{}' belongs to a quota-exhausted child ({}): resume it with follow_up_agent instead of spawning a replacement — its conversation and dossier are preserved",
@@ -170,6 +168,7 @@ impl Coordinator {
                 token_cap: Some(run.budget.role_token_cap(request.role)),
                 summary: None,
                 error: None,
+                failure_cause: None,
                 created_at: timestamp,
                 updated_at: timestamp,
             },
@@ -186,9 +185,9 @@ impl Coordinator {
         tx.save_record(&agent)?;
         tx.event(
             &run.id,
-            Some(&agent.id),
+            Some(&agent.metadata.id),
             "agent.created",
-            json!({"parent_id":parent.id,"role":agent.role,"scope":agent.scope,"environment_id":agent.environment_id}),
+            json!({"parent_id":parent.id,"role":agent.metadata.role,"scope":agent.metadata.scope,"environment_id":agent.metadata.environment_id}),
         )?;
         Ok(SpawnResult {
             created: true,

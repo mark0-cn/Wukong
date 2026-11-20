@@ -8,11 +8,19 @@ Windows uses per-user NSIS EXE; Linux uses AppImage. Tauri merges platform confi
 
 New desktop installations place configuration/data under Windows `%LOCALAPPDATA%/WukongData` or Linux `$XDG_DATA_HOME/Wukong` (default `~/.local/share/Wukong`). Explicit/existing portable configuration retains priority. Uninstall does not delete analysis data/Docker resources by default. Linux support follows the desktop acceptance matrix; AppImage does not promise every distribution.
 
+<a id="bundled-worker-setup"></a>
+
+## Bundled worker setup
+
+Windows installer builds also ship the offline worker setup executable. The Windows packaging step in `build-installer.yml` builds it with `python -m scripts.worker.build_native` in an x64 MSVC environment, stages the resulting `wukong-worker.exe` bytes as `target/worker-setup/WukongWorkerSetup.exe`, records the SHA256 and size in the step summary, and adds it to the NSIS payload as `worker-setup/WukongWorkerSetup.exe` through the `--config` resource overlay. The overlay keeps `tauri.windows.conf.json` free of a build-time-only file, so unsigned acceptance bundles that reuse the shared configuration still build without it. Local Windows packaging uses the same overlay by default: `cargo package-local` runs `python -m scripts.release.worker_setup --output target/worker-setup` before bundling, so its installer also contains `worker-setup/WukongWorkerSetup.exe` and needs auto-discovered x64 MSVC build tools. Verified against Tauri CLI 2.12.4: resource targets are install-directory relative, so the installed file is `<install directory>\worker-setup\WukongWorkerSetup.exe` (default current-user installation: `%LOCALAPPDATA%\Wukong\worker-setup\WukongWorkerSetup.exe`). NSIS deletes it on uninstall and replaces it on upgrade, so `packaging/windows/uninstall-hooks.nsh` needs no extra cleanup.
+
+The installer ships only this executable. The offline media template (staged payload, binaries and dependencies, about 458 MB as the released archive) is not bundled; it is a separate signed release asset whose downloaded contents `wukong lab provision` verifies and finalizes with controller keys. The installed setup file runs `verify-enrollment` without elevation and `install-reviewed` with elevation next to prepared media on a dedicated disposable VM; see [native Windows worker components](../../workers/windows/README.md).
+
 <a id="信任与状态"></a>
 
 ## Trust and state
 
-`updates/manifest.rs` verifies manifest/file signatures, versions, size, SHA256, fixed image digest, runtime protocol and data schema. Release `latest.json` serves Tauri and environment management. Verify its detached signature first, then pass the same bytes to Tauri `restore_update`, avoiding versions changing between queries. Only the current project's version-specific HTTPS attachments and public `hlmark0/wukong` digests are allowed. Signing keys differ from model keys and never enter images.
+`updates/manifest.rs` verifies manifest/file signatures, versions, size, SHA256, fixed image digest, runtime protocol and data schema. Release `latest.json` serves Tauri and environment management. Verify its detached signature first, then pass the same bytes to Tauri `restore_update`, avoiding versions changing between queries. Only the current project's version-specific HTTPS attachments and public `hlmark0/wukong` digests are allowed. Signing keys differ from model keys and never enter images. Development `cargo package-local` builds are local-release packages: only first-run onboarding reads the bundled unsigned `local-release.json` descriptor, and every online update path keeps the signed catalog ([local-release builds](local-builds.md)).
 
 `interfaces/desktop/updates.rs` manages checks, downloads, independent candidate self-tests, installation and progress. Preparation never replaces the active worker. Before installation, cache/verify the current installer and atomically save the recovery helper/`updates/pending.json`. The new process changes this to `previous.json` only when its version matches and environment doctor passes. Unconfirmed updates block new tasks. Shared/exclusive `maintenance.lock` coordinates GUI, CLI and updates. Model settings/challenge environments are not replaced; only schema 5 is accepted, with no incompatible migration.
 
@@ -40,7 +48,7 @@ Tasks/evidence use `state_dir`; UI switches reopen the workspace through configu
 
 ## Publication and validation
 
-`build-installer.yml` signs NSIS/AppImage using already-validated desktop Release binaries on both platforms. Linux desktop/build packaging uses Ubuntu 22.04; the acceptance CLI is separate. Native install/uninstall runs only on isolated runners; Linux starts real WebView through Xvfb. `desktop_manifest` combines image acceptance/installers; `wukong verify-update --directory dist` validates the whole set. Stable pointers advance only after official Release publication; manual rehearsals do not change the update channel.
+`build-installer.yml` signs NSIS/AppImage using already-validated desktop Release binaries on both platforms. Linux desktop/build packaging uses Ubuntu 22.04; the acceptance CLI is separate. Native install/uninstall runs only on isolated runners; Linux starts real WebView through Xvfb. `desktop_manifest` combines image acceptance/installers; `python -m scripts.release.verify_update --directory dist` validates the signed manifest and every installer. Stable pointers advance only after official Release publication; manual rehearsals do not change the update channel.
 
 Local checks cover real signature tamper rejection, maintenance exclusion, manifest origins, frontend controls/layout. Report Linux Docker acceptance separately from native package smoke checks; neither is complete Windows Docker Desktop cross-version acceptance.
 

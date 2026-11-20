@@ -36,6 +36,7 @@ pub struct ToolService {
     static_environment: Option<String>,
     windows_lab: crate::config::WindowsLabConfig,
     lab_operations: lab_operations::Operations,
+    open_lab: lab::LabFactory,
     default_environment: Option<String>,
     sync_limits: evidence_sync::SyncLimits,
 }
@@ -120,6 +121,7 @@ impl ToolService {
         config: AppConfig,
         store: Store,
         mcp: McpRegistry,
+        open_lab: lab::LabFactory,
     ) -> Result<Self> {
         let environments =
             crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?
@@ -139,6 +141,7 @@ impl ToolService {
             static_environment,
             windows_lab,
             lab_operations: Default::default(),
+            open_lab,
             default_environment: config.default_environment,
             sync_limits: Default::default(),
         })
@@ -369,7 +372,9 @@ impl ToolService {
                 bail!("unknown tool {name}")
             }
         };
-        let result = tokio::time::timeout(outer_timeout, result).await;
+        // Box the dispatch: this future is awaited for every tool call, and holding the
+        // whole match state machine inline costs about 36 KiB per in-flight call.
+        let result = tokio::time::timeout(outer_timeout, Box::pin(result)).await;
         match result {
             Ok(Ok(value)) => {
                 let is_error = self.mcp.contains(name) && value["isError"].as_bool() == Some(true);
@@ -488,6 +493,12 @@ fn number(args: &Value, key: &str, default: u64) -> u64 {
         Value::String(text) => parse_u64_text(text).unwrap_or(default),
         _ => default,
     }
+}
+/// A model-supplied count as a host size. Saturates instead of truncating when the
+/// value does not fit the platform's address space, so a huge limit cannot wrap
+/// into a small one and a huge offset still fails the "beyond the snapshot" check.
+pub(crate) fn host_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
 }
 fn address_list(args: &Value, key: &str) -> Result<Vec<u64>> {
     let Some(value) = args.get(key) else {

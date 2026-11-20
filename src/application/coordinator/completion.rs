@@ -1,7 +1,13 @@
 use super::*;
 
 impl Coordinator {
+    /// Move an agent into a live state. Terminal transitions must use the finish and
+    /// stop paths, which also archive results, release resources and update the run.
     pub fn set_status(&self, agent_id: &str, status: Status, error: Option<String>) -> Result<()> {
+        ensure!(
+            !status.terminal(),
+            "terminal transitions must use agent_finish or stop_agent"
+        );
         self.store.write(|tx| {
             let mut agent: AgentMetadata = tx
                 .get_record::<AgentMetadata>(agent_id)?
@@ -21,6 +27,37 @@ impl Coordinator {
                 Some(agent_id),
                 "agent.status",
                 json!({"status":status,"error":agent.error}),
+            )?;
+            Ok(())
+        })
+    }
+    /// Fail an agent and record why. Lifecycle decisions (whether a follow-up may
+    /// resume it with a fresh slice) read this typed cause, so a plain status change
+    /// cannot express a quota failure.
+    pub fn fail_agent(
+        &self,
+        agent_id: &str,
+        error: String,
+        cause: crate::domain::FailureCause,
+    ) -> Result<()> {
+        self.store.write(|tx| {
+            let mut agent: AgentMetadata = tx
+                .get_record::<AgentMetadata>(agent_id)?
+                .context("agent missing")?;
+            if agent.status.terminal() {
+                return Ok(());
+            }
+            agent.status = Status::Failed;
+            agent.error = Some(error.clone());
+            agent.failure_cause = Some(cause);
+            agent.updated_at = now();
+            tx.save_record(&agent)?;
+            Self::notify_terminal(tx, &agent)?;
+            tx.event(
+                &agent.run_id,
+                Some(agent_id),
+                "agent.error",
+                json!({"message":error,"cause":cause}),
             )?;
             Ok(())
         })
@@ -153,6 +190,26 @@ impl Coordinator {
                 ensure!(
                     verifications.iter().any(|verification| verification.passed),
                     "a child reported a flag value that no verifier has independently reproduced; spawn a verifier for the claim and record verification_record passed=true before finish_scan"
+                );
+                // A passing verification recorded for unrelated work is not enough: the
+                // claimed token must appear in a verifier's own accepted result.
+                let claimed: Vec<String> = others
+                    .iter()
+                    .filter(|other| other.id != agent.id)
+                    .filter_map(|other| other.task_result.as_ref())
+                    .flat_map(|result| flag_claims(&result.answer).concrete_tokens)
+                    .collect();
+                let answers: Vec<String> = others
+                    .iter()
+                    .filter(|other| other.role == Role::Verifier)
+                    .filter_map(|other| other.task_result.as_ref())
+                    .map(|result| normalize(&result.answer).to_lowercase())
+                    .collect();
+                ensure!(
+                    claimed
+                        .iter()
+                        .all(|token| answers.iter().any(|text| text.contains(token))),
+                    "a child reported a flag value that no verifier's accepted result reproduces; record the token in an independent verifier's task result"
                 );
             }
             let mut run: RunRecord = tx.get_record(&agent.run_id)?.context("run missing")?;

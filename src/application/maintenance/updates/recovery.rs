@@ -87,7 +87,7 @@ pub fn confirm() -> Result<bool> {
         journal.to == env!("CARGO_PKG_VERSION"),
         "update incomplete; use the recovery entry before starting analysis"
     );
-    let _lock = maintenance::lock(&root()?, true)?;
+    let _lock = maintenance::lock(&root()?, maintenance::LockMode::Exclusive)?;
     let manifest = cached(&journal.to)?;
     environment::activate(&journal.config, &manifest.image)?;
     write_json(&root()?.join("previous.json"), &journal)?;
@@ -96,7 +96,7 @@ pub fn confirm() -> Result<bool> {
 }
 pub fn recover() -> Result<()> {
     let _cache = super::storage::cache_lock(false)?;
-    let _lock = maintenance::lock(&root()?, true)?;
+    let _lock = maintenance::lock(&root()?, maintenance::LockMode::Exclusive)?;
     let journal = pending()?
         .or_else(|| read_json::<Journal>(&root().ok()?.join("previous.json")).ok())
         .context("no recoverable update")?;

@@ -10,7 +10,7 @@
 
 - `application/agent_runtime` 只装配 Rig 应用和驱动生命周期。`admission` 管理准入，`models` 管理模型请求与计量，`coordination` 管理消息/状态投影，`business_tools` 接入工具效果。`application/agent_runtime/host` 暴露业务操作，`application/assessment/supervisor` 独立管理心跳和后台任务观察；`application/model_catalog`、`application/usage`、`bootstrap` 分别负责模型选择、用量和装配。
 - `application/tools` 保留执行管线和共同校验入口，`application/effects` 管理持久化回执；`catalog` 统一注册 schema、角色、恢复策略与处理器，`handlers` 执行业务路由，`coordination` 处理共享资料与任务，`analysis` 处理静态查询，`execution` 分派 worker 请求，`verification` 统一验证准入与认证，`files`、`jobs`、`sessions` 各自管理资源。参数及 handlers 在各自子目录按职责分组，仍由单一 catalog 注册。
-- `queries` 定义中立 DTO，`application/queries` 管理持有 Store 的查询入口；`storage/queries/workspace_delta`、`storage/queries/report` 实现 SQL。`storage/queries/workspace_snapshot` 在同一事务读取完整快照，`interfaces/desktop/workspace` 和 `interfaces/desktop/presentation` 在事务结束后转换展示，不额外查询。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
+- `queries` 定义中立 DTO。桌面、CLI 和报告模块通过 `application/queries` 中持有 Store 的查询入口读取数据。`storage/queries` 管理 SQL，并在同一事务读取完整工作区快照。桌面展示层在事务结束后转换快照，不额外查询。架构检查禁止 `interfaces` 直接导入 `storage/queries`。`ui/src/shared/api/commands.ts` 约束命令参数/响应，生命周期副作用放在对应 hook 中。
 - `application/coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`adapters/binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
 - `storage` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`storage/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 5，不提供旧数据库迁移。
 
@@ -57,16 +57,16 @@ Python 构建和发布 CLI 复用 `scripts._lib` 定位仓库、计算哈希和�
 
 ## 工具文档
 
-工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `interfaces/desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单也从注册表生成：
+工具定义、参数 schema、角色权限、模型可见性和显示消息 ID 来自同一注册表；双语文案来自共享 Fluent 资源。内部入口由 `Visibility::Internal` 标记，不通过名称黑名单逐层过滤；内部事务调用保留权限校验。桌面只为原生 Rig 工具和旧事件名称保留 `interfaces/desktop/tool_aliases` 映射，新增内置工具必须在 catalog 提供消息 ID 并补齐双语标题。Markdown 工具清单通过仅供开发使用的 example 从注册表生成：
 
 ```sh
-cargo run -- tool-catalog > docs/reference/tool-catalog.md
-cargo run -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
-cargo run -- --json tool-catalog
+cargo run --example export_catalogs -- tool-catalog > docs/reference/tool-catalog.md
+cargo run --example export_catalogs -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
+cargo run --example export_catalogs -- --json tool-catalog
 cargo test --test tool_catalog
 ```
 
-导出目录无需模型凭据，也不会打开配置或状态目录。测试比较生成结果与已提交文档，防止工具改动后遗漏更新。
+导出目录无需模型凭据，也不读取配置或状态目录。测试比较生成结果与已提交文档，防止工具改动后遗漏更新。
 
 <a id="skill-coverage"></a>
 
@@ -75,9 +75,9 @@ cargo test --test tool_catalog
 内置方法的工具、来源及机制夹具关联记录在 `prompts/coverage.json`，复用 `SkillManifest` 的 `related_tools`、`sources`、`fixtures` 字段。更新后生成 [覆盖清单](../reference/skill-coverage.zh-CN.md)：
 
 ```sh
-cargo run -- skill-catalog > docs/reference/skill-coverage.md
-cargo run -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
-cargo run -- --json skill-catalog
+cargo run --example export_catalogs -- skill-catalog > docs/reference/skill-coverage.md
+cargo run --example export_catalogs -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
+cargo run --example export_catalogs -- --json skill-catalog
 cargo test --test tool_catalog
 ```
 

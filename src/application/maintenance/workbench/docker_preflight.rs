@@ -9,13 +9,22 @@ use std::{env, ffi::OsStr, fs, io::Read, path::PathBuf};
 
 impl Docker {
     pub fn preflight(&self, image: &str) -> Result<()> {
+        self.preflight_host()?;
+        if self.inspect("image", image)?.is_none() {
+            self.check_credentials(image)?;
+        }
+        Ok(())
+    }
+
+    /// Validate the Docker host without assuming the image must be pulled.
+    ///
+    /// Local-release builds name an image that already exists as a local tag, so
+    /// the registry credential check of [`Docker::preflight`] does not apply.
+    pub fn preflight_host(&self) -> Result<()> {
         let os = self
             .run(&["info", "--format", "{{.OSType}}"])
             .context(Message::new("system-docker-unavailable"))?;
         ensure!(os == "linux", Message::new("system-docker-linux-required"));
-        if self.inspect("image", image)?.is_none() {
-            self.check_credentials(image)?;
-        }
         Ok(())
     }
 

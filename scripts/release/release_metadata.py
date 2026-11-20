@@ -1,17 +1,63 @@
-"""Read image identity from the exact version's public GitHub Release assets."""
+"""Build and read metadata for the exact version's public GitHub Release assets."""
 
 import hashlib
 import json
+from pathlib import Path
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
 
+from scripts._lib.checksums import sha256
 from scripts._lib.versioning import validate_tag
 from scripts.release.cli import validate_image
 
 DEFAULT_REPOSITORY = "mark0-cn/Wukong"
 MAX_METADATA_BYTES = 1024 * 1024
+# `scripts.worker.media.ARCHIVE_ROOT` owns the staged archive name; release tooling
+# records that archive without renaming it.
+WORKER_MEDIA_PREFIX = "wukong-windows-worker-media-"
+ASSET_NAME = re.compile(r"[0-9A-Za-z._-]+")
+
+
+def repository_name(repository):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repository):
+        raise ValueError("Release repository must be OWNER/REPO on github.com")
+    return repository
+
+
+def release_asset_url(number, name, repository=DEFAULT_REPOSITORY):
+    """Return the immutable, version-pinned URL of a Release asset."""
+    validate_tag("v" + number)
+    repository_name(repository)
+    if not ASSET_NAME.fullmatch(name):
+        raise ValueError("Release asset name is invalid")
+    return f"https://github.com/{repository}/releases/download/v{number}/{name}"
+
+
+def worker_media(directory, number, repository=DEFAULT_REPOSITORY):
+    """Describe the staged offline Windows worker template, if this build produced one.
+
+    Rehearsals may stage no template, so absence is reported as None instead of
+    failing the release. The optional entry names exactly the version-pinned
+    asset and is signed only as part of the surrounding desktop catalog.
+    """
+    staged = sorted(
+        path for path in Path(directory).glob(WORKER_MEDIA_PREFIX + "*.zip") if path.is_file()
+    )
+    if not staged:
+        return None
+    name = f"{WORKER_MEDIA_PREFIX}{number}.zip"
+    if len(staged) != 1 or staged[0].name != name:
+        raise ValueError(f"Worker media asset for v{number} must be exactly {name}")
+    path = staged[0]
+    return dict(
+        version=number,
+        name=name,
+        size=path.stat().st_size,
+        sha256=sha256(path),
+        url=release_asset_url(number, name, repository),
+    )
 
 
 class HttpsRedirect(urllib.request.HTTPRedirectHandler):
@@ -44,8 +90,7 @@ def download(url):
 def release_image(number, revision, repository=DEFAULT_REPOSITORY):
     tag = "v" + number
     validate_tag(tag)
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repository):
-        raise ValueError("Release repository must be OWNER/REPO on github.com")
+    repository_name(repository)
     base = f"https://github.com/{repository}/releases/download/{tag}/"
     print(f"Downloading image metadata from {repository} Release {tag}", flush=True)
     # Direct versioned asset URLs avoid the API's anonymous rate limit. Never use latest.

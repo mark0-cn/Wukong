@@ -279,7 +279,12 @@ impl SessionsService {
                     None
                 };
                 let worker_call = if cleanup_actor.is_some() {
-                    session.cleanup_intent.as_ref().unwrap().call_id.as_str()
+                    session
+                        .cleanup_intent
+                        .as_ref()
+                        .expect("cleanup intent is present when a cleanup actor exists")
+                        .call_id
+                        .as_str()
                 } else {
                     call_id
                 };
@@ -463,7 +468,12 @@ impl SessionsService {
                     None
                 };
                 let worker_call = if cleanup_actor.is_some() {
-                    session.cleanup_intent.as_ref().unwrap().call_id.as_str()
+                    session
+                        .cleanup_intent
+                        .as_ref()
+                        .expect("cleanup intent is present when a cleanup actor exists")
+                        .call_id
+                        .as_str()
                 } else {
                     call_id
                 };
@@ -530,12 +540,12 @@ impl SessionsService {
         let events = raw["events"]
             .as_array()
             .context("worker returned no event snapshot")?;
-        let offset = number(args, "offset", 0) as usize;
+        let offset = crate::application::tools::host_usize(number(args, "offset", 0));
         ensure!(
             offset <= events.len(),
             "offset is beyond the current event snapshot; start a fresh snapshot at zero"
         );
-        let limit = number(args, "limit", 32).min(256) as usize;
+        let limit = crate::application::tools::host_usize(number(args, "limit", 32).min(256));
         let page = events.iter().skip(offset).take(limit).collect::<Vec<_>>();
         let evidence = self.store.artifact(
             &agent.run_id,

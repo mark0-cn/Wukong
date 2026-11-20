@@ -169,10 +169,11 @@ impl Workbench {
                 == crate::adapters::binary::sha256_file(root.join("challenge.toml"))?,
             "manifest changed since build; run challenge build again"
         );
-        Ok(lock["challenge_image_id"]
-            .as_str()
-            .context("build the challenge first")?
-            .to_owned())
+        valid_image_id(
+            lock["challenge_image_id"]
+                .as_str()
+                .context("build the challenge first")?,
+        )
     }
     pub fn up_challenge(&self, id: &str, allow_privileged: bool) -> Result<Value> {
         self.verify_original(id)?;
@@ -262,7 +263,11 @@ impl Workbench {
             "python3",
             &env.image_id,
             "/opt/wukong/runtime/wukong_worker/workbench/relay.py",
-            challenge.network.host.as_deref().unwrap(),
+            challenge
+                .network
+                .host
+                .as_deref()
+                .expect("local_service challenges declare a host"),
             &challenge.network.port.to_string(),
         ])?;
         self.docker.run(&[
@@ -560,11 +565,13 @@ impl Workbench {
         );
         let env = self.challenge_environment(id)?;
         let name = self.name(&format!("{id}-debug"));
+        let service_id = target["Id"]
+            .as_str()
+            .context("docker inspect omitted the challenge service container ID")?;
         if let Some(existing) = self.docker.inspect("container", &name)? {
             self.owned(&existing, &name)?;
             ensure!(
-                existing["HostConfig"]["PidMode"]
-                    == format!("container:{}", target["Id"].as_str().unwrap()),
+                existing["HostConfig"]["PidMode"] == format!("container:{service_id}"),
                 "debug companion belongs to a previous service instance; run challenge down first"
             );
             self.docker.run(&["start", &name])?;

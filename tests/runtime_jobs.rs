@@ -531,8 +531,12 @@ for line in sys.stdin:
         ),
         request_timeout_secs: 3,
     };
+    // SAFETY: GetStdHandle only reads the current standard handle and borrows it; the value
+    // stays valid until the process exits and is restored below.
     let previous = unsafe { GetStdHandle((-12i32) as u32) };
     assert_ne!(
+        // SAFETY: the test installs a deliberately invalid handle to model a detached console;
+        // SetStdHandle only stores the value and the previous handle is restored below.
         unsafe { SetStdHandle((-12i32) as u32, 0x12345678usize as *mut c_void) },
         0
     );
@@ -544,6 +548,8 @@ for line in sys.stdin:
         .stderr(std::process::Stdio::inherit())
         .spawn();
     let result = RuntimeClient::connect(config).await;
+    // SAFETY: restores the handle value read above, so the process ends with the handle it
+    // started with even when the assertions before it panic.
     unsafe {
         SetStdHandle((-12i32) as u32, previous);
     }

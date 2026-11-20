@@ -57,7 +57,7 @@ pub(crate) fn cache_lock_at(root: &Path, exclusive: bool) -> Result<FileLock> {
 
 pub fn set_cache(destination: &Path) -> Result<PathBuf> {
     let _cache = cache_lock(true)?;
-    let _maintenance = maintenance::lock(&recovery::root()?, true)?;
+    let _maintenance = maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
     ensure!(
         recovery::pending()?.is_none(),
         UiMessage::new("system-finish-the-pending-update-or-recovery-before-changing")
@@ -144,7 +144,11 @@ fn copy_releases(source: &Path, destination: &Path) -> Result<()> {
             fs::copy(path.join(file), output.join(file))?;
         }
         let artifact = manifest.artifact()?;
-        let filename = artifact.url.rsplit('/').next().unwrap();
+        let filename = artifact
+            .url
+            .rsplit('/')
+            .next()
+            .unwrap_or(artifact.url.as_str());
         let payload = path.join(filename);
         if payload.exists() {
             ensure!(

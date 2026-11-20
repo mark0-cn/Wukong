@@ -64,7 +64,14 @@ def checks_succeeded(kind, needs, event):
     if kind == "release":
         passed = all(
             needs.get(n, {}).get("result") == "success"
-            for n in ("metadata", "checks", "image", "acceptance", "package")
+            for n in (
+                "metadata",
+                "checks",
+                "image",
+                "acceptance",
+                "windows-worker",
+                "package",
+            )
         )
         metadata = needs.get("metadata", {}).get("outputs", {})
         for target in ("windows", "linux"):
@@ -233,7 +240,14 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
         a
         for a in artifacts
         if a["name"]
-        in {"online-release", "image-validation", "windows-client-v1", "linux-acceptance-client-v1"}
+        in {
+            "online-release",
+            "image-validation",
+            "windows-client-v1",
+            "linux-acceptance-client-v1",
+            "windows-worker-media-v1",
+            "windows-worker-media-report-v1",
+        }
         and not a.get("expired")
     ]
     for artifact in useful:

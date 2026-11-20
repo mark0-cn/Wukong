@@ -301,6 +301,16 @@ pub(crate) fn drive(
             // and business tool IO while this run is paused.
             app.update();
             app.update();
+            if let Some(error) = app.world_mut().resource_mut::<Fatal>().0.take() {
+                return Err(error);
+            }
+            if let Some(failure) = app
+                .world()
+                .resource::<rig_ecs::session_log::SessionLog>()
+                .failure()
+            {
+                anyhow::bail!("Rig journal write failed: {failure}");
+            }
             // Drop cancels in-flight futures. Leave Rig's saved turn open so
             // CarryOn can restore the exact pending effect on a later drive.
             runner.emit(
@@ -337,8 +347,12 @@ pub(crate) fn drive(
 fn task_schema() -> Value {
     let mut schema = crate::application::tools::child_schema();
     let properties = schema["properties"].as_object_mut().expect("typed object");
-    let name = properties.remove("name").unwrap();
-    let task = properties.remove("task").unwrap();
+    let name = properties
+        .remove("name")
+        .expect("child_schema declares a name field");
+    let task = properties
+        .remove("task")
+        .expect("child_schema declares a task field");
     properties.insert("description".into(), name);
     properties.insert("prompt".into(), task);
     schema["required"] = json!(["description", "prompt", "role", "scope"]);

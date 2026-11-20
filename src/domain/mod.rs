@@ -1,6 +1,6 @@
 pub mod bundle;
 mod claims;
-pub(crate) use claims::flag_claims;
+pub(crate) use claims::{flag_claims, normalize};
 mod rules;
 pub use rules::{CompletionFacts, CompletionRules, DependencyRules, MessageRules, TaskGraph};
 mod progress;
@@ -61,6 +61,18 @@ impl fmt::Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+/// Why an agent stopped before finishing. Lifecycle decisions (whether a
+/// follow-up can resume it with a fresh slice) read this field instead of
+/// matching the wording of [`AgentMetadata::error`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureCause {
+    /// The agent exhausted its role token quota and can be resumed.
+    Budget,
+    /// Any other failure.
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -126,6 +138,10 @@ impl Budget {
     /// Per-agent token quota derived from the run budget. A 10k floor keeps
     /// small-budget runs governed by the run-level budget alone instead of
     /// degenerating into role quotas that kill every agent on its first call.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the share is validated to (0, 1], so the product is a fractional count below the run token budget"
+    )]
     pub fn role_token_cap(&self, role: Role) -> u64 {
         ((self.role_share(role) * self.max_total_tokens as f64) as u64).max(10_000)
     }
@@ -213,6 +229,9 @@ pub struct AgentMetadata {
     pub token_cap: Option<u64>,
     pub summary: Option<String>,
     pub error: Option<String>,
+    /// Typed companion to `error`; absent on records written before it existed.
+    #[serde(default)]
+    pub failure_cause: Option<FailureCause>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -248,15 +267,13 @@ impl AgentSnapshot {
         }
     }
 }
+/// Read-only field access to the wrapped record, so reads stay terse. `DerefMut`
+/// is deliberately absent: mutating a snapshot's metadata through the wrapper
+/// would bypass the store that owns the durable record.
 impl std::ops::Deref for AgentSnapshot {
     type Target = AgentMetadata;
     fn deref(&self) -> &Self::Target {
         &self.metadata
-    }
-}
-impl std::ops::DerefMut for AgentSnapshot {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.metadata
     }
 }
 
@@ -660,7 +677,6 @@ pub trait RunScoped {
 macro_rules! run_scoped { ($($record:ty),+ $(,)?) => { $(impl RunScoped for $record { fn run_id(&self)->&str { &self.run_id } })+ }; }
 run_scoped!(
     AgentMetadata,
-    AgentSnapshot,
     JobRecord,
     SessionRecord,
     WorkerFileRecord,
@@ -673,3 +689,10 @@ run_scoped!(
     Thought,
     PublicReply
 );
+/// The snapshot is a wrapper, not a record: read the run through its metadata
+/// instead of dereferencing the wrapper like a smart pointer.
+impl RunScoped for AgentSnapshot {
+    fn run_id(&self) -> &str {
+        self.metadata.run_id.as_str()
+    }
+}

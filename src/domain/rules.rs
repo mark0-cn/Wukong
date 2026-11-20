@@ -307,11 +307,8 @@ impl MessageRules {
             !correlation.trim().is_empty() && correlation.len() <= 256,
             "invalid correlation_id"
         );
-        let quota_failed = target.status == Status::Failed
-            && target
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("budget"));
+        let quota_failed =
+            target.status == Status::Failed && target.failure_cause == Some(FailureCause::Budget);
         let resumable = target.status == Status::Completed || quota_failed;
         let generation = if options.kind == MessageKind::FollowUp && resumable && !stale {
             target
@@ -418,7 +415,7 @@ mod tests {
             skills: vec![],
             active_skills: vec![],
             status: Status::Running,
-            depth: usize::from(parent.is_some()) as u32,
+            depth: u32::from(parent.is_some()),
             generation: 0,
             inherit_context: false,
             wait_for: vec![],
@@ -433,6 +430,7 @@ mod tests {
             token_cap: None,
             summary: None,
             error: None,
+            failure_cause: None,
             created_at: now(),
             updated_at: now(),
         }

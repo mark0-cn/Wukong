@@ -16,6 +16,27 @@ The [2026-11-15 cleanup acceptance](../history/validation/2026-11-15-architectur
 
 The controller source is grouped by responsibility: `domain` holds durable records and pure rules; `queries` holds neutral read models; `application` owns use cases, agent integration and maintenance; `storage` owns transactions and artifacts; `adapters` owns worker/provider/filesystem integration; `interfaces` owns CLI, desktop and reports. `bootstrap` assembles dependencies. Existing public Rust paths are re-exported centrally in `src/lib.rs`; internal imports use the owning module. Private runner tests remain beside the runner, and installed-worker SSH fixtures live under `src/adapters/worker/ssh/tests`.
 
+```mermaid
+flowchart TB
+    IN["Interfaces<br/>Desktop · CLI · Report"]
+    subgraph CONTROL["Rust controller"]
+        APP["Application<br/>Assessment · Tools · Queries · Maintenance"]
+        DOMAIN["Domain<br/>Task records and business rules"]
+        IO["Infrastructure<br/>SQLite · Evidence files · Provider and Worker adapters"]
+        APP --> DOMAIN
+        APP --> IO
+    end
+    PROTO["Shared Worker protocol v3"]
+    LINUX["Linux Worker<br/>Python RPC · Resource ownership · OS adapters"]
+    WIN["Windows Worker · disposable VM<br/>Native RPC · ResourceManager · OS adapters"]
+    IN --> APP
+    IO <--> PROTO
+    PROTO <--> LINUX
+    PROTO <--> WIN
+```
+
+The application query facades supply neutral snapshots. Desktop health commands delegate observation to `application/maintenance/updates/health`, and the Windows setup page reads its inventory through `application/windows_worker_setup/inventory`. `interfaces/report/bundle` owns the file manifest and offline integrity checks for exported reports.
+
 Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
 
 Controller connections/configuration/identity/leases live under `src/adapters/worker` and `src/adapters/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/application/effects` and `src/storage` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.
@@ -70,7 +91,7 @@ Windows has one native worker authority. The controller owns business tasks/evid
 
 Agent states: queued, running, waiting, budget_paused, completed, stopped, crashed, failed. Completion/stop notify parents. Budget pauses retain checkpoints and resume scheduling later.
 
-Within an active run, `follow_up_agent` (CLI `message --kind follow_up`) adds work to a completed child, preserving history/cumulative usage and starting a new generation. Calls/notices are generation-scoped. Completed parents are awakened too; stopped/failed branches need new tasks. Explicit predecessor dependencies combine with parent-completion dependencies; ancestor dependencies/indirect cycles are rejected.
+Within an active run, `follow_up_agent` (desktop **Assign follow-up**) adds work to a completed child, preserving history/cumulative usage and starting a new generation. Calls/notices are generation-scoped. Completed parents are awakened too; stopped/failed branches need new tasks. Explicit predecessor dependencies combine with parent-completion dependencies; ancestor dependencies/indirect cycles are rejected.
 
 Children close owned debug/interactive sessions before finishing; root resolves all sessions. Other Agents in the same run may close abandoned sessions of stopped/failed owners, but cannot issue debug commands/interactive input.
 
@@ -82,7 +103,7 @@ Native logs in `state_dir/rig/RUN_ID` contain model conversations, effects and p
 
 `RunSupervisor` independently manages controller leases, duration budgets and background worker observation; Rig frames do not await worker RPC. Leases carry persistent increasing versions. Runner/coordinator/tools share versioned store handles; every write transaction validates owner/version/expiry before mutation. Expired controllers stop and late results cannot overwrite a successor. Supervision ends with run completion/cancellation; lease release also checks version.
 
-CLI/GUI use `AssessmentService` for start/resume/pause/stop/operator messages. `PreparedAssessment` retains resolved configuration/event subscriptions and closes controller tool connections on success/error. Frontends do not orchestrate leases or construct resume configuration. Resume preparation does not mutate tasks; budget changes commit only after the supervisor acquires the lease.
+The desktop and CLI use `AssessmentService` for assessment start/resume; the desktop additionally uses it for pause, stop and operator messages. `PreparedAssessment` retains resolved configuration/event subscriptions and closes controller tool connections on success/error. Frontends do not orchestrate leases or construct resume configuration. Resume preparation does not mutate tasks; budget changes commit only after the supervisor acquires the lease.
 
 `ToolContext` explicitly assembles execution, analysis, coordination, document, evidence and environment services without dereferencing to `ToolService`. Catalog adapters pass each handler its concrete service; handlers cannot reach the complete entry point. The catalog still owns schemas, registration, permissions and recovery policy, and Rig retains generic scheduling. `FilesService`, `JobService` and `SessionsService` own worker use cases; `WorkerGateway` centralizes transport/stable receipts. Controller ownership uses `JobRecord`, `SessionRecord`, `WorkerFileRecord`, `RunScoped`; original worker extension payloads remain JSON.
 
@@ -104,9 +125,9 @@ Callable names remain `reverse`, `hunter`, etc., without directories. Flat `skil
 
 Each fresh model request selects at most six bounded shared-note/todo/optional-threat-model previews by author, parent, predecessor, scope and keywords. This heuristic does not guarantee full relevance coverage; prompts report omitted counts/search entry points. `context_search` supports text, kind, author scope, agent_id and pagination; `context_read` reads original document JSON including amendments by Unicode character offset. Both shrink pages to output-byte limits, retain continuation offsets and bypass model summaries. Reads stay within the run; `evidence_read` retrieves original evidence. Compaction retains the same previews, ledger counts and full-conversation references, never reinjecting every document/tree. Contracts still define plans/constraints; selection does not replace acceptance.
 
-`src/application/tools/catalog.rs` owns tool schemas, role boundaries and backend requirements. Before each model request, environment preflight intersects observed capabilities with task grants and persisted optional group selections; root stays lazy. `tool_catalog` reports availability and `tool_select` changes exposure, never permissions. Core and resource lifecycle tools remain visible; configured MCP tools require the external group. Rig exposes `task`; typed messaging and waits use `send_message_to_agent` and `wait_for_agents`. Root completes through `finish_scan`, children through `agent_finish`, both with a single structured result. Invocation rechecks role, grants, target identity, evidence, resource ownership and backend capabilities. Only verifier may certify independent analysis or impact. Generate the [tool catalog](../reference/tool-catalog.md) with `wukong tool-catalog`; `wukong --json tool-catalog` exports schemas.
+`src/application/tools/catalog.rs` owns tool schemas, role boundaries and backend requirements. Before each model request, environment preflight intersects observed capabilities with task grants and persisted optional group selections; root stays lazy. `tool_catalog` reports availability and `tool_select` changes exposure, never permissions. Core and resource lifecycle tools remain visible; configured MCP tools require the external group. Rig exposes `task`; typed messaging and waits use `send_message_to_agent` and `wait_for_agents`. Root completes through `finish_scan`, children through `agent_finish`, both with a single structured result. Invocation rechecks role, grants, target identity, evidence, resource ownership and backend capabilities. Only verifier may certify independent analysis or impact. Generate the [tool catalog](../reference/tool-catalog.md) with the developer-only `cargo run --example export_catalogs -- tool-catalog`; `--json` exports schemas.
 
-`prompts/coverage.json` associates method sources/tools/mechanism fixtures with `SkillManifest`; `wukong skill-catalog` generates [coverage](../reference/skill-coverage.md). Metadata does not change permissions, availability or completion gates.
+`prompts/coverage.json` associates method sources/tools/mechanism fixtures with `SkillManifest`; `cargo run --example export_catalogs -- skill-catalog` generates [coverage](../reference/skill-coverage.md). Metadata does not change permissions, availability or completion gates.
 
 Worker entry, transport, ledger, jobs, independent supervision, debugging, interaction, files and command execution are separate components. `Runtime` only assembles/routes; the ledger executes callbacks/reconciles session liveness independently of a concrete runtime.
 
@@ -122,7 +143,7 @@ External processes recover separately from model state. Reconcile debugger/fuzz/
 
 `queries` contains neutral read models, incremental cursor state and workspace snapshot inputs. `application/queries` owns the Store-backed `AssessmentQueries`, `FindingQueries` and `ReportQueries` facades. SQL lives in `storage/queries/workspace_delta`/`storage/queries/report`. CLI/GUI share query models; chat parsing/layout caches remain GUI adapters.
 
-`storage/queries/workspace_snapshot` reads run/Agent summaries, calls, jobs, events and public replies in one SQL transaction. `interfaces/desktop/workspace` projects that frozen snapshot into transcript and active-tool DTOs after the transaction ends, without additional queries or Worker RPC. Storage does not import desktop presentation. Response signatures combine epoch, `entity_revisions`, event sequence, query scope and operator mail; unchanged data is not resent, while independent CLI changes remain observable. Active history defaults to latest 500, expandable to 10,000; only calls referenced by that window load. `useWorkspace` rejects stale responses and reloads after task/storage changes.
+The desktop requests a workspace snapshot through `AssessmentQueries::workspace_snapshot`. The storage implementation reads run/Agent summaries, calls, jobs, events and public replies in one SQL transaction. `interfaces/desktop/workspace` projects that frozen snapshot into transcript and active-tool DTOs after the transaction ends, without additional queries or Worker RPC. Response signatures combine epoch, `entity_revisions`, event sequence, query scope and operator mail; unchanged data is not resent, while independent CLI changes remain observable. Active history defaults to latest 500, expandable to 10,000; only calls referenced by that window load. `useWorkspace` rejects stale responses and reloads after task/storage changes.
 
 Business writes use `StateSession`, not exposed SQLite connections. Storage `StoredRecord` binds entity type/location/identity/conversation policy. Business code uses `load`, `records`, `save_record`, typed document/conversation categories and specific result-archive operations. Message replacement, old-generation archives and unread counts remain encapsulated. Receipts/state share lease validation and one IMMEDIATE transaction.
 
@@ -176,8 +197,8 @@ retained as `stale` and never injected as current work. `message_status` exposes
 these states. In-flight model requests keep their original mailbox snapshot.
 This increment uses a fresh schema 5 store; no old-database migration is provided.
 Informational mail left on completed work becomes
-stale when a new generation starts. CLI messages default to information; GUI
-operator input defaults to information; the explicit follow-up option reopens completed work.
+stale when a new generation starts. GUI operator input defaults to information;
+the explicit follow-up option reopens completed work.
 
 The native `message` tool opens a request or sends a reply to a reachable active
 agent. Use typed `send_message_to_agent` for informational updates and correlated

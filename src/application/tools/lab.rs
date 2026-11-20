@@ -4,9 +4,12 @@ use crate::adapters::environments::EnvironmentRegistry;
 use crate::application::windows_lab::WindowsLab;
 use crate::config::{AppConfig, WindowsLabConfig};
 
+pub(crate) type LabFactory = fn(&AppConfig, &EnvironmentRegistry, &str) -> Result<WindowsLab>;
+
 #[derive(Clone)]
 pub(crate) struct LabService {
     pub(super) operations: lab_operations::Operations,
+    pub(super) open_lab: LabFactory,
     pub(super) output_limit: usize,
     pub(super) store: Store,
     pub(super) execution: ExecutionService,
@@ -26,8 +29,13 @@ impl LabService {
     fn evidence_bytes(&self, agent: &AgentMetadata, id: &str, limit: u64) -> Result<Vec<u8>> {
         let evidence: Evidence = require_in_run(&self.store, id, &agent.run_id)?;
         ensure!(evidence.size <= limit, "lab evidence exceeds size budget");
-        self.store
-            .read_evidence_range(&agent.run_id, id, 0, evidence.size as usize)
+        self.store.read_evidence_range(
+            &agent.run_id,
+            id,
+            0,
+            usize::try_from(evidence.size)
+                .map_err(|_| anyhow::anyhow!("lab evidence exceeds the address space"))?,
+        )
     }
 
     pub(super) fn materialize_spec(
@@ -85,7 +93,21 @@ impl LabService {
                 use std::io::Write;
                 let mut file = tempfile::NamedTempFile::new_in(&directory)?;
                 file.write_all(&bytes)?;
-                file.persist_noclobber(&path).map_err(|e| e.error)?;
+                match file.persist_noclobber(&path) {
+                    Ok(_) => {}
+                    // Another operation published the same content-addressed evidence
+                    // first; identical bytes are equivalent, anything else is a bug.
+                    Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        ensure!(
+                            crate::application::windows_lab::package::read_bounded(
+                                &path,
+                                crate::application::windows_lab::package::MAX_ARTIFACT_BYTES
+                            )? == bytes,
+                            "existing evidence copy differs"
+                        );
+                    }
+                    Err(error) => return Err(error.error.into()),
+                }
             }
             dependencies.push(Dependency {
                 name: dependency.name,
@@ -188,12 +210,8 @@ impl LabService {
             windows_lab: self.config.clone(),
             ..Default::default()
         };
-        crate::application::windows_lab::service::open_configured(
-            &config,
-            &self.environments,
-            vm_id,
-        )
-        .map(|lab| lab.with_caller(self.owner(agent)))
+        (self.open_lab)(&config, &self.environments, vm_id)
+            .map(|lab| lab.with_caller(self.owner(agent)))
     }
 }
 

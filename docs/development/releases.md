@@ -40,7 +40,7 @@ The repository is public and uses standard hosted runners. First uncached image 
 
 ## Build native installers locally
 
-Run `cargo package-local` in committed, clean Windows x64/Linux x64 source. It checks source/tools and invokes Tauri for the platform's NSIS EXE/AppImage, outputting `target/local-installers/`. It neither downloads tools nor publishes. First client setup requests the matching official Release's signed manifest, so an unpublished local version cannot fetch its environment through online setup.
+Run `cargo package-local` in committed, clean Windows x64/Linux x64 source. It checks source/tools and invokes Tauri for the platform's NSIS EXE/AppImage, outputting `target/local-installers/`. It does not publish. The Windows installer bundles the offline worker setup executable at `<install directory>\worker-setup\WukongWorkerSetup.exe`: the command builds it with `python -m scripts.worker.build_native` in an auto-discovered x64 MSVC environment, stages `target/worker-setup/WukongWorkerSetup.exe`, and adds it through the Tauri `--config` resource overlay exactly like CI ([bundled worker setup](desktop-updates.md#bundled-worker-setup)). This requires Windows x64 with Visual Studio C++ build tools and may download missing pinned toolchain assets on first run; the installer grows by roughly 2–4 MB. `cargo package-local` builds a **local-release** package: first setup uses the bundled `local-release.json` and a locally built Docker image instead of the online signed catalog, so an unpublished checkout can prepare its environment ([local-release builds](local-builds.md)). Use `--online` for the previous catalog-dependent installer; CI release packaging never enables the local-release mode.
 
 ```sh
 cargo package-local --check
@@ -48,7 +48,7 @@ cargo package-local --output target/installers/build-1
 cargo package-local --signed
 ```
 
-Existing output directories are rejected. `--check` checks source/tool entry points; actual builds verify system/installer dependencies. `--signed` requires `TAURI_SIGNING_PRIVATE_KEY`; ordinary local builds need no release secret. Windows needs MSVC, Rust, Node.js/npm and Python; Linux also needs Tauri WebKitGTK, GTK, AppIndicator, patchelf and related build libraries. Official AppImages build on Ubuntu 22.04 and receive real WebView startup checks, not every-distribution guarantees. Legacy ZIP scripts remain development fixtures; official releases/`cargo package-local` use native installers.
+Existing output directories are rejected. `--check` checks source/tool entry points, including the x64 MSVC environment, offline toolchain availability and native worker source for the Windows worker setup; actual builds verify system/installer dependencies. `--signed` requires `TAURI_SIGNING_PRIVATE_KEY`; ordinary local builds need no release secret. Windows needs MSVC (auto-discovered for the worker setup), Rust, Node.js/npm and Python; Linux also needs Tauri WebKitGTK, GTK, AppIndicator, patchelf and related build libraries. Local-release packaging additionally requires a running Docker daemon and a linux/amd64 workbench image that is already local, pulled from the separate CI-built workbench repository or built locally ([local-release builds](local-builds.md)). Official AppImages build on Ubuntu 22.04 and receive real WebView startup checks, not every-distribution guarantees. Legacy ZIP scripts remain development fixtures; official releases/`cargo package-local` use native installers.
 
 Independent launcher formatting: `cargo fmt --manifest-path xtask/Cargo.toml -- --check`.
 
@@ -56,7 +56,7 @@ Independent launcher formatting: `cargo fmt --manifest-path xtask/Cargo.toml -- 
 
 ## Everyday CI
 
-`Checks` (`ci.yml`) runs on master pushes, PRs targeting master and manual dispatch. Both PR/master select checks by scope; version PRs, master version increases, manual Checks and release calls run full checks plus APT/uninstall acceptance. Windows runs selected Rust fmt/clippy/test, frontend tests/build and online-package validation; Linux runs selected runtime/evaluation and real replay checks. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md#actions-entry-points) for scope, gates and the five operator/three internal workflows.
+`Checks` (`ci.yml`) runs on master pushes, PRs targeting master and manual dispatch. Both PR/master select checks by scope; version PRs, master version increases, manual Checks and release calls run full checks plus APT/uninstall acceptance. Windows runs selected Rust fmt/clippy/test, frontend tests/build and online-package validation; Linux runs selected runtime/evaluation and real replay checks. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md#actions-entry-points) for scope, gates and the six operator/three internal workflows.
 
 `rust-toolchain.toml` pins Rust; Cargo/npm use lockfiles. Debian/Python transitive dependencies are not fully locked. Released image digests are authoritative; rebuilding is not guaranteed byte-for-byte reproducible.
 
@@ -88,8 +88,9 @@ The workflow listens to all tags and validates metadata before image build/packa
 2. Find trusted same-SHA CI/release clients or build them. Before execution/packaging, verify platform, version, full commit, recipe and binary SHA256/size. Bake stable toolchain/workbench together; verify external assets against `workers/toolchain.lock.json`, even on cache hits. Publish candidate `build-<fullcommit>` with SBOM/provenance.
 3. On a fresh runner pull by digest and run network isolation, fixed-target relay, LaunchSpec/archive tests, and host-CLI doctor, challenge import/build/extract/start/connect, GDB attach, update/rollback.
 4. Package both platforms' validated desktop binaries directly into NSIS/AppImage without recompiling; reuse Linux acceptance CLI separately. Sign and run native install/start checks. Combine platform files into signed `latest.json`, `release.json`, SHA256SUMS and acceptance reports; Rust verifies every installer signature/hash.
-5. Upload a draft GitHub Release, add fixed-version tags to the same image digest, then publish.
-6. Advance Docker/GitHub latest only if no higher stable version exists; finally recheck attachments/digest.
+5. On `windows-2025`, build the offline Windows worker media template without controller keys, check it with an ephemeral key, pack the deterministic zip and stage it into the release asset set, where the signed desktop catalog records it for desktop download.
+6. Upload a draft GitHub Release, add fixed-version tags to the same image digest, then publish.
+7. Advance Docker/GitHub latest only if no higher stable version exists; finally recheck attachments/digest.
 
 Fixed versions never overwrite published images. GitHub/Docker Hub have no cross-service atomic transaction: failures may leave candidates, drafts or fixed image tags. Use **Re-run failed jobs** after repair, reusing original artifacts/digest. Different bytes for already-published attachments are rejected; publish a new version.
 
@@ -123,6 +124,16 @@ Inspect failed jobs:
 
 Candidates/buildcache share the public repository. Periodically clean unreferenced old candidates as capacity requires. CI lacks Delete permission and does not remove tags. Preserve official versions/digests still in use.
 
+<a id="offline-windows-worker-media"></a>
+
+## Offline Windows worker media
+
+Release builds also publish `wukong-windows-worker-media-<version>.zip` from the `windows-worker` job on `windows-2025`. That job runs the shared Windows worker checks, stages the unsigned payload with the authenticated native binaries, checks finalization with an ephemeral key and packs the deterministic archive without any controller private key. The archive root `wukong-windows-worker-media-<version>/` contains `payload/`, `binaries/`, `manifest-draft.json`, `native-build.json` and `media-template.json`. The zip is a separate release asset, not an application installer or update target: it stays out of the `platforms` entries, has no updater signature and the desktop updater never downloads it.
+
+The package job generates the signed desktop catalog (`latest.json`, signed as `latest.json.sig`) from the accepted assets and records the staged zip as an optional `worker_media` entry: `version`, `name`, `size`, `sha256` and a `url` pinned to the matching `v<version>` Release asset. `release.json` mirrors the same entry for release tooling. The desktop verifies the catalog signature first, then uses only the version-pinned URL and the signed `size`/`sha256` to download and check the matching offline worker template. A rehearsal that stages no template omits `worker_media`; the field is optional, so older clients and catalogs remain valid.
+
+An operator downloads the asset, verifies it against `SHA256SUMS`, unpacks it, and runs `python -m scripts.worker.media finalize --template <unpacked template> --keys <absolute controller key directory> --spec <enrollment spec> --output <new media directory>` to seal the payload, sign enrollment and produce the offline `WukongWorkerSetup.exe` media. The controller key directory and SSH private keys stay outside the template and output. Before installation, any Windows host can run `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>` without elevation; installation requires elevation and belongs on a dedicated disposable VM. See [native Windows worker components](../../workers/windows/README.md) for the complete commands and spec fields.
+
 <a id="验收边界"></a>
 
 ## Acceptance boundary
@@ -135,7 +146,7 @@ See [online installation](../user/online-install.md). Packages exclude image tar
 
 ## In-app update trust and recovery
 
-Clients read official `latest.json`/`latest.json.sig`, verify the manifest first, then inspect version/platform/digest/compatibility. Downloaded EXE/AppImage also requires signature/SHA256/size verification. Docker `latest` never selects the runtime environment. Public keys in `src/interfaces/desktop/update-public.key` and Tauri configuration must match. Private keys live in Actions Secrets with an external administrator backup; losing a key cannot be fixed by silently generating another for seamless existing-client updates. Updater signing does not replace Authenticode; current installers lack OS code signing.
+Clients read official `latest.json`/`latest.json.sig`, verify the manifest first, then inspect version/platform/digest/compatibility. The optional `worker_media` entry is provisioning metadata for the offline Windows worker template, not an application update artifact; clients that do not use it ignore the field. Downloaded EXE/AppImage also requires signature/SHA256/size verification. Docker `latest` never selects the runtime environment. Public keys in `src/interfaces/desktop/update-public.key` and Tauri configuration must match. Private keys live in Actions Secrets with an external administrator backup; losing a key cannot be fixed by silently generating another for seamless existing-client updates. Updater signing does not replace Authenticode; current installers lack OS code signing.
 
 See [desktop updates](desktop-updates.md) for check/prepare/switch/confirm rules. Manual rehearsals sign candidates without changing official releases/stable update entry points.
 

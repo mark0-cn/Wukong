@@ -333,11 +333,14 @@ pub(super) fn retry_policy(
     application: Res<Application>,
 ) {
     let policy = rig_ecs::retry::RetryPolicy {
-        max_retries: application
-            .runner
-            .execution()
-            .model_retries
-            .min(u32::MAX as usize) as u32,
+        max_retries: u32::try_from(
+            application
+                .runner
+                .execution()
+                .model_retries
+                .min(u32::MAX as usize),
+        )
+        .expect("clamped to u32::MAX above"),
         ..rig_ecs::retry::RetryPolicy::DEFAULT
     };
     for (outcome, of, mut verdict) in &mut calls {
@@ -378,6 +381,7 @@ pub(super) fn enforce_completion(
                                 TurnOutcome::Answered(message) => message.final_answer(),
                                 _ => None,
                             },
+                            crate::domain::FailureCause::Error,
                         )?;
                         *outcome = TurnOutcome::Failed("task result not accepted".into());
                     } else {
@@ -412,7 +416,12 @@ pub(super) fn record_turn_end(
                 if !record.status.terminal()
                     && let TurnOutcome::Failed(reason) = outcome
                 {
-                    application.runner.fail_agent(&id.0, reason.clone(), None)?;
+                    application.runner.fail_agent(
+                        &id.0,
+                        reason.clone(),
+                        None,
+                        crate::domain::FailureCause::Error,
+                    )?;
                 }
                 Ok(())
             })(),

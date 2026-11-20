@@ -262,6 +262,8 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let private = AclPolicy::current_user()?;
         let mut token = std::ptr::null_mut();
+        // SAFETY: `GetCurrentProcess` returns a pseudo-handle needing no close, and `token` is a
+        // null-initialized out-param; `check` gates the write and `Handle` takes ownership.
         security::check(unsafe {
             OpenProcessToken(
                 GetCurrentProcess(),
@@ -273,6 +275,8 @@ mod tests {
         let mut token = std::ptr::null_mut();
         // Administrator test runners can have SeTakeOwnershipPrivilege enabled.
         // Model ordinary sandbox DACL access, not that privilege's bypass.
+        // SAFETY: `original.0` is a live token handle opened with TOKEN_DUPLICATE above, and all
+        // empty SID/privilege lists pass count 0, so their null pointers are never read.
         security::check(unsafe {
             CreateRestrictedToken(
                 original.0,

@@ -24,8 +24,10 @@ pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
             let target = TaskGraph::resolve(&agents, reference)?;
             return Ok(json!({"caller_id":agent.id,"agent":target}));
         }
-        let offset = number(&args, "offset", 0).min(agents.len() as u64) as usize;
-        let limit = number(&args, "limit", 8).clamp(1, 16) as usize;
+        let offset = crate::application::tools::host_usize(
+            number(&args, "offset", 0).min(agents.len() as u64),
+        );
+        let limit = crate::application::tools::host_usize(number(&args, "limit", 8).clamp(1, 16));
         let page: Vec<_> = agents.iter().skip(offset).take(limit).collect();
         let brief = |text: &str| text.chars().take(160).collect::<String>();
         let mut sessions = Vec::new();
@@ -35,7 +37,7 @@ pub(in crate::application::tools) fn handle_view_agent_graph<'a>(
                         .map(|session| json!({"kind":kind,"id":session["id"],"agent_id":session["agent_id"],"state":session["state"]})));
         }
         Ok(
-            json!({"caller_id":agent.id,"parent_id":agent.parent_id,"total":agents.len(),"next_offset":(offset+page.len()<agents.len()).then_some(offset+page.len()),"agents":page.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":brief(&a.name),"role":a.role,"scope":brief(&a.scope),"status":a.status,"generation":a.generation,"error":a.error.as_deref().map(brief),"can_follow_up":a.status==Status::Completed || (a.status==Status::Failed && a.error.as_deref().is_some_and(|e|e.contains("budget")))})).collect::<Vec<_>>(),"open_sessions":sessions}),
+            json!({"caller_id":agent.id,"parent_id":agent.parent_id,"total":agents.len(),"next_offset":(offset+page.len()<agents.len()).then_some(offset+page.len()),"agents":page.iter().map(|a|json!({"id":a.id,"parent_id":a.parent_id,"name":brief(&a.name),"role":a.role,"scope":brief(&a.scope),"status":a.status,"generation":a.generation,"error":a.error.as_deref().map(brief),"can_follow_up":a.status==Status::Completed || (a.status==Status::Failed && a.failure_cause==Some(crate::domain::FailureCause::Budget))})).collect::<Vec<_>>(),"open_sessions":sessions}),
         )
     })
 }
@@ -113,7 +115,10 @@ pub(in crate::application::tools) fn handle_stop_agent<'a>(
             target.id.clone()
         };
         tools.effect(agent, call_id, |tx| {
-            Ok(json!({"stopped":Coordinator::tx_stop(tx, &target_id, text(&args, "reason")?)?}))
+            let stopped = Coordinator::tx_stop(tx, &target_id, text(&args, "reason")?)?;
+            Ok(
+                json!({"stopped":stopped,"already_terminal":!stopped.iter().any(|id| id == &target_id)}),
+            )
         })
     })
 }

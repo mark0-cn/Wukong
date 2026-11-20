@@ -83,6 +83,10 @@ impl JobService {
         let lock = self.resource_lock(job_id).await;
         let _guard = lock.lock().await;
         let job = self.known_job(agent, job_id, false)?;
+        // Read-only observation stays open to the run, but evidence must belong to the
+        // agent that produced the job; otherwise an observer's records would satisfy
+        // verifier-owned checks for work it never ran.
+        let owns = job.agent_id == agent.id;
         let status: JobStatus = if job.status.settled() {
             job.status.clone()
         } else {
@@ -110,7 +114,8 @@ impl JobService {
         // Original status receipts are small, local writes. File transfers have
         // a separate owner and never run while this resource lock is held.
         let terminal = status.state.terminal();
-        let execution_evidence = if terminal
+        let execution_evidence = if owns
+            && terminal
             && job.execution_status_evidence_id.is_none()
             && job.notification_message_id.is_none()
         {
@@ -130,7 +135,7 @@ impl JobService {
         } else {
             job.execution_status_evidence_id.clone()
         };
-        let final_evidence = if status.settled() && job.status_evidence_id.is_none() {
+        let final_evidence = if owns && status.settled() && job.status_evidence_id.is_none() {
             Some(
                 self.store
                     .artifact(

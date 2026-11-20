@@ -16,6 +16,27 @@
 
 控制器源码按职责归组：`domain` 保存持久记录和纯规则，`queries` 保存中立读取模型，`application` 管理用例、Agent 集成和维护，`storage` 管理事务与制品，`adapters` 管理 Worker/模型提供方/文件系统接入，`interfaces` 管理 CLI、桌面和报告。`bootstrap` 装配依赖。现有公开 Rust 路径集中在 `src/lib.rs` 重导出，内部导入直接指向所属模块。runner 的私有测试与实现相邻，已安装 Worker 的 SSH 夹具位于 `src/adapters/worker/ssh/tests`。
 
+```mermaid
+flowchart TB
+    IN["接口层<br/>桌面端 · CLI · 报告"]
+    subgraph CONTROL["Rust 控制器"]
+        APP["应用层<br/>评估 · 工具 · 查询 · 维护"]
+        DOMAIN["领域层<br/>任务记录与业务规则"]
+        IO["基础设施<br/>SQLite · 证据文件 · 模型与 Worker 适配器"]
+        APP --> DOMAIN
+        APP --> IO
+    end
+    PROTO["共享 Worker 协议 v3"]
+    LINUX["Linux Worker<br/>Python RPC · 资源所有权 · 系统适配器"]
+    WIN["Windows Worker · 可丢弃 VM<br/>原生 RPC · ResourceManager · 系统适配器"]
+    IN --> APP
+    IO <--> PROTO
+    PROTO <--> LINUX
+    PROTO <--> WIN
+```
+
+应用层查询入口提供中立快照。桌面健康命令将观测交给 `application/maintenance/updates/health`，Windows 安装页面通过 `application/windows_worker_setup/inventory` 读取清单。`interfaces/report/bundle` 管理导出报告的文件清单和离线完整性校验。
+
 公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v3。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。
 
 控制器连接、配置、身份及租约位于 `src/adapters/worker` 与 `src/adapters/environments`；`ToolContext` 将已绑定 Worker 传给文件、作业、会话和验证用例。`WorkerGateway` 保留稳定请求 ID 及未改写的 Worker 回执，由相应用例将资源 ID 转成控制器归属记录。`src/application/effects` 和 `src/storage` 保存业务收据、证据及通知，Worker 执行账本另行记录外部副作用。重复的会话启动回执不能重新打开控制器已关闭的会话，也不能抹掉其 transcript。
@@ -70,7 +91,7 @@ Windows 的执行管理入口只有原生 Worker。控制器负责业务任务�
 
 agent 状态包括 queued、running、waiting、budget_paused、completed、stopped、crashed、failed。完成/停止事件通知父任务。预算暂停保留检查点，恢复后继续调度。
 
-活动任务内，通过 `follow_up_agent`（CLI `message --kind follow_up`）向 completed 子 agent 追加任务会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。
+活动任务内，通过 `follow_up_agent`（桌面“安排后续任务”）向 completed 子 agent 追加任务会保留其历史和累计用量，并开始新的 generation；工具调用与完成通知按 generation 区分。父任务已完成时一并唤醒，已停止或失败的分支需新建任务。显式前驱依赖与父子完成依赖合并检查，拒绝祖先依赖及间接循环。
 
 子 agent 完成前须关闭自己持有的调试和交互会话，根任务完成前须处理全部会话。停止或失败的 owner 遗留会话可以由同任务的其他子 agent 关闭；该权限不允许发送调试命令或交互输入。
 
@@ -82,7 +103,7 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 `RunSupervisor` 独立管理控制端租约、时间预算和后台 worker 观察，Rig 帧不等待 worker RPC。租约带持久化递增版本；运行中的 runner、coordinator 和工具共享带该版本的存储句柄，每次业务写事务在提交修改前验证 owner、版本和有效期。租约失效后旧控制端停止执行，其迟到结果不能覆盖接管者。监督任务随运行结束或取消清理，释放租约时也核对版本。
 
-CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止及操作员消息。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
+桌面与 CLI 通过 `AssessmentService` 执行启动、恢复，桌面端还使用其暂停、停止及操作员消息能力。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
 
 `ToolContext` 显式装配执行、分析、协调、文档、证据及环境服务，不再解引用为 `ToolService`。目录适配器向每个处理器传入具体服务，处理器不能访问完整入口对象。目录继续管理 schema、注册、权限和恢复策略，Rig 保留通用调度职责。`FilesService`、`JobService` 和 `SessionsService` 负责 worker 用例；`WorkerGateway` 集中管理传输与稳定回执。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。
 
@@ -104,9 +125,9 @@ CLI 和 GUI 通过 `AssessmentService` 执行启动、恢复、暂停、停止�
 
 共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置，不经过模型摘要。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
-`src/application/tools/catalog.rs` 统一定义工具 schema、角色边界和后端要求。每次模型请求前，环境预检将实际能力与任务授权及持久化的可选分组选择取交集；root 保持延迟连接。`tool_catalog` 报告可用性，`tool_select` 只改变工具展示，不授予权限。核心和资源生命周期工具始终可见；配置的 MCP 工具需选择 external 分组。Rig 只向模型暴露 `task`；消息与等待使用 `send_message_to_agent` 和 `wait_for_agents`。root 通过 `finish_scan`、子任务通过 `agent_finish` 完成，两者都只接受一个结构化 result。调用时再次校验角色、授权、目标身份、证据、资源归属和后端能力。只有 verifier 可以认证独立分析或影响。通过 `wukong tool-catalog` 生成[工具目录](../reference/tool-catalog.zh-CN.md)，`wukong --json tool-catalog` 导出 schema。
+`src/application/tools/catalog.rs` 统一定义工具 schema、角色边界和后端要求。每次模型请求前，环境预检将实际能力与任务授权及持久化的可选分组选择取交集；root 保持延迟连接。`tool_catalog` 报告可用性，`tool_select` 只改变工具展示，不授予权限。核心和资源生命周期工具始终可见；配置的 MCP 工具需选择 external 分组。Rig 只向模型暴露 `task`；消息与等待使用 `send_message_to_agent` 和 `wait_for_agents`。root 通过 `finish_scan`、子任务通过 `agent_finish` 完成，两者都只接受一个结构化 result。调用时再次校验角色、授权、目标身份、证据、资源归属和后端能力。只有 verifier 可以认证独立分析或影响。通过仅供开发使用的 `cargo run --example export_catalogs -- tool-catalog` 生成[工具目录](../reference/tool-catalog.zh-CN.md)，`--json` 导出 schema。
 
-内置方法的来源、相关工具和机制夹具由 `prompts/coverage.json` 关联到现有 `SkillManifest`，通过 `wukong skill-catalog` 生成[覆盖清单](../reference/skill-coverage.zh-CN.md)。这些维护信息不改变角色权限、工具可用性或完成门槛。
+内置方法的来源、相关工具和机制夹具由 `prompts/coverage.json` 关联到现有 `SkillManifest`，通过仅供开发使用的 `cargo run --example export_catalogs -- skill-catalog` 生成[覆盖清单](../reference/skill-coverage.zh-CN.md)。这些维护信息不改变角色权限、工具可用性或完成门槛。
 
 Python worker 的入口、传输、操作账本、任务管理、独立监督、调试、交互、文件和命令执行由独立组件负责。`Runtime` 仅装配和路由，操作账本通过回调执行及核对会话存活，不依赖具体运行时。
 
@@ -122,7 +143,7 @@ Python worker 的入口、传输、操作账本、任务管理、独立监督、
 
 `queries` 包含中立读取模型、增量游标状态和工作区快照输入。`application/queries` 管理持有 Store 的 `AssessmentQueries`、`FindingQueries` 和 `ReportQueries` 查询入口。SQL 实现位于 `storage/queries/workspace_delta` 与 `storage/queries/report`；CLI 与 GUI 共用查询模型，聊天解析和布局缓存只保留在 GUI 适配层。
 
-`storage/queries/workspace_snapshot` 在同一 SQL 事务读取任务/Agent 摘要、调用、后台任务、事件和公开回复。事务结束后，`interfaces/desktop/workspace` 将这份固定快照转换为对话和活动工具 DTO，不额外查询或调用 Worker RPC；存储层不导入桌面展示模块。响应修订签名结合 epoch、`entity_revisions`、事件序号、查询范围和操作员消息；未变化时不重复发送工作区数据，也能观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。前端 `useWorkspace` 丢弃旧请求结果，切换任务或存储目录后重新读取。
+桌面通过 `AssessmentQueries::workspace_snapshot` 请求工作区快照。存储层在同一 SQL 事务读取任务/Agent 摘要、调用、后台任务、事件和公开回复。事务结束后，`interfaces/desktop/workspace` 将这份固定快照转换为对话和活动工具 DTO，不额外查询或调用 Worker RPC。响应修订签名结合 epoch、`entity_revisions`、事件序号、查询范围和操作员消息；未变化时不重复发送工作区数据，也能观察独立 CLI 进程的修改。活动历史默认保留最新 500 条，可按需扩展到 10000 条，工具调用仅加载活动窗口引用的记录。前端 `useWorkspace` 丢弃旧请求结果，切换任务或存储目录后重新读取。
 
 业务写入通过 `StateSession` 事务会话提交，业务层不接收 SQLite 连接。`StoredRecord` 在存储实现中绑定实体类型、存储位置、身份和会话读取策略；业务使用 `load`、`records`、`save_record`，文档及会话使用有类型的类别接口，任务结果归档也通过具体业务方法完成。消息替换、旧 generation 消息归档和未读计数封装在存储实现内；所有回执与业务更新共享同一次租约校验和 IMMEDIATE 事务。
 
@@ -164,7 +185,7 @@ Ghidra 使用真实 headless 导入、自动分析与 Java bridge。functions �
 
 消息携带 kind、correlation/reply ID、收发 generation、当前任务身份和证据引用。send_message_to_agent 默认 information：不重开任务、不打断等待。question、reply、result、blocked 可唤醒等待者但不清除等待条件。只有显式 follow_up_agent 重开已完成任务。
 
-queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 5，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。CLI/GUI 默认 information，显式 follow-up 才重开。
+queued 表示持久入队；included 表示进入原生会话/上下文及日志，不表示模型已执行或处理。replied 表示显式关联回复，不判断正确性。旧代次回复保留为 stale，不注入当前工作。message_status 展示状态；在途请求保留原邮箱快照。此增量使用新 schema 5，不迁移旧数据库。已完成任务遗留 information 在新代次开始时变 stale。桌面操作员输入默认 information，显式 follow-up 才重开。
 
 原生 message 向可达活动 Agent 发请求或回复。信息/关联邮件使用类型化 send_message_to_agent，完成后的新工作用 follow_up_agent。原生等待投递与类型化回执一起投影；included 不证明模型已处理或回答。
 

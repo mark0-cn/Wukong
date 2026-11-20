@@ -10,60 +10,64 @@
       "zh-CN": "d1df1e41e1b87b740712d33a98edb92a2bc1bb246de619d912966b510c8ca622"
     },
     "README.md": {
-      "en": "d77b454b37bfab80fdbec80b9927ac81eefba878d25667e3d4773c0b82ba5baa",
-      "zh-CN": "c7347269092896acf0a14bf5ec23ed7a4082e233587c83df2d8689af14ee129b"
+      "en": "25b40d1412fcc85f6bc27939388fe167877e037df5019125fd5c81886de2df26",
+      "zh-CN": "b013f93ed0f491692066a7e91f887adf97d239912fb993c421ff07c7a90a1d5a"
     },
     "docs/README.md": {
-      "en": "4a3e81ec55758eca24625918a8e33351ad2dac8f0b117d867c2a10dc11bf07ab",
-      "zh-CN": "f3d70c02fab4d30f2b1ea9141eaf5ce0a02f053413629cf70d84e0af3ab7c9e4"
+      "en": "22e6a41430f5fc21a5c9b0ced4666abf5192206673e2e29ca761ec9f7f83b306",
+      "zh-CN": "93b889c62e96d46fe75562f1a939200dc1ebf76fa13da777f1487a9b5838e497"
     },
     "docs/design/architecture.md": {
-      "en": "a4d39b49f32e9375d2c80f9dd0095bf5a847bcf376c4270b69a1e18d96c71b83",
-      "zh-CN": "49cdf25f123f1f775162f9b7349891b9d57f9d1dce4e0ec29d6f400970507088"
+      "en": "be42224d63aa2c2825e6922a18346135c938933d58746d6c8b34dc0c08be4e61",
+      "zh-CN": "99024c6779b4eb2c258fcb6bc1bb7ff6acd57451847d164be5deb80347ab1db6"
     },
     "docs/design/cross-platform-environments.md": {
-      "en": "05d2b32a6adfbdccfe7d50c11a995dac78af519797af5eeb443f43a5a1bd525e",
-      "zh-CN": "03214c38f5332792b83c14d7ff2bd6682ff9401f4a5f89afcf5c2c0b2d32e7ac"
+      "en": "fb47db688581ad5412b88ad75f84dfea0bed388e0c46edef4aa670735ab9aff2",
+      "zh-CN": "1c0a2e131276d298519b0f37ea1a77622e4bd4c58f3b2c6526d521239da2a55d"
     },
     "docs/design/implementation-contract.md": {
       "en": "579c18b2a2fe5944c829359f89e0a7c3b143555666f2c15ed5c1d710f1f8b94c",
       "zh-CN": "99de4fb39618f470be7eb5adc193c69ae9761d359dce89bce9dae569d24f4343"
     },
     "docs/design/windows-lab.md": {
-      "en": "771a0b77318d32d9d3bbd932f5ba70c556ee23df9d7c6c132ca9ad6d58f90e5d",
-      "zh-CN": "bf0bff9edfd642db31a6ef5a43fdecb48ec2c64347168baec640222a7e5c20f9"
+      "en": "c1e6b1f39eb56c724a0be005cfc9c0f4938c75d1cf786aa45efea2ff4201c6fc",
+      "zh-CN": "f3662fced2a294d6d824053724666d407e49aac81e5e4d0676889c873380eefe"
     },
     "docs/development/commits.md": {
       "en": "328bb6704645a84d522c3b2a6a122d0c7c580287ec5321f7e70b5b3aadf52bf5",
       "zh-CN": "be05ebe96a7f402f2d80df9f47292d1a216e6ae8ec39a4ffec52877a94323700"
     },
     "docs/development/desktop-updates.md": {
-      "en": "439da589c889954afb9a36f9dc6c11ad9d16564e538ec80dc9a1871bdaa091a9",
-      "zh-CN": "8eb152cb42c9b38efd81cef1fa37abe378ce643f15ef77a4ce33817d2c313703"
+      "en": "48eb8ae5c35cfe2e014cef72e3982723904768ea6fc357b4d60a074b3868da1a",
+      "zh-CN": "24d92643b1c2c37ba6cb5c8c369aad0475aee0c17c533a50e0a26f18e4d61b08"
     },
     "docs/development/documentation.md": {
-      "en": "1c5a885e9fb60e19bc18e1b0d22367c2fc46d3d9a033e93670bb74873371c2a9",
-      "zh-CN": "2049a12c1f96e354f7f064a5fbbf79822af5e20f868da9da31308e9b4d0c90b6"
+      "en": "3cd9dbff5f96ff2dd52e709e3d8329a4c518caebb88ecd55982da1bcb7d1aa95",
+      "zh-CN": "3da10d659cf28810d091921e18f8a5a99ed988c623a60a673c6cc859bb6e64aa"
     },
     "docs/development/getting-started.md": {
       "en": "3235cf6c98808c6061eb434f0e46b130271476f3288ba39c7595ab22e3b631f8",
       "zh-CN": "72fe258e53653c22a828ec69900ac35d934de2e2f876d8229ae871f2846cfc38"
     },
     "docs/development/github-maintenance.md": {
-      "en": "eddd0fd0ae5d6fb6a94f4955ed3fbb54a4ea3da46410800d03051c83820938f9",
-      "zh-CN": "85639e26609e196d724a8f9995eccd97779d6c5ef134c0c2d302d05a46979f3f"
+      "en": "b5565a1185e3ee2a250a9b70f71bfd00442dbbbb6f3bd76d3ce9bd68daed2a45",
+      "zh-CN": "92294cbcdd34411231b5b93bfbe66a2c81d16dabce764b90d11d29afcf9d48be"
+    },
+    "docs/development/local-builds.md": {
+      "en": "98d3084c69264b2db0ffbac08192aab04d67346fe3371e4bf1e9543865ed6ef9",
+      "zh-CN": "de98bfeca7c05db19d1729098b33649e64ec48f7f86503f25c33781291b36b22"
     },
     "docs/development/localization.md": {
       "en": "c4c4556a74b2c895f9378d202e139da062fa1a86507b81554eb1132d22b3e472",
       "zh-CN": "fec3b5ffa7799de2a5c11f04e345a83f9e28f009d69f74804eb6b210a505e98e"
     },
     "docs/development/maintenance.md": {
-      "en": "abc04d6290d5dad9b9cde90eb4c71af2185636c026b6f40517306df5175dccf7",
-      "zh-CN": "6082b7528023d0f663591ae012278184db9fa7a5c298e151cf5443b379675e49"
+      "en": "9d4b7eeb648ee9e2aa5e2313c048db955a5663c82847f189b4d06a4f48b7a56b",
+      "zh-CN": "304e6ace61a6e9632785ad7efbcfaf86b395d9a8d8cf8d9d73f1cb98d463eb73"
     },
     "docs/development/releases.md": {
-      "en": "dac0dd35da874f75c80bda7df2863abf61d3e378e86fc0e30e67b6aa4a4d8f44",
-      "zh-CN": "72d2f15a219acd20e33ebd816c8d4b373f22fb0365ecefb9d4717541c0b81c15"
+      "en": "eb4bf890df766e529f7cea76df841dcf33538055e13374403adccfbb67be261a",
+      "zh-CN": "88a86f4e3edcfacf7424e039e4d87377355eae3b3d9638066b8e46d19ba33842"
     },
     "docs/history/README.md": {
       "en": "dc9906830ecbb0c106b647ef4513032bef03e89f8dc0daa3eddc1e4762299500",
@@ -106,20 +110,20 @@
       "zh-CN": "b911263c1fdd3314d409f6b34623a181f6104eb85a5fec36eb12c60616958c19"
     },
     "docs/reference/report-format.md": {
-      "en": "02d16ba3826d78e0b10632f7451639699528d12ba72d30245c3855fbf70872fd",
-      "zh-CN": "23406501c7614bdcd665a1a5d95b420d5b0054c574820a174bd197bcfca2ad88"
+      "en": "e6e57ddd43c3efbd58052c6a2a6653b1753b6c559c7a020fdb3c3b9c6207d04e",
+      "zh-CN": "860e86de1dd7f1ec6e79d473cb58a0af81e98b19f8c0501d5a794e4078f47caf"
     },
     "docs/reference/skill-coverage.md": {
-      "en": "ffdcd9ef7c681550cdc36e100b25274b73aa761be50ac02b2b1bdfa01a083f73",
-      "zh-CN": "1edce24e862bbc1c082016383088c2703f2548180d9886c731594b0f71ab6e18"
+      "en": "dbe7107e31c32be695703bf9888fa7dce390fbd71687fdc5191489741078c683",
+      "zh-CN": "3f367c932c249f99948d96351774e84c8d904f1b5262976aaa11c9486e9e4e43"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "7676f45560d780feab7fab7983c40ab2c8380add311d47a3ceb53dc1a0d0c111",
-      "zh-CN": "3d21d8a96ae6c1f5d0c4b2855257a4eef6a4f00b13bb4b4bbac9c4888269175f"
+      "en": "b567961887be040c2cff769c3b0ad5ae9a8de6322d4fcf8255425cb1c514503c",
+      "zh-CN": "b2a62ceb80106b4707d4159f9e09031ebf9d33d31505761a84861ba60ce4fbf8"
     },
     "docs/user/languages.md": {
-      "en": "93c350998c8d47914eda2a86d0f1988d70772ec10c6dba27aee242d103a2e683",
-      "zh-CN": "7065aba25b92383295d5a7c7d21cb0b7ea70885614959fb196e65d4b266beb29"
+      "en": "86aee34cae2199a005e6e552158cb4f42db3e2168662c6f8acd17713898931db",
+      "zh-CN": "fc9a780fc71d1c0df7d92048951e1e66705ba1410f7c6547cb9c347ed1de73d8"
     },
     "docs/user/online-install.md": {
       "en": "bc29afadfcbb3c42342291379f514b3ddc20ccff2d14a9052666604354d6f453",
@@ -130,8 +134,12 @@
       "zh-CN": "11b6e828ccc1953a223f868a234c45ea53abed0a94d3b3602866035e5b1fd483"
     },
     "docs/user/usage.md": {
-      "en": "3e077da39f5c574ea76b1d8a405417d89329c63dec133403617849ee911095dc",
-      "zh-CN": "536fa3ec0a04974249212c1412ba1837de164475b5171f10032ff2c19d5f9efe"
+      "en": "164a3c84de31a3321e8bf8db7c9b800d22e052eaae1382a4946f07e465dee0d7",
+      "zh-CN": "eaab685f563521608f38061dba0139f67778d57073f5b069e8bd9bca0620f09f"
+    },
+    "docs/user/windows-worker.md": {
+      "en": "18bff91a8e1c4401d345522fcc1c39c89274512ce9b93e7e0605a51b591a2453",
+      "zh-CN": "d10f6a448e94bb2667054e0739a78582b5585aa5f42414a2e1378b28ecc33f34"
     },
     "evals/README.md": {
       "en": "8fb115c1b503627b087374bb0a3b254a140e6094baa6df91452a763a761b78ed",
@@ -166,8 +174,8 @@
       "zh-CN": "70055ee918963c9690157f1d8820122f3e3a8cc8683375b1a34cdb2ae28cd4b4"
     },
     "workers/package/README.md": {
-      "en": "6580d74064fc3d5537c17a346ee3cdb3d90761ba8eaf2e13b6b3aa217b0696cd",
-      "zh-CN": "9a306808567be1f7e30abcd0246fe5e0945c6bff5de272b7f719c3e78c7e8b93"
+      "en": "532b65557b48f7c91633e504cead6a851d1fa625a238b8f9ec5f354cb5b8ef6b",
+      "zh-CN": "9a5f15efdc811120faa3172cf3eefa761f71b18661f7bf7d39efe57ed67d113e"
     },
     "workers/protocol/README.md": {
       "en": "ae0abade86e434f072eabcb12f5bf14232dc81032bc8f7107bd1bbae9e922091",
@@ -182,8 +190,8 @@
       "zh-CN": "dc5c89b8cc73bb1f734fde41a6e9fa61a9a82a8d817fb1048bd2c259641ea831"
     },
     "workers/windows/README.md": {
-      "en": "3f43285d0a5e373643a2b744452db85264e696840d532a8c350f44757a17ab34",
-      "zh-CN": "171749316074273d66e3bad3e89b59a7f02642904058440a733af2d60c72c559"
+      "en": "94be828fe965a0e2b871dcaf221b3f6b1a211fd6c30b186e3d24de618189b680",
+      "zh-CN": "1cf620f3527ec1361947df0bba806c0c772505bea8e286cc028bde41a7ad7f5b"
     },
     "workers/windows/VALIDATION-HISTORY.md": {
       "en": "0d0397e04441b89da389edcc895fb469ebce0fdea4521dea4315f2fd7d863772",

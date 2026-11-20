@@ -15,6 +15,57 @@ pub struct Artifact {
     pub sha256: String,
     pub size: u64,
 }
+/// Optional offline Windows worker media template published beside one release.
+///
+/// The desktop downloads this prebuilt template, verifies it against the signed
+/// catalog and then seals it locally for a specific installation. Older releases
+/// (and rehearsals without a staged template) omit the entry entirely.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WorkerMedia {
+    /// Release version that built the template; must equal the catalog version.
+    pub version: String,
+    /// Pinned release asset name, the last path segment of `url`.
+    pub name: String,
+    pub size: u64,
+    pub sha256: String,
+    /// Version-pinned immutable release asset URL.
+    pub url: String,
+}
+impl WorkerMedia {
+    /// Validate the optional template entry against the signed catalog version
+    /// and the release asset URL rules. The controller-version check belongs to
+    /// the downloader: an update check may legitimately see a newer catalog.
+    pub fn validate(&self, manifest_version: &str) -> Result<()> {
+        ensure!(
+            self.version == manifest_version,
+            "worker media template version differs from the release"
+        );
+        let prefix = format!("{RELEASES}/download/v{manifest_version}/");
+        ensure!(
+            self.url.strip_prefix(&prefix) == Some(self.name.as_str()),
+            "worker media template must be this release's pinned asset"
+        );
+        ensure!(
+            self.name.ends_with(".zip")
+                && self.name.len() <= 128
+                && self
+                    .name
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c)),
+            "invalid worker media template asset name"
+        );
+        let hex_sha256 = self.sha256.len() == 64
+            && self
+                .sha256
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c));
+        ensure!(
+            hex_sha256 && self.size > 0 && self.size <= 8 * 1024 * 1024 * 1024,
+            "invalid worker media template size or checksum"
+        );
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Manifest {
     pub schema: u32,
@@ -27,6 +78,9 @@ pub struct Manifest {
     pub image_size: u64,
     pub source_revision: String,
     pub platforms: BTreeMap<String, Artifact>,
+    /// Optional prebuilt offline Windows worker media template for this version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_media: Option<WorkerMedia>,
 }
 
 pub fn target() -> Result<&'static str> {
@@ -123,6 +177,9 @@ impl Manifest {
             );
             ensure!(!artifact.signature.is_empty(), "unsigned artifact");
         }
+        if let Some(media) = &self.worker_media {
+            media.validate(&self.version)?;
+        }
         Ok(())
     }
     pub fn artifact(&self) -> Result<&Artifact> {
@@ -195,6 +252,52 @@ mod tests {
     fn unsigned_metadata_is_rejected() {
         assert!(Manifest::parse(b"{}", "").is_err());
         assert!(verify(b"changed", "not-a-signature").is_err());
+    }
+    #[test]
+    fn optional_worker_media_must_be_the_pinned_asset_of_this_release() -> Result<()> {
+        let media = |version: &str, name: &str, size: u64, sha256: &str, url: &str| WorkerMedia {
+            version: version.into(),
+            name: name.into(),
+            size,
+            sha256: sha256.into(),
+            url: url.into(),
+        };
+        let name = "wukong-windows-worker-media-1.0.0.zip";
+        let url = format!("{RELEASES}/download/v1.0.0/{name}");
+        let valid = media("1.0.0", name, 1024, &"a".repeat(64), &url);
+        valid.validate("1.0.0")?;
+        assert!(
+            media("0.9.0", name, 1024, &"a".repeat(64), &url)
+                .validate("1.0.0")
+                .is_err()
+        );
+        assert!(
+            media(
+                "1.0.0",
+                name,
+                1024,
+                &"a".repeat(64),
+                "https://example.com/x.zip"
+            )
+            .validate("1.0.0")
+            .is_err()
+        );
+        assert!(
+            media("1.0.0", name, 0, &"a".repeat(64), &url)
+                .validate("1.0.0")
+                .is_err()
+        );
+        assert!(
+            media("1.0.0", name, 1024, "not-a-hash", &url)
+                .validate("1.0.0")
+                .is_err()
+        );
+        assert!(
+            media("1.0.0", "other.zip", 1024, &"a".repeat(64), &url)
+                .validate("1.0.0")
+                .is_err()
+        );
+        Ok(())
     }
     #[test]
     fn real_signature_rejects_modified_content_and_wrong_key() -> Result<()> {

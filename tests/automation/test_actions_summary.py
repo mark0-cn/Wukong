@@ -28,6 +28,7 @@ class SummaryTests(unittest.TestCase):
                 "linux-client",
                 "image",
                 "acceptance",
+                "windows-worker",
                 "package",
             )
         }

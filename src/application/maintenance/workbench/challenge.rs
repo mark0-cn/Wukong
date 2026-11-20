@@ -1,12 +1,12 @@
 use super::*;
 use std::collections::BTreeMap;
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct Target {
     pub binary: Option<String>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ChallengeRuntime {
     pub kind: String,
@@ -34,7 +34,7 @@ impl Default for ChallengeRuntime {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Launch {
     pub argv: Vec<String>,
@@ -54,7 +54,7 @@ impl Default for Launch {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Network {
     pub mode: String,
@@ -70,7 +70,7 @@ impl Default for Network {
         }
     }
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Challenge {
     pub schema_version: u32,
@@ -301,7 +301,9 @@ impl Workbench {
             !source.starts_with(&self.root) && !self.root.starts_with(&source),
             "import source and workbench must not contain one another"
         );
-        let parent = destination.parent().unwrap();
+        let parent = destination
+            .parent()
+            .context("challenge destination needs a parent directory")?;
         fs::create_dir_all(parent)?;
         let temporary = tempfile::tempdir_in(parent)?;
         let root = temporary.path();
@@ -337,9 +339,12 @@ impl Workbench {
             challenge.target.binary = Some(format!("original/{binary}"));
         }
         let files = inventory(&original)?;
+        let entries = files
+            .as_object()
+            .context("bundle inventory is not an object")?;
         if challenge.target.binary.is_none() {
             let mut candidates = vec![];
-            for (path, _) in files.as_object().unwrap() {
+            for (path, _) in entries {
                 if path.contains("libc")
                     || path.split('/').next_back().unwrap_or("").starts_with("ld-")
                 {
@@ -372,9 +377,7 @@ impl Workbench {
             challenge.runtime.libc = Some("original/libc.so.6".into());
         }
         if challenge.runtime.loader.is_none() {
-            let candidates: Vec<_> = files
-                .as_object()
-                .unwrap()
+            let candidates: Vec<_> = entries
                 .keys()
                 .filter(|p| p.split('/').next_back().unwrap_or("").starts_with("ld-"))
                 .collect();

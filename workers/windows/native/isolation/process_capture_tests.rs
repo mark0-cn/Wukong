@@ -187,6 +187,8 @@ fn leader_exit_does_not_leave_a_descendant_holding_an_output_pipe() -> Result<()
     }
     let pid = std::fs::read_to_string(root.path().join("leaf.pid"))?.parse()?;
     use windows_sys::Win32::System::Threading::*;
+    // SAFETY: `pid` was published by our own fixture descendant (still sleeping), so it names a
+    // live process we own; the result is null-checked below and `security::Handle` closes it.
     let handle = crate::isolation::security::Handle(unsafe {
         OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | 0x100000, 0, pid)
     });
@@ -200,6 +202,8 @@ fn leader_exit_does_not_leave_a_descendant_holding_an_output_pipe() -> Result<()
     assert_eq!(result.exit_code, 0);
     assert!(started.elapsed() < Duration::from_secs(5));
     assert_eq!(
+        // SAFETY: `handle` is the live, non-null `security::Handle` bound above and is not dropped
+        // before this call, so its raw handle stays valid for the wait.
         unsafe { WaitForSingleObject(handle.0, 1000) },
         windows_sys::Win32::Foundation::WAIT_OBJECT_0
     );

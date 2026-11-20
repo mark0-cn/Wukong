@@ -1,7 +1,7 @@
 //! Desktop update orchestration. Network preparation never switches the live worker.
 use super::service::Service;
 use crate::application::maintenance::updates::{
-    environment, maintenance,
+    OnboardingRelease, environment, health, maintenance,
     manifest::{self, Manifest},
     recovery,
 };
@@ -44,7 +44,10 @@ pub struct Status {
         Option<crate::application::maintenance::workbench::pull_progress::PullProgress>,
     pub image_version: Option<String>,
     pub pending: bool,
-    pub health: super::update_health::Health,
+    /// True for `cargo package-local` builds; the UI may later show a local/dev
+    /// marker. Environment onboarding then uses the bundled local descriptor.
+    pub local_build: bool,
+    pub health: health::Health,
 }
 pub struct Controller {
     status: Mutex<Status>,
@@ -93,6 +96,7 @@ impl Default for Controller {
             status: Mutex::new(Status {
                 version: env!("CARGO_PKG_VERSION").into(),
                 phase: "idle".into(),
+                local_build: cfg!(feature = "local-release"),
                 ..Default::default()
             }),
             operation: tokio::sync::Mutex::new(()),
@@ -143,7 +147,11 @@ impl Controller {
         }
     }
     fn edit(&self) -> StatusEdit<'_> {
-        StatusEdit(self.status.lock().unwrap())
+        StatusEdit(
+            self.status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
     fn begin(&self, action: Option<Action>) {
         let mut state = self.edit();
@@ -205,7 +213,7 @@ impl Controller {
             result = future => result,
         }
     }
-    fn observe_tool_action(&self, snapshot: super::update_health::Health) {
+    fn observe_tool_action(&self, snapshot: health::Health) {
         let mut state = self.edit();
         state.needs_setup = !snapshot.configured;
         state.diagnosis = snapshot
@@ -216,7 +224,10 @@ impl Controller {
     }
 
     pub fn status(&self) -> Status {
-        self.status.lock().unwrap().clone()
+        self.status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn initialization(&self, config: &AppConfig) {
@@ -283,11 +294,14 @@ impl Controller {
     async fn download(&self, manifest: &Manifest) -> Result<()> {
         let artifact = manifest.artifact()?;
         let path = recovery::payload(manifest)?;
+        let parent = path
+            .parent()
+            .context("cached artifact path needs a parent directory")?;
         if path.exists() && manifest::verify_file(&path, artifact).is_ok() {
             return Ok(());
         }
         ensure!(
-            fs2::available_space(path.parent().unwrap())? > artifact.size * 3 + 512 * 1024 * 1024,
+            fs2::available_space(parent)? > artifact.size * 3 + 512 * 1024 * 1024,
             UiMessage::new("system-insufficient-space-on-the-client-disk")
         );
         self.phase(
@@ -303,7 +317,7 @@ impl Controller {
             .cancellable(async { Ok(client.get(&artifact.url).send().await?) })
             .await?
             .error_for_status()?;
-        let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
         let mut downloaded = 0;
         use std::io::Write;
         while let Some(chunk) = self
@@ -407,7 +421,7 @@ impl Controller {
             let current_epoch = service.status().epoch;
             let (config, _, _operation) = service.maintenance_context(current_epoch)?;
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check_workbench(&config, false, current_epoch)
+                health::check_workbench(&config, health::HealthScope::Quick, current_epoch)
             })
             .await??;
             self.observe_tool_action(snapshot);
@@ -418,7 +432,15 @@ impl Controller {
         if matches!(action, Action::Health | Action::Doctor) {
             self.phase("health", UiMessage::new("system-checking-tool-health"));
             let snapshot = tokio::task::spawn_blocking(move || {
-                super::update_health::check(&config, matches!(action, Action::Doctor), epoch)
+                health::check(
+                    &config,
+                    if matches!(action, Action::Doctor) {
+                        health::HealthScope::Full
+                    } else {
+                        health::HealthScope::Quick
+                    },
+                    epoch,
+                )
             })
             .await??;
             self.edit().diagnosis = snapshot
@@ -431,13 +453,21 @@ impl Controller {
         }
 
         if matches!(action, Action::Integrate) {
-            let path = recovery::integrate_linux()?;
-            std::process::Command::new(path).spawn()?;
+            // The installer handoff is process and filesystem work; keep it off
+            // the async worker like the neighbouring phases do.
+            tokio::task::spawn_blocking(|| -> Result<()> {
+                let path = recovery::integrate_linux()?;
+                std::process::Command::new(path).spawn()?;
+                Ok(())
+            })
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|result| result)?;
             app.exit(0);
             return Ok(());
         }
         if matches!(action, Action::CleanCache | Action::CleanImages) {
-            let _lock = maintenance::lock(&recovery::root()?, true)?;
+            let _lock = maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
             ensure!(
                 recovery::pending()?.is_none(),
                 UiMessage::new("system-finish-or-recover-the-pending-update-first")
@@ -466,52 +496,22 @@ impl Controller {
             );
             let directory =
                 crate::application::maintenance::updates::storage::cache_root()?.join("releases");
-            if directory.exists() {
-                for entry in std::fs::read_dir(&directory)? {
-                    let entry = entry?;
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if !entry.file_type()?.is_dir()
-                        || semver::Version::parse(&name).is_err()
-                        || name == env!("CARGO_PKG_VERSION")
-                        || prepared.as_ref() == Some(&name)
-                        || previous.as_ref().is_some_and(|p| p.from == name)
-                    {
-                        continue;
-                    }
-                    let path = std::fs::canonicalize(entry.path())?;
-                    ensure!(
-                        path.starts_with(std::fs::canonicalize(&directory)?),
-                        "cache path escaped its directory"
-                    );
-                    let manifest = recovery::cached(&name)?;
-                    if matches!(action, Action::CleanImages) {
-                        if protected_images.contains(&manifest.image) {
-                            continue;
-                        }
-                        if docker.inspect("image", &manifest.image)?.is_some()
-                            && docker
-                                .run(&[
-                                    "ps",
-                                    "-aq",
-                                    "--filter",
-                                    &format!("ancestor={}", manifest.image),
-                                ])?
-                                .is_empty()
-                        {
-                            docker.run(&["image", "rm", &manifest.image])?;
-                        }
-                    } else {
-                        let payload = recovery::payload(&manifest)?;
-                        if payload.exists() {
-                            ensure!(
-                                std::fs::canonicalize(&payload)?.parent() == Some(path.as_path()),
-                                "payload escaped cache directory"
-                            );
-                            std::fs::remove_file(payload)?;
-                        }
-                    }
-                }
-            }
+            // Walking the cache directory and driving the Docker CLI blocks for
+            // seconds; keep it off the async worker like the neighbouring phases.
+            let clean_images = matches!(action, Action::CleanImages);
+            tokio::task::spawn_blocking(move || {
+                clean_cached_releases(
+                    &directory,
+                    clean_images,
+                    &prepared,
+                    &previous,
+                    &protected_images,
+                    &docker,
+                )
+            })
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|result| result)?;
             self.phase(
                 "idle",
                 UiMessage::new(
@@ -554,7 +554,7 @@ impl Controller {
                 manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?,
                 UiMessage::new("system-this-is-not-a-newer-version")
             );
-            let _lock = maintenance::lock(&recovery::root()?, true)?;
+            let _lock = maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
             ensure!(
                 recovery::pending()?.is_none(),
                 UiMessage::new("system-an-update-already-needs-recovery")
@@ -598,6 +598,7 @@ impl Controller {
             update.install(bytes)?;
             #[cfg(not(windows))]
             app.restart();
+            #[cfg(windows)]
             return Ok(());
         }
         ensure!(
@@ -619,14 +620,11 @@ impl Controller {
                 UiMessage::new("system-preparing-update")
             },
         );
-        let manifest = self
-            .remember(if setup {
-                Some(env!("CARGO_PKG_VERSION"))
-            } else {
-                None
-            })
-            .await?;
-        if !setup {
+        let release = if setup {
+            // Onboarding only. Update checks keep resolving the online catalog.
+            self.setup_release(&config).await?
+        } else {
+            let manifest = self.remember(None).await?;
             ensure!(
                 manifest.can_upgrade(env!("CARGO_PKG_VERSION"))?,
                 UiMessage::new("system-no-newer-version-is-available-to-install")
@@ -634,16 +632,31 @@ impl Controller {
             self.download(&manifest).await?;
             let previous = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
             self.download(&previous).await?;
-        }
-        self.edit().image_version = Some(manifest.version.clone());
+            OnboardingRelease {
+                version: manifest.version,
+                image: manifest.image,
+                image_size: manifest.image_size,
+                local_build: false,
+            }
+        };
+        tracing::info!(
+            version = %release.version,
+            image = %release.image,
+            image_size = release.image_size,
+            local_build = release.local_build,
+            "resolved the onboarding tool image"
+        );
+        self.edit().image_version = Some(release.version.clone());
         let controller = self.clone();
-        let image = manifest.image.clone();
+        let image = release.image.clone();
+        let local_build = release.local_build;
         let probe_config = config.clone();
         let cancel = self.status().cancel;
         tokio::task::spawn_blocking(move || {
             environment::prepare(
                 &probe_config,
                 &image,
+                local_build,
                 cancel,
                 |log| {
                     let mut state = controller.edit();
@@ -671,9 +684,10 @@ impl Controller {
                 "activating",
                 UiMessage::new("system-activating-tool-environment"),
             );
-            let image = manifest.image;
+            let image = release.image;
             tokio::task::spawn_blocking(move || {
-                let _lock = maintenance::lock(&recovery::root()?, true)?;
+                let _lock =
+                    maintenance::lock(&recovery::root()?, maintenance::LockMode::Exclusive)?;
                 environment::activate(&config_path, &image)
             })
             .await??;
@@ -682,14 +696,14 @@ impl Controller {
                 let mut state = self.edit();
                 state.needs_setup = false;
                 // activate() has just checked the live container, tools, and saved binding.
-                state.health = super::update_health::Health::verified_now(service.status().epoch);
+                state.health = health::Health::verified_now(service.status().epoch);
             }
             self.phase(
                 "idle",
                 UiMessage::new("system-tool-environment-prepared-validation-passed"),
             );
         } else {
-            self.edit().prepared = Some(manifest.version);
+            self.edit().prepared = Some(release.version);
             self.phase(
                 "ready",
                 UiMessage::new("system-download-and-environment-checks-completed-ready-to-install"),
@@ -697,6 +711,155 @@ impl Controller {
         }
         Ok(())
     }
+
+    /// Environment identity for first-run setup.
+    ///
+    /// `local-release` builds resolve it from the bundled descriptor; a missing
+    /// local image is pulled from the version-pinned CI workbench repository
+    /// during onboarding. Every other build keeps the signed-catalog acquisition.
+    async fn setup_release(self: &Arc<Self>, _config: &AppConfig) -> Result<OnboardingRelease> {
+        #[cfg(feature = "local-release")]
+        {
+            let config = _config.clone();
+            let controller = self.clone();
+            let version = env!("CARGO_PKG_VERSION").to_string();
+            let cancel = self.status().cancel;
+            let release = tokio::task::spawn_blocking(move || {
+                controller.edit().image_version = Some(version);
+                local_setup_release(&config, cancel, |progress| {
+                    let mut state = controller.edit();
+                    state.image_progress = Some(progress);
+                    let started = state.phase != "pulling";
+                    drop(state);
+                    if started {
+                        controller.phase(
+                            "pulling",
+                            UiMessage::new(
+                                "system-pulling-the-tool-image-docker-will-reuse-downloaded",
+                            ),
+                        );
+                    }
+                })
+            })
+            .await
+            .map_err(anyhow::Error::from)??;
+            Ok(release)
+        }
+        #[cfg(not(feature = "local-release"))]
+        {
+            let manifest = self.remember(Some(env!("CARGO_PKG_VERSION"))).await?;
+            Ok(OnboardingRelease {
+                version: manifest.version,
+                image: manifest.image,
+                image_size: manifest.image_size,
+                local_build: false,
+            })
+        }
+    }
+}
+
+/// Resolve the environment of a `cargo package-local` build.
+///
+/// The bundled descriptor names a local image tag and, for packages built by the
+/// current tooling, the version-pinned CI-built workbench image. Onboarding uses
+/// the local tag when it already exists, otherwise it pulls and tags the CI image
+/// so an installer built on another machine still prepares its environment. A
+/// pull failure surfaces both the registry commands and the local build command.
+#[cfg(feature = "local-release")]
+fn local_setup_release(
+    config: &AppConfig,
+    cancel: tokio_util::sync::CancellationToken,
+    report: impl FnMut(crate::application::maintenance::workbench::pull_progress::PullProgress),
+) -> Result<OnboardingRelease> {
+    let descriptor = crate::application::maintenance::updates::local_release::read()?;
+    ensure!(
+        descriptor.version == env!("CARGO_PKG_VERSION"),
+        "local-release.json was built for client version {} but this executable is {}; rebuild this package with `cargo package-local`",
+        descriptor.version,
+        env!("CARGO_PKG_VERSION")
+    );
+    let mut docker = crate::application::maintenance::workbench::Docker::new(
+        &config.workbench.docker_executable,
+    );
+    // A multi-gigabyte pull must honor the preparation cancel action.
+    docker.cancellation = Some(cancel);
+    let image_size =
+        environment::require_or_pull_local_image_observed(&docker, &descriptor, report)?;
+    if descriptor.image_size > 0 && image_size != descriptor.image_size {
+        tracing::warn!(
+            image = %descriptor.image,
+            packaged = descriptor.image_size,
+            actual = image_size,
+            "the local-release Docker image was rebuilt after packaging; using its current size"
+        );
+    }
+    Ok(OnboardingRelease {
+        version: descriptor.version,
+        image: descriptor.image,
+        image_size,
+        local_build: true,
+    })
+}
+
+/// Delete cached releases that no pending switch, previous journal or the running
+/// build still references, and optionally the container images built from them.
+/// Runs on the blocking pool: it walks the cache directory and drives the Docker CLI.
+fn clean_cached_releases(
+    directory: &std::path::Path,
+    clean_images: bool,
+    prepared: &Option<String>,
+    previous: &Option<recovery::Journal>,
+    protected_images: &[String],
+    docker: &crate::application::maintenance::workbench::Docker,
+) -> Result<()> {
+    if !directory.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !entry.file_type()?.is_dir()
+            || semver::Version::parse(&name).is_err()
+            || name == env!("CARGO_PKG_VERSION")
+            || prepared.as_ref() == Some(&name)
+            || previous.as_ref().is_some_and(|p| p.from == name)
+        {
+            continue;
+        }
+        let path = std::fs::canonicalize(entry.path())?;
+        ensure!(
+            path.starts_with(std::fs::canonicalize(directory)?),
+            "cache path escaped its directory"
+        );
+        let manifest = recovery::cached(&name)?;
+        if clean_images {
+            if protected_images.contains(&manifest.image) {
+                continue;
+            }
+            if docker.inspect("image", &manifest.image)?.is_some()
+                && docker
+                    .run(&[
+                        "ps",
+                        "-aq",
+                        "--filter",
+                        &format!("ancestor={}", manifest.image),
+                    ])?
+                    .is_empty()
+            {
+                docker.run(&["image", "rm", &manifest.image])?;
+            }
+        } else {
+            let payload = recovery::payload(&manifest)?;
+            if payload.exists() {
+                ensure!(
+                    std::fs::canonicalize(&payload)?.parent() == Some(path.as_path()),
+                    "payload escaped cache directory"
+                );
+                std::fs::remove_file(payload)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -707,7 +870,7 @@ mod tests {
         let controller = Controller::default();
         controller.initialization(&AppConfig::default());
         assert!(controller.status().needs_setup);
-        controller.observe_tool_action(super::super::update_health::Health {
+        controller.observe_tool_action(health::Health {
             configured: true,
             running: Some(true),
             docker: Some(true),

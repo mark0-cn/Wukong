@@ -156,9 +156,29 @@ class ExecutionBoundaries(unittest.TestCase):
             "application/assessment/mod.rs",
             "application/assessment/runner.rs",
             "application/tools/mod.rs",
+            "application/tools/lab.rs",
+            "application/windows_lab/provision_service.rs",
         ]:
             source = (ROOT / "src" / name).read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\bbootstrap\s*::", name)
+
+    def test_worker_relay_adapters_keep_platform_and_rpc_responsibilities_separate(self):
+        root = ROOT / "src/adapters/worker"
+        launch = (root / "launch.rs").read_text(encoding="utf-8")
+        channel = (root / "stdio.rs").read_text(encoding="utf-8")
+        self.assertNotRegex(launch, r"\b(?:jsonrpsee_core|WorkerIdentity|EnvironmentLease)\b")
+        self.assertNotRegex(channel, r"\b(?:TransportConfig|WorkerIdentity|EnvironmentLease)\b")
+
+    def test_native_installation_does_not_depend_on_setup_ui(self):
+        root = ROOT / "workers/windows/native/host"
+        for name in [
+            "installer.rs",
+            "install_service.rs",
+            "install_ssh.rs",
+            "installation_receipt.rs",
+        ]:
+            source = (root / name).read_text(encoding="utf-8")
+            self.assertNotRegex(source, r"\b(?:setup_ui|MessageBoxW|GetSaveFileNameW)\b", name)
 
     def test_domain_depends_on_protocol_without_host_adapters(self):
         for path in (ROOT / "src/domain").rglob("*.rs"):
@@ -184,6 +204,32 @@ class ExecutionBoundaries(unittest.TestCase):
         for path in (ROOT / "src/queries").glob("*.rs"):
             source = path.read_text(encoding="utf-8")
             self.assertNotRegex(source, r"\bStore\b|\b(?:store|desktop|bootstrap)\s*::", str(path))
+
+    def test_interfaces_do_not_access_sql_query_modules(self):
+        for path in (ROOT / "src/interfaces").rglob("*.rs"):
+            self.assertNotRegex(
+                path.read_text(encoding="utf-8"),
+                r"\b(?:storage|store)\s*::\s*(?:queries\b|\{[^{}]*\bqueries\b)",
+                str(path),
+            )
+
+    def test_status_and_bundle_checks_are_independent_of_runtime_workflows(self):
+        for name, forbidden in [
+            (
+                "application/maintenance/updates/health.rs",
+                r"\b(?:tauri|interfaces)\s*::",
+            ),
+            (
+                "application/windows_worker_setup/inventory.rs",
+                r"\b(?:probe|EnvironmentRegistry|RuntimeClient|prepare_import|mark_available)\b",
+            ),
+            (
+                "interfaces/report/bundle.rs",
+                r"\b(?:Store\b|(?:domain|storage|application|queries)\s*::)",
+            ),
+        ]:
+            source = (ROOT / "src" / name).read_text(encoding="utf-8")
+            self.assertNotRegex(source, forbidden, name)
 
     def test_contract_has_no_controller_or_platform_dependencies(self):
         manifest = tomllib.loads((ROOT / "workers/protocol/Cargo.toml").read_text(encoding="utf-8"))

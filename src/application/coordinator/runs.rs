@@ -21,6 +21,14 @@ impl Coordinator {
         } else {
             bail!("target is neither a file nor a directory");
         };
+        ensure!(!task.trim().is_empty(), "task must not be empty");
+        if let Some(environment) = config["default_environment"].as_str() {
+            crate::adapters::environments::validate_id(environment)?;
+            ensure!(
+                config["environments"].get(environment).is_some(),
+                "environment is outside this assessment's registered environments: {environment}"
+            );
+        }
         let run_id = id("run");
         let root_id = id("agent");
         let timestamp = now();
@@ -79,6 +87,7 @@ impl Coordinator {
                     .then(|| run.budget.role_token_cap(Role::Root)), // root is governed by the run budget alone unless an explicit root share is configured
                 summary: None,
                 error: None,
+                failure_cause: None,
                 created_at: timestamp,
                 updated_at: timestamp,
             },
@@ -90,7 +99,7 @@ impl Coordinator {
             tx.save_record(&root.metadata)?;
             tx.event(
                 &run.id,
-                Some(&root.id),
+                Some(&root.metadata.id),
                 "run.created",
                 json!({"target_sha256":run.target_sha256,"bundle_sha256":run.bundle.as_ref().map(|bundle| &bundle.bundle_sha256),"task":task}),
             )?;
@@ -176,7 +185,13 @@ impl Coordinator {
                     // Role caps follow the run budget: a resumed run with an
                     // enlarged budget rescales every surviving worker's quota.
                     // The root is governed by the run budget alone.
-                    a.token_cap = Some(run.budget.role_token_cap(a.role));
+                    // A follow-up grants headroom on top of what the agent spent;
+                    // resetting to the bare role slice would re-exhaust it on the next
+                    // request after every controller restart.
+                    a.token_cap = Some(
+                        a.total_tokens
+                            .saturating_add(run.budget.role_token_cap(a.role)),
+                    );
                     changed = true;
                 }
                 if matches!(a.status, Status::Running | Status::BudgetPaused) {

@@ -113,15 +113,11 @@ Use the configuration for your prepared workspace when running execution tools:
 # Read a file without executing it or calling a model
 wukong inspect ./sample.elf --strings
 
-# Analyze with the generated workbench configuration
-wukong --config .wukong/workbench/wukong.toml analyze ./sample.elf --task "Recover the input format with evidence"
-
-# Export to a new directory and check its integrity
-wukong report RUN_ID --output ./reports/analysis-01
-wukong verify-bundle ./reports/analysis-01
+# Analyze with the generated workbench configuration and export the report bundle
+wukong --config .wukong/workbench/wukong.toml analyze ./sample.elf --task "Recover the input format with evidence" --output ./reports/analysis-01
 ```
 
-Replace `RUN_ID` and the configuration path with your actual values. See [task management](docs/user/usage.md#task-management-and-recovery) for messaging, pause/resume and branch control, or run `wukong --help`.
+Replace the configuration path with your actual value. See [task management](docs/user/usage.md#task-management-and-recovery) for recovery, and use the desktop workspace for messaging, pause/resume and branch control, or run `wukong --help`.
 
 <a id="1-prerequisites"></a>
 <a id="1-准备环境"></a>

@@ -84,6 +84,8 @@ fn create_server(
 ) -> Result<NamedPipeServer> {
     let descriptor = SecurityDescriptor::from_sddl(sddl)?;
     let mut attributes = descriptor.attributes();
+    // SAFETY: `attributes` is a live SECURITY_ATTRIBUTES (nLength set by `descriptor.attributes()`)
+    // and its lpSecurityDescriptor is owned by `descriptor`; both outlive this synchronous call.
     let result = unsafe {
         ServerOptions::new()
             .first_pipe_instance(first)
@@ -109,10 +111,14 @@ pub fn authenticate_client(server: &NamedPipeServer, management_sid: &str) -> Re
     Ok(())
 }
 pub(crate) fn client_sid(server: &NamedPipeServer) -> Result<String> {
+    // SAFETY: `server` is borrowed for this call and owns a connected pipe instance, so
+    // `as_raw_handle()` is an open pipe handle; the Revert guard below ends the impersonation.
     security::check(unsafe { ImpersonateNamedPipeClient(server.as_raw_handle()) })?;
     struct Revert;
     impl Drop for Revert {
         fn drop(&mut self) {
+            // SAFETY: dropped on the thread that impersonated above, so RevertToSelf ends that
+            // thread's token; failure aborts rather than continuing as the client.
             if unsafe { RevertToSelf() } == 0 {
                 std::process::abort();
             }
@@ -120,6 +126,8 @@ pub(crate) fn client_sid(server: &NamedPipeServer) -> Result<String> {
     }
     let guard = Revert;
     let mut token = null_mut();
+    // SAFETY: GetCurrentThread() is an always-valid pseudo-handle for this thread; impersonation
+    // above guarantees a thread token; OpenAsSelf=1 checks access as the process.
     security::check(unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) })?;
     let sid = security::token_user_sid(&Handle(token))?;
     drop(guard);
@@ -128,6 +136,8 @@ pub(crate) fn client_sid(server: &NamedPipeServer) -> Result<String> {
 
 fn open_client(installation: &str, channel: Channel) -> Result<NamedPipeClient> {
     let encoded = security::wide(OsStr::new(&pipe_name(installation, channel)?))?;
+    // SAFETY: `encoded` is a NUL-terminated wide string alive until the end of this statement;
+    // null security attributes and template are permitted, and the result is validated below.
     let handle = unsafe {
         CreateFileW(
             encoded.as_ptr(),
@@ -142,19 +152,27 @@ fn open_client(installation: &str, channel: Channel) -> Result<NamedPipeClient> 
     if handle == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error().into());
     }
+    // SAFETY: `handle` is a valid file handle just returned by CreateFileW and already checked
+    // against INVALID_HANDLE_VALUE; OwnedHandle takes over sole ownership and closing.
     let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+    // SAFETY: `into_raw_handle()` transfers sole ownership of that checked handle to
+    // NamedPipeClient, which owns and closes it; it was opened with FILE_FLAG_OVERLAPPED.
     Ok(unsafe { NamedPipeClient::from_raw_handle(handle.into_raw_handle()) }?)
 }
 
 struct Service(windows_sys::Win32::System::Services::SC_HANDLE);
 impl Drop for Service {
     fn drop(&mut self) {
+        // SAFETY: `Service` is only built from non-null SC_HANDLEs returned by
+        // OpenSCManagerW/OpenServiceW (ensured above), and Drop runs exactly once.
         unsafe {
             CloseServiceHandle(self.0);
         }
     }
 }
 pub fn running_service_pid(installation: &str) -> Result<u32> {
+    // SAFETY: null machine and database names mean the local SCM and are not dereferenced here;
+    // the result is null-checked by the ensure! below before being wrapped in Service.
     let manager = unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT) };
     ensure!(
         !manager.is_null(),
@@ -163,6 +181,8 @@ pub fn running_service_pid(installation: &str) -> Result<u32> {
     );
     let manager = Service(manager);
     let name = security::wide(OsStr::new(&service_name(installation)?))?;
+    // SAFETY: `manager.0` is a live non-null SC_HANDLE held by the `manager` Service, and `name`
+    // is a NUL-terminated wide string alive for the call; the result is null-checked below.
     let service = unsafe { OpenServiceW(manager.0, name.as_ptr(), SERVICE_QUERY_STATUS) };
     ensure!(
         !service.is_null(),
@@ -170,8 +190,12 @@ pub fn running_service_pid(installation: &str) -> Result<u32> {
         io::Error::last_os_error()
     );
     let service = Service(service);
+    // SAFETY: SERVICE_STATUS_PROCESS is a plain integer struct, so all-zero bytes are a valid
+    // value; QueryServiceStatusEx below overwrites it before any field is read.
     let mut status: SERVICE_STATUS_PROCESS = unsafe { std::mem::zeroed() };
     let mut size = 0;
+    // SAFETY: `service.0` is a live handle opened with SERVICE_QUERY_STATUS, and `status` is a
+    // live SERVICE_STATUS_PROCESS whose byte size is passed as the declared buffer length.
     security::check(unsafe {
         QueryServiceStatusEx(
             service.0,
@@ -206,6 +230,8 @@ pub async fn connect(installation: &str) -> Result<NamedPipeClient> {
         }
     };
     let mut actual = 0;
+    // SAFETY: `client` owns a live connected pipe handle for this call, and `actual` is a valid
+    // u32 out-parameter; the BOOL result is checked by security::check right below.
     security::check(unsafe { GetNamedPipeServerProcessId(client.as_raw_handle(), &mut actual) })?;
     ensure!(
         actual == expected && actual == running_service_pid(installation)?,

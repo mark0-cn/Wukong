@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Record the released offline Windows worker media template in the signed desktop release metadata, so the desktop can download and verify the matching template automatically."
+zh_CN = "将发布的离线 Windows Worker 介质模板写入签名的桌面发布元数据，桌面可自动下载并校验匹配的模板。"

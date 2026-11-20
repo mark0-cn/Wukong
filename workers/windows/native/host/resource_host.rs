@@ -36,6 +36,8 @@ fn token_data(
     class: windows_sys::Win32::Security::TOKEN_INFORMATION_CLASS,
 ) -> Result<Vec<usize>> {
     let mut size = 0;
+    // SAFETY: `token.0` is a live handle owned by `Handle`; a null buffer with zero length is the
+    // documented size-query form, and the following `ensure!` bounds the returned `size`.
     unsafe {
         GetTokenInformation(token.0, class, null_mut(), 0, &mut size);
     }
@@ -44,6 +46,8 @@ fn token_data(
         "invalid resource token information length"
     );
     let mut data = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: `size` was returned by the sizing call above, and `data` allocates that many bytes
+    // rounded up to whole `usize` words, so it is aligned and large enough for this query.
     security::check(unsafe {
         GetTokenInformation(token.0, class, data.as_mut_ptr().cast(), size, &mut size)
     })?;
@@ -60,12 +64,16 @@ pub fn probe(
 ) -> Result<Value> {
     security::validate_app_sid(expected_sid)?;
     let mut token = null_mut();
+    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing, and `token` is a
+    // null-initialized out-param; `check` proves success before `Handle` takes ownership.
     security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = Handle(token);
     crate::isolation::token_policy::verify_appcontainer_policy(token.0)?;
     crate::isolation::processes::verify_sandbox_privileges(&token)?;
     let info = token_data(&token, TokenAppContainerSid)?;
     let sid =
+        // SAFETY: `info` was filled by the `TokenAppContainerSid` query above, so its first word
+        // is an aligned SID pointer; `sid_text` rejects that pointer if it is null.
         security::sid_text(unsafe { *info.as_ptr().cast::<windows_sys::Win32::Security::PSID>() })?;
     ensure!(
         sid == expected_sid,
@@ -127,6 +135,8 @@ pub(crate) fn open(installation: &str, configuration: &Path) -> Result<Host> {
     // Resolve fixed Windows locations once under the fresh System context,
     // before changing predefined registry caching or loading role profiles.
     let system_environment = environment::system(&root)?;
+    // SAFETY: No arguments or pointers; the process-wide predefined-handle cache change is sound
+    // because `open` runs in a fresh System child on its only thread, before worker I/O.
     let status = unsafe { RegDisablePredefinedCacheEx() };
     ensure!(
         status == 0,
@@ -236,6 +246,8 @@ fn check_persona(
             worker_sentinel.as_os_str().to_owned(),
             sid.clone().into(),
             std::process::id().to_string().into(),
+            // SAFETY: Takes no arguments or pointers and only reads the calling thread's id, which
+            // is this live System host thread that the probe later compares against.
             unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() }
                 .to_string()
                 .into(),
@@ -282,6 +294,8 @@ fn check_persona(
     ensure!(
         report["authority_after_self_dacl"]["protected_process_id"] == std::process::id()
             && report["authority_after_self_dacl"]["protected_thread_id"]
+                // SAFETY: No arguments or pointers; returns the id of the calling host thread,
+                // the same thread whose id was passed to the probe above.
                 == unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() },
         "adversarial probe did not use this live System host"
     );

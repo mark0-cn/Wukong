@@ -1,5 +1,5 @@
 //! Cross-process admission shared by assessment workers and VM maintenance.
-use crate::adapters::files::locks::FileLock;
+pub use crate::adapters::files::locks::{FileLock, LockMode};
 use anyhow::{Context, Result};
 use std::{
     fs::OpenOptions,
@@ -14,14 +14,14 @@ pub fn path(vmx: &Path) -> Result<PathBuf> {
     };
     Ok(canonical.with_extension("wukong-environment.lock"))
 }
-pub fn acquire(path: &Path, exclusive: bool) -> Result<FileLock> {
+pub fn acquire(path: &Path, mode: LockMode) -> Result<FileLock> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .open(path)?;
-    if exclusive { FileLock::try_lock(file) } else { FileLock::try_lock_shared(file) }
+    mode.lock(file)
         .context("VM maintenance conflicts with an active assessment connection; finish and close its resources first")
 }
 

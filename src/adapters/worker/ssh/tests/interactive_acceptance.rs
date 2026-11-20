@@ -202,7 +202,9 @@ async fn remote_installed_windows_worker_interactive_acceptance() -> Result<()> 
                 } else if name == "natural" {
                     Vec::new()
                 } else {
-                    (0..65536).map(|i| (i % 256) as u8).collect()
+                    (0..65536)
+                        .map(|i| u8::try_from(i % 256).expect("the remainder is below 256"))
+                        .collect()
                 };
                 let (request, mut result) = send(&mut calls, id, &payload, 10).await?;
                 writes.push(json!({"request":request,"result":result}));

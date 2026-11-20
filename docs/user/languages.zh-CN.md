@@ -23,7 +23,7 @@ CLI 示例：
 ```sh
 wukong --locale en-US --help
 wukong --locale zh-CN analyze ./sample --output-language en-US --task "分析输入格式"
-wukong --locale en-US report RUN_ID --output ./report-en
+wukong --locale en-US analyze ./sample --task "Recover the input format" --output ./report-en
 ```
 
-`WUKONG_LOCALE` 与 `WUKONG_OUTPUT_LANGUAGE` 可提供命令行默认值，显式参数优先。恢复任务仍使用任务创建时保存的输出语言。切换语言不需要重建或下载 Docker 镜像。
+`WUKONG_LOCALE` 与 `WUKONG_OUTPUT_LANGUAGE` 可提供命令行默认值，显式参数优先。恢复任务仍使用任务创建时保存的输出语言。桌面工作区导出报告时使用当前界面语言。切换语言不需要重建或下载 Docker 镜像。

@@ -1,10 +1,12 @@
 //! Operator enrollment of public Windows connection receipts. Private key
 //! contents are never imported; saving prepares only a dedicated public host pin.
-use super::{EnvironmentConfig, validate_id};
-use crate::adapters::worker::ssh::{ManagedSsh, validate_host, validate_no_links};
-use anyhow::{Context, Result, ensure};
+use super::{EnvironmentConfig, Platform};
+use crate::adapters::worker::{
+    ManagedSshConfig, RuntimeConfig, TransportConfig,
+    ssh::{ManagedSsh, validate_host, validate_no_links},
+};
+use anyhow::{Result, ensure};
 use serde::Deserialize;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -12,28 +14,11 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
-use wukong_worker_package::SshPublicKey;
+use wukong_worker_package::{ConnectionReceipt, SshPublicKey};
 #[cfg(test)]
 mod tests;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Receipt {
-    schema: u32,
-    installed: bool,
-    installation_id: String,
-    environment_id: String,
-    generation: u64,
-    manifest_sha256: String,
-    ssh_user: String,
-    ssh_port: u16,
-    host_key: SshPublicKey,
-    host_fingerprint: String,
-    #[serde(rename = "production_isolation_verified")]
-    _production_isolation_verified: bool,
-}
-
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WindowsConnection {
     pub connection_json: String,
@@ -44,7 +29,14 @@ pub struct WindowsConnection {
     pub make_default: bool,
 }
 
-fn pin_path(home: &Path, installation: &str, key: &SshPublicKey) -> Result<PathBuf> {
+pub(crate) fn pin_path(home: &Path, installation: &str, key: &SshPublicKey) -> Result<PathBuf> {
+    ensure!(
+        installation.len() == 32
+            && installation
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "invalid installation identity for the public host pin"
+    );
     let record = format!("wukong-worker-{installation} {}\n", key.authorized_key()?);
     Ok(home.join(format!(
         "ssh-host-{}.known_hosts",
@@ -52,61 +44,74 @@ fn pin_path(home: &Path, installation: &str, key: &SshPublicKey) -> Result<PathB
     )))
 }
 
+pub(crate) struct ConnectionTarget<'a> {
+    pub name: &'a str,
+    pub host: &'a str,
+    pub identity_file: &'a Path,
+    pub confirmed_fingerprint: &'a str,
+}
+
 pub fn prepare(
     home: &Path,
     input: &WindowsConnection,
     existing: &BTreeMap<String, EnvironmentConfig>,
-) -> Result<(String, Value)> {
-    ensure!(
-        input.connection_json.len() <= 16384,
-        "public connection receipt exceeds 16 KiB"
-    );
-    let receipt: Receipt = serde_json::from_str(&input.connection_json)
-        .context("invalid public Windows connection receipt")?;
-    ensure!(
-        receipt.schema == 1 && receipt.installed && receipt.generation > 0,
-        "connection receipt does not describe an installed worker"
-    );
-    validate_id(&receipt.environment_id)?;
+) -> Result<(String, EnvironmentConfig)> {
+    let receipt = ConnectionReceipt::parse(input.connection_json.as_bytes())?;
+    let environment = prepare_config(
+        home,
+        &receipt,
+        ConnectionTarget {
+            name: &input.name,
+            host: &input.host,
+            identity_file: &input.identity_file,
+            confirmed_fingerprint: &input.confirmed_fingerprint,
+        },
+        existing,
+    )?;
+    Ok((receipt.environment_id, environment))
+}
+
+pub(crate) fn prepare_config(
+    home: &Path,
+    receipt: &ConnectionReceipt,
+    target: ConnectionTarget<'_>,
+    existing: &BTreeMap<String, EnvironmentConfig>,
+) -> Result<EnvironmentConfig> {
+    receipt.confirm(target.confirmed_fingerprint)?;
     ensure!(
         !existing.contains_key(&receipt.environment_id),
         "environment ID already exists; edit its settings instead of replacing it"
     );
-    ensure!(
-        receipt.manifest_sha256.len() == 64
-            && receipt
-                .manifest_sha256
-                .bytes()
-                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-        "invalid connection payload identity"
-    );
-    let fingerprint = receipt.host_key.fingerprint()?;
-    ensure!(
-        receipt.host_fingerprint == fingerprint
-            && input.confirmed_fingerprint.trim() == fingerprint,
-        "independently confirmed SSH fingerprint does not match the public host key"
-    );
-    let host = input.host.trim();
+    let host = target.host.trim();
     validate_host(host)?;
-    validate_no_links(&input.identity_file)?;
+    validate_no_links(target.identity_file)?;
     ensure!(
-        fs::metadata(&input.identity_file)?.is_file(),
+        fs::metadata(target.identity_file)?.is_file(),
         "select an existing local SSH private key file"
     );
     let ssh = ManagedSsh {
         installation_id: receipt.installation_id.clone(),
-        user: receipt.ssh_user,
+        user: receipt.ssh_user.clone(),
         port: receipt.ssh_port,
-        identity_file: input.identity_file.clone(),
+        identity_file: target.identity_file.into(),
         known_hosts_file: pin_path(home, &receipt.installation_id, &receipt.host_key)?,
-        host_key: receipt.host_key,
+        host_key: receipt.host_key.clone(),
     };
-    ssh.validate()?;
-    let value = json!({"name":input.name.trim(),"platform":"windows","installation_id":receipt.installation_id,
-        "runtime":{"backend":"managed_ssh","ssh_host":host,"managed_ssh":ssh}});
-    let environment: EnvironmentConfig = serde_json::from_value(value.clone())?;
+    let environment = EnvironmentConfig {
+        name: target.name.trim().into(),
+        platform: Platform::Windows,
+        installation_id: Some(receipt.installation_id.clone()),
+        runtime: RuntimeConfig {
+            transport: TransportConfig::ManagedSsh(ManagedSshConfig {
+                ssh_host: host.into(),
+                ssh_executable: "ssh".into(),
+                managed_ssh: ssh,
+            }),
+            ..Default::default()
+        },
+    };
     environment.validate()?;
-    Ok((receipt.environment_id, value))
+    Ok(environment)
 }
 
 /// Called under the controller maintenance lock, after configuration validation.

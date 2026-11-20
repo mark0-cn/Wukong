@@ -52,6 +52,8 @@ impl Job {
         Self::configured(None)
     }
     fn configured(resource: Option<ResourceLimits>) -> Result<Self> {
+        // SAFETY: both arguments are null, so this call dereferences no pointer; the returned Job
+        // handle is checked non-null below and stored in Self(Handle(..)), which closes it once.
         let handle = unsafe { CreateJobObjectW(null(), null()) };
         ensure!(
             !handle.is_null(),
@@ -73,6 +75,8 @@ impl Job {
             limits.BasicLimitInformation.PriorityClass = BELOW_NORMAL_PRIORITY_CLASS;
             limits.JobMemoryLimit = resource.memory;
         }
+        // SAFETY: cb is exactly size_of of the live, initialized limits local, so the callee reads
+        // only that many bytes; job.0.0 is the non-null Job handle owned by this value.
         security::check(unsafe {
             SetInformationJobObject(
                 job.0.0,
@@ -83,6 +87,8 @@ impl Job {
         })?;
         if let Some(resource) = resource {
             let mut actual = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            // SAFETY: actual is a live, zero-initialized local of the type this info class expects;
+            // cb is exactly its size and the trailing out-length pointer is null.
             security::check(unsafe {
                 QueryInformationJobObject(
                     job.0.0,
@@ -103,6 +109,8 @@ impl Job {
         Ok(job)
     }
     pub fn terminate(&self) -> Result<()> {
+        // SAFETY: self.0.0 is the Job handle owned by this value for the whole borrow, so it is
+        // valid and non-null; TerminateJobObject takes no other pointer argument.
         security::check(unsafe { TerminateJobObject(self.0.0, 1) })
     }
     pub fn active_processes(&self) -> Result<u32> {
@@ -110,6 +118,8 @@ impl Job {
     }
     fn active_handle(handle: HANDLE) -> Result<u32> {
         let mut information = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        // SAFETY: information is a live local matching JobObjectBasicAccountingInformation and cb
+        // is exactly its size; the out-length pointer is null and handle is a caller Job handle.
         security::check(unsafe {
             QueryInformationJobObject(
                 handle,
@@ -130,6 +140,8 @@ impl Job {
         if Self::active_handle(handle).context("query owned Job before termination")? == 0 {
             return Ok(());
         }
+        // SAFETY: handle is the Job handle its caller owns (self.0.0, or the duplicate held by
+        // SystemHost) and was just used by active_handle, so it is still open and non-null here.
         security::check(unsafe { TerminateJobObject(handle, 1) })
             .context("terminate owned native Job")?;
         let deadline = Instant::now() + timeout;
@@ -155,6 +167,8 @@ struct Desktop {
 }
 impl Drop for Desktop {
     fn drop(&mut self) {
+        // SAFETY: station and desktop were created by this Desktop in create(); Drop runs once, so
+        // each is closed exactly once (a failed create leaves null, which these APIs tolerate).
         unsafe {
             CloseDesktop(self.desktop);
             CloseWindowStation(self.station);
@@ -188,6 +202,8 @@ impl Desktop {
         ))?;
         let attributes = descriptor.attributes();
         let station =
+            // SAFETY: station_name is NUL-terminated by security::wide and attributes points at the
+            // descriptor owned by the enclosing frame, which outlives this call.
             unsafe { CreateWindowStationW(station_name.as_ptr(), 0, 0x000f037f, &attributes) };
         ensure!(
             !station.is_null(),
@@ -199,9 +215,15 @@ impl Desktop {
             station,
             name: security::wide(OsStr::new(&format!("{name}\\worker")))?,
         };
+        // SAFETY: GetProcessWindowStation takes no arguments and returns the process window station
+        // handle, which is process-owned and never closed: it is only passed back below.
         let previous = unsafe { GetProcessWindowStation() };
+        // SAFETY: station was returned by CreateWindowStationW above and checked non-null by the
+        // ensure! that follows it; it is still owned here and closed only by Desktop's Drop.
         security::check(unsafe { SetProcessWindowStation(station) })?;
         let desktop_name = security::wide(OsStr::new("worker"))?;
+        // SAFETY: desktop_name is NUL-terminated by security::wide; a null device and DEVMODE are
+        // required for dwFlags 0, and the attributes descriptor outlives the call.
         result.desktop = unsafe {
             CreateDesktopW(
                 desktop_name.as_ptr(),
@@ -213,6 +235,8 @@ impl Desktop {
             )
         };
         let failure = std::io::Error::last_os_error();
+        // SAFETY: previous is the handle GetProcessWindowStation returned earlier in this function;
+        // the process still owns it, so passing it back restores the original station.
         if unsafe { SetProcessWindowStation(previous) } == 0 {
             std::process::abort();
         }
@@ -226,11 +250,18 @@ impl Desktop {
 
 fn without_privileges(token: &Handle) -> Result<Handle> {
     let mut size = 0;
+    // SAFETY: a null buffer with length 0 is the documented sizing query, so the kernel writes
+    // only the required byte count into size (a live local); token.0 is the borrowed handle.
     unsafe {
         GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut size);
     }
     ensure!(size > 0 && size < 65536, "invalid process privilege list");
-    let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    // A privilege-less token reports only the 4-byte PrivilegeCount, but the view
+    // below is a whole TOKEN_PRIVILEGES; reserve that much so the borrow is in bounds.
+    let capacity = (size as usize).max(size_of::<TOKEN_PRIVILEGES>());
+    let mut buffer = vec![0usize; capacity.div_ceil(size_of::<usize>())];
+    // SAFETY: buffer holds at least size bytes (size.div_ceil(size_of::<usize>()) elements) and
+    // the kernel writes at most size bytes there; size is checked in 1..65536 just above.
     security::check(unsafe {
         GetTokenInformation(
             token.0,
@@ -240,6 +271,8 @@ fn without_privileges(token: &Handle) -> Result<Handle> {
             &mut size,
         )
     })?;
+    // SAFETY: the buffer is at least size_of::<TOKEN_PRIVILEGES>() bytes, the kernel wrote no
+    // more than size bytes into it, and the count/array bounds are checked immediately below.
     let privileges = unsafe { &*buffer.as_ptr().cast::<TOKEN_PRIVILEGES>() };
     let offset = std::mem::offset_of!(TOKEN_PRIVILEGES, Privileges);
     ensure!(
@@ -252,6 +285,8 @@ fn without_privileges(token: &Handle) -> Result<Handle> {
     let mut restricted = null_mut();
     // DISABLE_MAX_PRIVILEGE retains SeChangeNotifyPrivilege and ignores the
     // explicit deletion list. Flags=0 deletes every enumerated privilege.
+    // SAFETY: privileges is the in-bounds view of buffer verified above (offset + count *
+    // LUID_AND_ATTRIBUTES <= size), and token.0 is the caller's live token handle.
     security::check(unsafe {
         CreateRestrictedToken(
             token.0,
@@ -268,6 +303,8 @@ fn without_privileges(token: &Handle) -> Result<Handle> {
     let restricted = Handle(restricted);
     let mut actual = TOKEN_PRIVILEGES::default();
     let mut returned = 0;
+    // SAFETY: actual is a live local of size TOKEN_PRIVILEGES for the same info class; a larger
+    // list makes the kernel fail with ERROR_INSUFFICIENT_BUFFER instead of writing past cb.
     security::check(unsafe {
         GetTokenInformation(
             restricted.0,
@@ -292,6 +329,8 @@ fn seal_sandbox_token(
         TOKEN_ADJUST_PRIVILEGES, TOKEN_APPCONTAINER_INFORMATION, TOKEN_QUERY, TokenAppContainerSid,
     };
     let mut token = null_mut();
+    // SAFETY: process.process is the owned suspended-child handle, token is a live out local,
+    // and TOKEN_QUERY|TOKEN_ADJUST_PRIVILEGES is available on the child we created.
     security::check(unsafe {
         OpenProcessToken(
             process.process.0,
@@ -302,6 +341,8 @@ fn seal_sandbox_token(
     let token = Handle(token);
     crate::isolation::token_policy::verify_appcontainer_policy(token.0)?;
     let mut bytes = 0;
+    // SAFETY: a null buffer with zero length only asks for the required byte count, written to
+    // bytes (a live local); token.0 came from OpenProcessToken above.
     unsafe {
         GetTokenInformation(token.0, TokenAppContainerSid, null_mut(), 0, &mut bytes);
     }
@@ -310,6 +351,8 @@ fn seal_sandbox_token(
         "invalid created AppContainer token data"
     );
     let mut app_data = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: app_data was sized from this byte count and the kernel wrote at most that much;
+    // bytes is checked >= size_of::<TOKEN_APPCONTAINER_INFORMATION>() and < 65536.
     security::check(unsafe {
         GetTokenInformation(
             token.0,
@@ -319,6 +362,8 @@ fn seal_sandbox_token(
             &mut bytes,
         )
     })?;
+    // SAFETY: the buffer just filled by GetTokenInformation starts with this struct, is at
+    // least size_of of it long and 8-byte aligned; TokenAppContainer points inside it.
     let app = unsafe { &*app_data.as_ptr().cast::<TOKEN_APPCONTAINER_INFORMATION>() };
     ensure!(
         security::sid_text(app.TokenAppContainer)? == security::sid_text(expected_sid)?,
@@ -334,6 +379,8 @@ fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
     use windows_sys::Win32::Security::{AdjustTokenPrivileges, SE_PRIVILEGE_REMOVED};
     let traverse = retain_traverse.then(traverse_privilege).transpose()?;
     let mut bytes = 0;
+    // SAFETY: sizing query only: a null buffer with length 0 writes just the required byte
+    // count into bytes; token.0 is the caller's owned token handle.
     unsafe {
         GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut bytes);
     }
@@ -342,6 +389,8 @@ fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
         "invalid created token privilege list"
     );
     let mut data = vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())];
+    // SAFETY: data was allocated from the byte count reported by the query above and the kernel
+    // writes at most bytes there; bytes is checked in 1..65536.
     security::check(unsafe {
         GetTokenInformation(
             token.0,
@@ -351,6 +400,8 @@ fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
             &mut bytes,
         )
     })?;
+    // SAFETY: data holds at least one usize (bytes > 0), so reading the leading u32 privilege
+    // count stays inside the allocation just filled by GetTokenInformation.
     let count = unsafe { *data.as_ptr().cast::<u32>() };
     if count > 0 {
         ensure!(
@@ -359,7 +410,11 @@ fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
                 <= bytes as usize,
             "truncated created token privilege list"
         );
+        // SAFETY: count > 0 means the kernel reported at least one LUID_AND_ATTRIBUTES entry, so
+        // the buffer holds a whole TOKEN_PRIVILEGES; the usize vec keeps the cast 4-byte aligned.
         let privileges = unsafe { &mut *data.as_mut_ptr().cast::<TOKEN_PRIVILEGES>() };
+        // SAFETY: the ensure! above bounds offset_of!(Privileges) + count * LUID_AND_ATTRIBUTES by
+        // bytes, so the count entries lie inside the kernel-filled buffer; count > 0 here.
         let entries = unsafe {
             std::slice::from_raw_parts_mut(privileges.Privileges.as_mut_ptr(), count as usize)
         };
@@ -380,6 +435,8 @@ fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
                 SE_PRIVILEGE_REMOVED
             };
         }
+        // SAFETY: privileges points at the checked in-bounds entry array inside data; token.0 is
+        // the caller's live token handle, and BufferLength 0 with null PreviousState is documented.
         security::check(unsafe {
             AdjustTokenPrivileges(token.0, 0, privileges, 0, null_mut(), null_mut())
         })?;
@@ -388,6 +445,8 @@ fn seal_token_privileges(token: &Handle, retain_traverse: bool) -> Result<()> {
         return verify_sandbox_privileges(token);
     }
     let mut remaining = TOKEN_PRIVILEGES::default();
+    // SAFETY: remaining is a live TOKEN_PRIVILEGES local whose size is passed as cb; a longer
+    // list makes the kernel fail instead of overrunning it, and token.0 is the owned handle.
     security::check(unsafe {
         GetTokenInformation(
             token.0,
@@ -411,6 +470,8 @@ struct Attributes {
 impl Attributes {
     fn new(count: u32) -> Result<Self> {
         let mut bytes = 0;
+        // SAFETY: documented sizing call: a null list only writes the required byte size into
+        // bytes, a live local, and no attribute storage is touched.
         unsafe {
             InitializeProcThreadAttributeList(null_mut(), count, 0, &mut bytes);
         }
@@ -419,6 +480,8 @@ impl Attributes {
             storage: vec![0; bytes.div_ceil(size_of::<usize>())],
             initialized: false,
         };
+        // SAFETY: storage holds at least the bytes the sizing call reported and is 8-byte aligned;
+        // that capacity is passed, and a failure leaves initialized false so Drop skips it.
         security::check(unsafe {
             InitializeProcThreadAttributeList(result.pointer(), count, 0, &mut bytes)
         })?;
@@ -429,6 +492,8 @@ impl Attributes {
         self.storage.as_mut_ptr().cast()
     }
     fn set_handles(&mut self, attribute: u32, handles: &mut [HANDLE]) -> Result<()> {
+        // SAFETY: self.pointer() is a list initialized by Attributes::new; handles is a live slice
+        // whose byte length is passed as cbSize and that outlives the CreateProcess call below.
         security::check(unsafe {
             UpdateProcThreadAttribute(
                 self.pointer(),
@@ -445,6 +510,8 @@ impl Attributes {
 impl Drop for Attributes {
     fn drop(&mut self) {
         if self.initialized {
+            // SAFETY: initialized is true only after InitializeProcThreadAttributeList succeeded on
+            // this same storage, and Drop runs once, so a successful list is deleted exactly once.
             unsafe {
                 DeleteProcThreadAttributeList(self.pointer());
             }
@@ -453,6 +520,8 @@ impl Drop for Attributes {
 }
 fn inheritable(file: &File) -> Result<Handle> {
     let mut output = null_mut();
+    // SAFETY: file.as_raw_handle() is borrowed from a live File for the call, both process
+    // arguments are the GetCurrentProcess pseudo-handle, and output is a live out local.
     security::check(unsafe {
         DuplicateHandle(
             GetCurrentProcess(),
@@ -543,6 +612,8 @@ impl OwnedProcess {
             "native debug target exited before attachment"
         );
         let mut attached = 0;
+        // SAFETY: self.process.0 is the handle this OwnedProcess owns and the ensure! above proved
+        // the target has not exited; attached is a live BOOL out parameter.
         security::check(unsafe {
             windows_sys::Win32::System::Diagnostics::Debug::CheckRemoteDebuggerPresent(
                 self.process.0,
@@ -552,6 +623,8 @@ impl OwnedProcess {
         if attached == 0 {
             return Ok(false);
         }
+        // SAFETY: thread is the initial-thread handle borrowed from self.initial_thread by the
+        // context(..) call above, so it is Some, owned and open for this call.
         let previous = unsafe { ResumeThread(thread.0) };
         // DbgEng may add its own suspension while attaching. Release only our
         // one count, leaving every debugger-owned count intact. Never retry a
@@ -576,6 +649,8 @@ impl OwnedProcess {
         Ok(result)
     }
     pub fn exited(&self) -> bool {
+        // SAFETY: self.process.0 is the process handle owned by this value for the whole borrow,
+        // and a zero timeout polls without any output pointer.
         unsafe { WaitForSingleObject(self.process.0, 0) == WAIT_OBJECT_0 }
     }
     pub fn exit_code(&self) -> Result<Option<u32>> {
@@ -583,6 +658,8 @@ impl OwnedProcess {
             return Ok(None);
         }
         let mut code = 0;
+        // SAFETY: code is a live out local and self.process.0 is the owned process handle that
+        // exited() just reported signaled, so the query targets a valid object.
         security::check(unsafe { GetExitCodeProcess(self.process.0, &mut code) })?;
         Ok(Some(code))
     }
@@ -599,6 +676,8 @@ impl OwnedProcess {
             .as_millis()
             .min((u32::MAX - 1) as u128) as u32;
         ensure!(
+            // SAFETY: self.process.0 is still owned and open after the Job drain, and remaining is
+            // a bounded millisecond timeout; the wait takes no pointer arguments.
             unsafe { WaitForSingleObject(self.process.0, remaining) } == WAIT_OBJECT_0,
             "owned native process did not signal after Job drain"
         );
@@ -632,6 +711,8 @@ impl ExitSignal {
     pub(crate) async fn wait(&self) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
+                // SAFETY: self.0 is the OwnedHandle created by exit_signal's DuplicateHandle, so
+                // as_raw_handle stays valid for as long as this ExitSignal is borrowed.
                 let state = unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) };
                 if state == WAIT_OBJECT_0 {
                     return Ok::<_, anyhow::Error>(());
@@ -652,6 +733,8 @@ impl ExitSignal {
 impl SystemHost {
     pub(crate) fn exit_signal(&self) -> Result<ExitSignal> {
         let mut handle = null_mut();
+        // SAFETY: self.process.as_raw_handle() is the retained OwnedHandle, both process arguments
+        // are pseudo-handles, and handle is a live out local written only on success.
         security::check(unsafe {
             DuplicateHandle(
                 GetCurrentProcess(),
@@ -663,6 +746,8 @@ impl SystemHost {
                 0,
             )
         })?;
+        // SAFETY: handle was set by the DuplicateHandle call security::check accepted, so it is a
+        // fresh valid handle whose sole ownership now passes to OwnedHandle.
         Ok(ExitSignal(unsafe { OwnedHandle::from_raw_handle(handle) }))
     }
     fn take(mut source: OwnedProcess) -> Result<Self> {
@@ -674,6 +759,8 @@ impl SystemHost {
         );
         fn duplicate(handle: HANDLE) -> Result<OwnedHandle> {
             let mut copy = null_mut();
+            // SAFETY: handle is one of the caller's live owned handles, both process arguments are
+            // pseudo-handles, and copy is a live out local; DUPLICATE_SAME_ACCESS is requested.
             security::check(unsafe {
                 DuplicateHandle(
                     GetCurrentProcess(),
@@ -685,6 +772,8 @@ impl SystemHost {
                     DUPLICATE_SAME_ACCESS,
                 )
             })?;
+            // SAFETY: copy holds the handle the checked DuplicateHandle call created; ownership of
+            // that new handle moves into the OwnedHandle, which closes it exactly once.
             Ok(unsafe { OwnedHandle::from_raw_handle(copy) })
         }
         let result = Self {
@@ -701,6 +790,8 @@ impl SystemHost {
         self.pid
     }
     pub(crate) fn exited(&self) -> bool {
+        // SAFETY: self.process is the OwnedHandle retained by this SystemHost, valid for &self, and
+        // a zero timeout only polls for its signaled state.
         unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) == WAIT_OBJECT_0 }
     }
     pub(crate) fn stop(&self, timeout: Duration) -> Result<u32> {
@@ -711,11 +802,15 @@ impl SystemHost {
             .as_millis()
             .min((u32::MAX - 1) as u128) as u32;
         ensure!(
+            // SAFETY: the same retained process handle exited() uses; remaining is a bounded
+            // timeout value, and the call takes no pointer argument.
             unsafe { WaitForSingleObject(self.process.as_raw_handle(), remaining) }
                 == WAIT_OBJECT_0,
             "native System host did not signal after Job drain"
         );
         let mut code = 0;
+        // SAFETY: code is a live out local and self.process.as_raw_handle() is the retained handle
+        // that the wait above proved signaled.
         security::check(unsafe { GetExitCodeProcess(self.process.as_raw_handle(), &mut code) })?;
         Ok(code)
     }
@@ -928,6 +1023,8 @@ impl Spawn<'_> {
         // checked and stripped of every privilege except Windows' ordinary
         // traverse-check bypass before its first instruction.
         let mut token = null_mut();
+        // SAFETY: persona.token() borrows a live handle from persona for this function, both
+        // process arguments are pseudo-handles, and token is a live out local.
         security::check(unsafe {
             DuplicateHandle(
                 GetCurrentProcess(),
@@ -1029,6 +1126,8 @@ impl Spawn<'_> {
         attributes.set_handles(PROC_THREAD_ATTRIBUTE_HANDLE_LIST, &mut handles)?;
         attributes.set_handles(PROC_THREAD_ATTRIBUTE_JOB_LIST, &mut jobs)?;
         if let Some(capabilities) = capabilities.as_mut() {
+            // SAFETY: capabilities is the live Option local borrowed mutably here, so its address
+            // is stable and cbSize is exactly size_of that struct; the list is initialized.
             security::check(unsafe {
                 UpdateProcThreadAttribute(
                     attributes.pointer(),
@@ -1062,6 +1161,8 @@ impl Spawn<'_> {
             .map(crate::isolation::process_access::Policy::attributes);
         let object_attributes = object_attributes.as_ref().map_or(null(), |value| value);
         let mut launch = || {
+            // SAFETY: app, command, environment and directory are live NUL-terminated Vec<u16>
+            // buffers, and startup/object_attributes point into locals alive for the whole call.
             let success = unsafe {
                 match token.as_ref() {
                     Some(token) => CreateProcessAsUserW(
@@ -1164,6 +1265,8 @@ impl Spawn<'_> {
             #[cfg(test)]
             if let Some(policy) = self.environment.get("WUKONG_NATIVE_SEAL_PRIVILEGES") {
                 let mut token = null_mut();
+                // SAFETY: process.process.0 is the owned suspended child handle, so the parent
+                // holds full access to its token; token is a live out local.
                 security::check(unsafe {
                     OpenProcessToken(
                         process.process.0,
@@ -1176,6 +1279,8 @@ impl Spawn<'_> {
             }
             if !matches!(start, Start::InspectSuspended | Start::AwaitDebugger { .. }) {
                 ensure!(
+                    // SAFETY: thread is the handle CreateProcessW returned in PROCESS_INFORMATION
+                    // and stays open here; it is dropped only after this closure returns.
                     unsafe { ResumeThread(thread.0) } != u32::MAX,
                     "cannot resume owned native child"
                 );
@@ -1280,6 +1385,8 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         let pid: u32 = std::fs::read_to_string(root.path().join("leaf.pid"))?.parse()?;
+        // SAFETY: pid came from the fixture's leaf.pid and OpenProcess returns a valid handle or
+        // null, which the ensure! below rejects before any use.
         let leaf = Handle(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) });
         ensure!(
             !leaf.0.is_null() && !host.exited(),
@@ -1288,6 +1395,8 @@ mod tests {
         std::thread::spawn(move || host.stop(Duration::from_secs(10)))
             .join()
             .unwrap()?;
+        // SAFETY: leaf.0 was proven non-null by the ensure! above and is still owned by leaf; the
+        // timeout is a plain millisecond value.
         assert_eq!(unsafe { WaitForSingleObject(leaf.0, 1000) }, WAIT_OBJECT_0);
         Ok(())
     }
@@ -1298,6 +1407,8 @@ mod tests {
         };
         if mode == "privileges" {
             let mut token = null_mut();
+            // SAFETY: GetCurrentProcess is the process pseudo-handle, valid in this process; token
+            // is a live out local that starts null and is owned by Handle afterwards.
             security::check(unsafe {
                 OpenProcessToken(
                     GetCurrentProcess(),
@@ -1352,6 +1463,8 @@ mod tests {
         fn set(path: &Path, sddl: &str) -> Result<()> {
             let descriptor = SecurityDescriptor::from_sddl(sddl)?;
             let encoded = security::wide(path.as_os_str())?;
+            // SAFETY: encoded is a NUL-terminated Vec<u16> from security::wide, and the
+            // PSECURITY_DESCRIPTOR is owned by the live SecurityDescriptor in this scope.
             security::check(unsafe {
                 SetFileSecurityW(
                     encoded.as_ptr(),
@@ -1404,11 +1517,15 @@ mod tests {
     }
     fn privilege_count(token: &Handle) -> Result<u32> {
         let mut size = 0;
+        // SAFETY: sizing query only: a null buffer with length 0 writes the required byte count
+        // into size; token.0 is the caller's borrowed token handle.
         unsafe {
             GetTokenInformation(token.0, TokenPrivileges, null_mut(), 0, &mut size);
         }
         ensure!(size > 0 && size < 65536, "invalid fixture privilege list");
         let mut data = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+        // SAFETY: data holds at least size bytes (size is checked in 1..65536) and is 8-byte
+        // aligned; the kernel writes at most size bytes into it.
         security::check(unsafe {
             GetTokenInformation(
                 token.0,
@@ -1418,6 +1535,8 @@ mod tests {
                 &mut size,
             )
         })?;
+        // SAFETY: data is at least one usize long, so reading the leading count as u32 stays inside
+        // the allocation just filled by GetTokenInformation.
         Ok(unsafe { *data.as_ptr().cast::<u32>() })
     }
     #[test]
@@ -1431,6 +1550,8 @@ mod tests {
     fn sealed_privilege_fixture(policy: &str, expected: u32) -> Result<()> {
         let temporary = tempfile::tempdir()?;
         let mut parent = null_mut();
+        // SAFETY: GetCurrentProcess is the process pseudo-handle and parent is a live out local
+        // that starts null; TOKEN_QUERY is available for this process token.
         security::check(unsafe {
             OpenProcessToken(
                 GetCurrentProcess(),
@@ -1576,19 +1697,26 @@ mod tests {
             "fixture child did not inherit the non-breakaway Job"
         );
         let leaf_pid: u32 = std::fs::read_to_string(leaf_path)?.parse()?;
+        // SAFETY: leaf_pid was parsed from the fixture's leaf.pid; OpenProcess returns a valid
+        // handle or null, and the ensure! below rejects null before any use.
         let leaf = Handle(unsafe {
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | 0x00100000, 0, leaf_pid)
         });
         ensure!(!leaf.0.is_null(), "fixture descendant cannot be inspected");
         let mut contained = 0;
+        // SAFETY: leaf.0 was checked non-null above and fixture.job.0.0 is the Job handle owned by
+        // fixture; contained is a live out local.
         security::check(unsafe { IsProcessInJob(leaf.0, fixture.job.0.0, &mut contained) })?;
         assert_eq!(contained, 1);
         fixture.stop(Duration::from_secs(10))?;
         assert_eq!(fixture.job().active_processes()?, 0);
         assert_eq!(
+            // SAFETY: fixture.process.0 is the child handle owned by fixture and the timeout is a
+            // bounded millisecond value; no pointer arguments are involved.
             unsafe { WaitForSingleObject(fixture.process.0, 10000) },
             WAIT_OBJECT_0
         );
+        // SAFETY: leaf.0 was checked non-null above and leaf still owns that handle here.
         assert_eq!(unsafe { WaitForSingleObject(leaf.0, 10000) }, WAIT_OBJECT_0);
         Ok(())
     }
@@ -1637,12 +1765,15 @@ mod tests {
         assert_eq!(fixture.exit_code()?, Some(0));
         assert!(fixture.job().active_processes()? > 0);
         let leaf_pid: u32 = std::fs::read_to_string(leaf_path)?.parse()?;
+        // SAFETY: leaf_pid was parsed from the fixture's leaf.pid; OpenProcess returns a valid
+        // handle or a null one that the ensure! below rejects.
         let leaf = Handle(unsafe {
             OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | 0x00100000, 0, leaf_pid)
         });
         ensure!(!leaf.0.is_null(), "fixture descendant cannot be inspected");
         fixture.stop(Duration::from_secs(10))?;
         assert_eq!(fixture.job().active_processes()?, 0);
+        // SAFETY: leaf.0 was proven non-null by the ensure! above and leaf still owns it here.
         assert_eq!(unsafe { WaitForSingleObject(leaf.0, 1000) }, WAIT_OBJECT_0);
         Ok(())
     }

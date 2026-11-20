@@ -1,6 +1,6 @@
 //! Language preferences are independent of workspace epochs, model config and active runs.
 use crate::i18n::Locale;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{io::Write, path::Path};
 
@@ -43,7 +43,9 @@ pub fn read_at(path: &Path) -> Result<Preferences> {
     }
 }
 pub fn write_at(path: &Path, preferences: &Preferences) -> Result<()> {
-    let parent = path.parent().unwrap();
+    let parent = path
+        .parent()
+        .context("preferences file needs a parent directory")?;
     std::fs::create_dir_all(parent)?;
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
     file.write_all(&serde_json::to_vec_pretty(preferences)?)?;

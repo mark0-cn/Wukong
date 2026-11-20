@@ -27,11 +27,15 @@ pub(crate) fn allows(
 ) -> Result<bool> {
     let text = security::wide(OsStr::new(restriction))?;
     let mut sid = null_mut();
+    // SAFETY: `text` is NUL-terminated by `security::wide`; the SID is allocated into `sid`
+    // and handed to the `Sid` guard below, which frees it exactly once.
     security::check(unsafe { ConvertStringSidToSidW(text.as_ptr(), &mut sid) })
         .context("parse inert resource restriction")?;
     struct Sid(*mut std::ffi::c_void);
     impl Drop for Sid {
         fn drop(&mut self) {
+            // SAFETY: `Sid` only ever wraps a successful `ConvertStringSidToSidW` allocation
+            // and is the sole owner, so this LocalFree runs exactly once.
             unsafe {
                 LocalFree(self.0);
             }
@@ -46,6 +50,8 @@ pub(crate) fn allows(
     impl Drop for Manager {
         fn drop(&mut self) {
             if !self.0.is_null() {
+                // SAFETY: the null guard proves `self.0` is a handle created by a successful
+                // `AuthzInitializeResourceManager`, and `Manager` is its sole owner.
                 unsafe {
                     AuthzFreeResourceManager(self.0);
                 }
@@ -56,6 +62,8 @@ pub(crate) fn allows(
     impl Drop for Context {
         fn drop(&mut self) {
             if !self.0.is_null() {
+                // SAFETY: the null guard proves `self.0` is a live context handle from
+                // `AuthzInitializeContextFromToken`/`AuthzAddSidsToContext`; `Context` owns it.
                 unsafe {
                     AuthzFreeContext(self.0);
                 }
@@ -63,6 +71,8 @@ pub(crate) fn allows(
         }
     }
     let mut manager = Manager(null_mut());
+    // SAFETY: `manager.0` receives an opaque handle owned by the `Manager` guard above; the
+    // audit callback and context are all null/None, as `AUTHZ_RM_FLAG_NO_AUDIT` allows.
     security::check(unsafe {
         AuthzInitializeResourceManager(
             AUTHZ_RM_FLAG_NO_AUDIT,
@@ -75,6 +85,8 @@ pub(crate) fn allows(
     })
     .context("create inert authorization manager")?;
     let mut initial = Context(null_mut());
+    // SAFETY: `original.0` is the fixture's live token owned by its `Handle`, `manager.0` is
+    // the live resource manager above, and `initial.0` receives the new owned context.
     security::check(unsafe {
         AuthzInitializeContextFromToken(
             0,
@@ -88,6 +100,8 @@ pub(crate) fn allows(
     })
     .context("copy fixture token into authorization context")?;
     let mut restricted = Context(null_mut());
+    // SAFETY: `initial.0` is the live context above and `restriction` borrows the `Sid` guard's
+    // SID for the call duration; `restricted.0` then receives the new owned context.
     security::check(unsafe {
         AuthzAddSidsToContext(initial.0, null(), 0, &restriction, 1, &mut restricted.0)
     })
@@ -103,6 +117,8 @@ pub(crate) fn allows(
         Error: &mut error,
         ..Default::default()
     };
+    // SAFETY: `restricted.0` is the live context above, `descriptor` owns the SD passed via
+    // `attributes()`, and `reply` points at the two still-live locals it fills in.
     security::check(unsafe {
         AuthzAccessCheck(
             0,

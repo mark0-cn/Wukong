@@ -8,14 +8,22 @@ pub(crate) fn identity(installation: &str, package: &str) -> Result<WorkerIdenti
     // Resolve the native API dynamically, as required by Microsoft's contract:
     // https://learn.microsoft.com/windows/win32/api/winternl/nf-winternl-ntquerysysteminformation
     let name = crate::isolation::security::wide(std::ffi::OsStr::new("ntdll.dll"))?;
+    // SAFETY: `name` is a NUL-terminated wide string alive for the call; GetModuleHandleW
+    // borrows the loaded module handle without raising its refcount, and it is null-checked.
     let library = unsafe { GetModuleHandleW(name.as_ptr()) };
     ensure!(!library.is_null(), "Windows native runtime is unavailable");
+    // SAFETY: `library` was null-checked above, and `c"NtQuerySystemInformation"` is a
+    // NUL-terminated C string; the lookup returns Option, so a missing export is handled.
     let address = unsafe { GetProcAddress(library, c"NtQuerySystemInformation".as_ptr().cast()) }
         .context("Windows native boot query is unavailable")?;
     type Query = unsafe extern "system" fn(i32, *mut c_void, u32, *mut u32) -> i32;
+    // SAFETY: the Option was unwrapped by `context` above, so `address` is a live ntdll code
+    // pointer, and the transmuted type matches the documented NTSTATUS/ULONG prototype.
     let query: Query = unsafe { mem::transmute(address) };
     let mut environment = [0u8; 32];
     let mut returned = 0;
+    // SAFETY: `query` matches the documented prototype, `environment` is a live 32-byte buffer
+    // whose length is passed as 32, and `returned` is a valid u32 out-parameter.
     let status = unsafe { query(90, environment.as_mut_ptr().cast(), 32, &mut returned) };
     ensure!(
         status >= 0,
@@ -28,6 +36,8 @@ pub(crate) fn identity(installation: &str, package: &str) -> Result<WorkerIdenti
     );
     let mut shared = [0u8; 0x2c8];
     // Fixed read-only Windows user mapping; only copy the bounded known prefix.
+    // SAFETY: 0x7ffe0000 is the fixed KUSER_SHARED_DATA page mapped read-only in every process,
+    // so 0x2c8 bytes are readable there; `shared` is a live same-size array and does not alias.
     unsafe {
         ptr::copy_nonoverlapping(
             0x7ffe0000usize as *const u8,

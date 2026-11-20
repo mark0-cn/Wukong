@@ -52,7 +52,7 @@ report-bundle-readme = Wukong 证据包
     config.redacted.json：凭据字段已脱敏的配置。
     target/sample.bin：原始目标字节（导出时不执行）。
     evidence/：按 SHA256 索引的原始证据字节。
-    manifest.json / SHA256SUMS：全部文件的摘要。使用 wukong verify-bundle 校验。
+    manifest.json / SHA256SUMS：全部文件的摘要。可用任意校验和工具比对。
 
     校验和证明完整性，不证明发布者身份。原始证据不脱敏。
     脱敏配置和事件元数据不能用于备份凭据。

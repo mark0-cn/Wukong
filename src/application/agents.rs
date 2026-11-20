@@ -337,27 +337,27 @@ mod tests {
         fs::write(&target, b"fixture")?;
         let run = coordinator.create_run(&target, "task", Default::default(), json!({}))?;
         let mut agent: AgentSnapshot = store.require("agent", &run.root_id)?;
-        agent.role = Role::Analyst;
-        agent.skills = vec!["reverse".into(), "tooling".into()];
+        agent.metadata.role = Role::Analyst;
+        agent.metadata.skills = vec!["reverse".into(), "tooling".into()];
         let marker = "# Testable script validation (self_check_v1)";
-        assert!(!preamble(&agent, &run, &store, None, None)?.contains(marker));
+        assert!(!preamble(&agent.metadata, &run, &store, None, None)?.contains(marker));
 
         // The same agent can gain a delivery contract on an explicit follow-up.
-        agent.contract.deliverables.push("solve.py".into());
-        agent.contract.artifact_acceptance.insert(
+        agent.metadata.contract.deliverables.push("solve.py".into());
+        agent.metadata.contract.artifact_acceptance.insert(
             "solve.py".into(),
             crate::domain::ArtifactAcceptanceProfile::SelfCheckV1,
         );
-        let prompt = preamble(&agent, &run, &store, None, None)?;
+        let prompt = preamble(&agent.metadata, &run, &store, None, None)?;
         assert_eq!(prompt.matches(marker).count(), 1);
         assert!(prompt.contains("--validation-io"));
         assert!(prompt.contains("baseline.json"));
-        assert_eq!(agent.role, Role::Analyst);
-        assert_eq!(agent.skills, ["reverse", "tooling"]);
+        assert_eq!(agent.metadata.role, Role::Analyst);
+        assert_eq!(agent.metadata.skills, ["reverse", "tooling"]);
 
-        agent.skills.push("validation".into());
+        agent.metadata.skills.push("validation".into());
         assert_eq!(
-            preamble(&agent, &run, &store, None, None)?
+            preamble(&agent.metadata, &run, &store, None, None)?
                 .matches(marker)
                 .count(),
             1
@@ -365,19 +365,22 @@ mod tests {
         let custom = dir.path().join("custom");
         fs::create_dir(&custom)?;
         fs::write(custom.join("validation.md"), "CUSTOM_VALIDATION_METHOD")?;
-        agent.skills.pop();
-        let prompt = preamble(&agent, &run, &store, Some(&custom), None)?;
+        agent.metadata.skills.pop();
+        let prompt = preamble(&agent.metadata, &run, &store, Some(&custom), None)?;
         assert!(prompt.contains("CUSTOM_VALIDATION_METHOD"));
         assert!(!prompt.contains(marker));
-        agent.active_skills.push(crate::domain::ActiveSkill {
-            name: "validation".into(),
-            sha256: String::new(),
-            content: "ACTIVE_VALIDATION_SNAPSHOT".into(),
-            evidence_id: String::new(),
-        });
+        agent
+            .metadata
+            .active_skills
+            .push(crate::domain::ActiveSkill {
+                name: "validation".into(),
+                sha256: String::new(),
+                content: "ACTIVE_VALIDATION_SNAPSHOT".into(),
+                evidence_id: String::new(),
+            });
         // The host owns snapshot installation and hash validation. Do not also
         // load a newer file or the built-in body into the stable preamble.
-        let prompt = preamble(&agent, &run, &store, Some(&custom), None)?;
+        let prompt = preamble(&agent.metadata, &run, &store, Some(&custom), None)?;
         assert!(!prompt.contains("CUSTOM_VALIDATION_METHOD"));
         assert!(!prompt.contains(marker));
         Ok(())
@@ -405,7 +408,7 @@ mod tests {
             .create_run(&target, "task", crate::domain::Budget::default(), json!({}))
             .unwrap();
         let mut root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
-        root.skills = vec!["reporter".into()];
+        root.metadata.skills = vec!["reporter".into()];
         let custom = dir.path().join("custom");
         let examples = dir.path().join("examples");
         fs::create_dir(&custom).unwrap();
@@ -415,7 +418,8 @@ mod tests {
         fs::write(examples.join("root.md"), "SELECTED_ROLE_EXAMPLE").unwrap();
         fs::write(examples.join("reporter.md"), "SELECTED_CAPABILITY_EXAMPLE").unwrap();
         fs::write(examples.join("hunter.md"), "UNSELECTED_HUNTER_EXAMPLE").unwrap();
-        let prompt = preamble(&root, &run, &store, Some(&custom), Some(&examples)).unwrap();
+        let prompt =
+            preamble(&root.metadata, &run, &store, Some(&custom), Some(&examples)).unwrap();
         assert!(prompt.contains("SELECTED_REPORT_INSTRUCTIONS"));
         assert!(prompt.contains("SELECTED_ROLE_EXAMPLE"));
         assert!(prompt.contains("SELECTED_CAPABILITY_EXAMPLE"));
@@ -433,8 +437,8 @@ mod tests {
         let mut localized = run.clone();
         localized.config["output_language"] = json!("en-US");
         for role in [Role::Root, Role::Analyst, Role::Verifier] {
-            root.role = role;
-            let prompt = preamble(&root, &localized, &store, None, None).unwrap();
+            root.metadata.role = role;
+            let prompt = preamble(&root.metadata, &localized, &store, None, None).unwrap();
             assert!(prompt.contains("Write user-facing prose in English (en-US)."));
             assert!(prompt.contains("Never translate or rewrite original evidence."));
             assert!(prompt.contains("agent_finish"));

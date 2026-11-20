@@ -1,6 +1,24 @@
 //! File locks whose lifetime belongs to a scope, not inherited descriptors.
 use std::fs::{File, TryLockError};
 
+/// Requested sharing for an advisory lock. Named so a call site cannot pass a
+/// bare `true`/`false` whose meaning lives only in the callee's parameter list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockMode {
+    Shared,
+    Exclusive,
+}
+
+impl LockMode {
+    /// Take the requested lock on an already-open file.
+    pub fn lock(self, file: File) -> Result<FileLock, TryLockError> {
+        match self {
+            Self::Shared => FileLock::try_lock_shared(file),
+            Self::Exclusive => FileLock::try_lock(file),
+        }
+    }
+}
+
 #[must_use = "keep the guard alive for the complete protected operation"]
 pub struct FileLock {
     file: File,

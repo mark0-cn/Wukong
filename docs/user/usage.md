@@ -93,6 +93,8 @@ The right panel draws connectors from actual parent IDs. Lead, Analysis and Veri
 
 **Environments → Register Windows VM** imports the public `connection.json` produced by completed offline setup. Enter the VM address, select the corresponding existing controller SSH private key file, and independently enter the host fingerprint displayed by the VM. Only the key's path is saved. A mismatched fingerprint, malformed receipt or existing environment ID is rejected. **Add to settings draft** preserves other edits; **Save and apply** registers the environment and creates its dedicated public host-pin file. Add or reset an unfinished connection before saving. An empty environment registry makes the first connection the default; later connections can be selected explicitly. Registration performs no SSH connection and does not establish production readiness. Preparing offline media, installing the VM and validating its isolated worker are separate steps; see the [Windows component guide](../../workers/windows/README.md).
 
+**Environments → Windows Worker** (Windows x64 controller only) offers two primary actions: **Generate installer package** prepares the offline media for a disposable Windows VM, and **Import install result** verifies the saved receipt and registers the managed worker. It auto-selects the management network, requires the operator to confirm the fingerprint shown in the VM setup window, reports pending and available states, and supports retrying the connection. See [Windows Worker setup](windows-worker.md) for prerequisites, VM steps, failures and trust limits.
+
 API key values are not stored in TOML: enter the environment variable name, not the secret. Windows reads process variables first, then user/system variables when absent, allowing desktop launches to use saved credentials. PowerShell `$env:...` values apply only to that process and its children.
 
 <a id="windows-发布与启动"></a>
@@ -203,7 +205,7 @@ Execution tools default to disabled. See [execution worker](../../workers/runtim
 
 ## Task management and recovery
 
-Replace `RUN_ID`, `AGENT_ID`, `CALL_ID` and `EVIDENCE_ID` with actual IDs.
+Replace `RUN_ID`, `CALL_ID` and `EVIDENCE_ID` with actual IDs.
 
 <a id="查看与干预"></a>
 
@@ -211,25 +213,21 @@ Replace `RUN_ID`, `AGENT_ID`, `CALL_ID` and `EVIDENCE_ID` with actual IDs.
 
 ```sh
 wukong runs
-wukong status RUN_ID --events 30
+wukong runs --run RUN_ID --events 30
 wukong gui RUN_ID
-wukong message AGENT_ID "Record this additional analysis constraint"
-wukong message AGENT_ID "Continue investigating this function's boundary conditions" --kind follow_up
-wukong stop AGENT_ID --reason "Stop this branch"
 ```
 
-Ordinary messages add information without reopening completed work. `--kind follow_up` assigns more work to a completed Agent, preserving history and cumulative budgets. Paused analysis still requires explicit resume. Stopping a branch stops its subtasks too; recorded evidence remains available.
+Use the desktop workspace to send information, assign follow-ups, pause analysis and stop branches. `runs` lists saved assessments; `runs --run RUN_ID` reports one assessment's status and recent events. Ordinary messages add information without reopening completed work; a follow-up assigns more work to a completed Agent, preserving history and cumulative budgets. Paused analysis still requires explicit resume. Stopping a branch stops its subtasks too; recorded evidence remains available.
 
 <a id="暂停与恢复"></a>
 
 ### Pause and resume
 
 ```sh
-wukong pause RUN_ID
-wukong resume RUN_ID --max-tokens 1000000
+wukong analyze --resume RUN_ID --max-tokens 1000000
 ```
 
-CLI Ctrl+C requests scheduling to stop at a persistence boundary, retaining resumable state. `resume` uses saved configuration/checkpoints; `--max-tokens` and `--max-usd` change cumulative limits. A lease excludes simultaneous active controllers.
+The desktop workspace pauses an active assessment and saves progress. CLI Ctrl+C requests scheduling to stop at a persistence boundary, retaining resumable state. `analyze --resume` uses saved configuration/checkpoints; `--max-tokens` and `--max-usd` change cumulative limits and require `--resume`. A lease excludes simultaneous active controllers.
 
 Native Rig logs live in state-directory `rig/RUN_ID`. State schema is currently 3, without legacy database migration. Old directories return a version message; choose a new state directory for new tasks.
 
@@ -312,12 +310,7 @@ Override builtin bodies or add methods in `skills_dir/<name>.md`; provide exampl
 
 ## Reports and review
 
-```sh
-wukong report RUN_ID --output ./reports/assessment-01
-wukong verify-bundle ./reports/assessment-01
-```
-
-The destination must be new. Bundles contain target snapshots, original evidence, configuration/reproduction metadata, JSON/Markdown/HTML and a SHA256 manifest. Export does not execute the target. `verify-bundle` checks file/mapping integrity, not publisher identity. Original evidence is not redacted; exported configuration redacts credential fields and is not a credential backup. Headings/status follow export language without rewriting existing content. See [report format](../reference/report-format.md).
+Export from the desktop workspace, or pass `--output` to `analyze`; the destination must be new. Bundles contain target snapshots, original evidence, configuration/reproduction metadata, JSON/Markdown/HTML and a SHA256 manifest. Export does not execute the target and verifies every staged payload before publishing; the SHA256 manifest lets any checksum tool detect later changes. Original evidence is not redacted; exported configuration redacts credential fields and is not a credential backup. Headings/status follow export language without rewriting existing content. See [report format](../reference/report-format.md).
 
 Independent review requires a different Agent and actual worker results. Static suspicion or a crash alone never becomes verified impact automatically.
 

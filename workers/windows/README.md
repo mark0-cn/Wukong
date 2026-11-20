@@ -65,17 +65,37 @@ The current offline package does not ship pwntools, pyelftools or Unicorn, so cy
 
 ## Offline delivery and validation
 
+The native installer runs the reviewed installation for both setup UI and unattended provisioning. The installer coordinates protected state, SSH configuration, Service Control Manager activation and publication of the public connection receipt. The UI handles confirmation and receipt export.
+
 Build in an x64 MSVC environment. Keep model credentials and signing private keys on the controller. Install/uninstall acceptance belongs only on dedicated VMs or isolated runners, never over a developer's installation.
+
+CI stages the exact payload and native binaries without controller keys; the operator finalizes the downloadable template with the controller key directory:
 
 ```powershell
 python -m scripts.worker.toolchain --cache target/windows-offline-cache --download
 python -m scripts.worker.build_native
-python -m scripts.worker.layout --cache target/windows-offline-cache --output target/windows-offline-layout
-python -m scripts.worker.assemble --cache target/windows-offline-cache --output target/windows-worker-package --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY
+python -m scripts.worker.media template --cache target/windows-offline-cache --native target/windows-worker-native --output target/windows-worker-media-template --version VERSION
+python -m scripts.worker.media check --template target/windows-worker-media-template --report target/windows-worker-media-check.json
+python -m scripts.worker.media pack --template target/windows-worker-media-template --version VERSION --output target/windows-worker-media
+python -m scripts.worker.media finalize --template ABSOLUTE_TEMPLATE_DIRECTORY --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY --spec enrollment-spec.json --output ABSOLUTE_MEDIA_DIRECTORY --generate-ssh-key ABSOLUTE_SSH_PRIVATE_PATH
 cargo fmt --manifest-path workers/windows/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 ```
+
+`template` stages `payload/`, `binaries/{wukong-worker.exe,wukong-package.exe}`, the unsigned `manifest-draft.json`, `native-build.json` and `media-template.json`; `check` then finalizes that template in a temporary directory with an ephemeral key and runs `WukongWorkerSetup.exe verify-enrollment`, so CI proves sealing, enrollment and media wiring without elevation or installation. Release builds publish the deterministic archive `wukong-windows-worker-media-<version>.zip`; verify it against `SHA256SUMS` and unpack it outside the key directory.
+
+`finalize` requires an absolute controller key directory outside the template and output. The enrollment spec (`schema: 1`) provides a 32-character lowercase hexadecimal `installation_id`, an `environment_id` of 1–64 ASCII letters/digits/underscores/hyphens, `generation` (default 1), an IPv4 `management_peer` (loopback, unspecified, multicast and broadcast addresses are rejected), `ssh_port`, optional `execution_boundary` (only `disposable_vm`) and either a canonical `ssh_public_key {algorithm, key}` or `--generate-ssh-key`. SSH key generation uses the packaged `ssh-keygen.exe`; the private key is written outside the media and only the public key enters the signed enrollment. Finalize seals the staged payload, signs enrollment, bundles public media (`WukongWorkerSetup.exe`, `setup.json`, `payload/`, `enrollment/`, optional `recovery/`) and writes a hashed `media.json` receipt. It fails closed when the key directory or any private-key filename would appear inside the template or output. Never copy the controller key directory, SSH private keys or model credentials into the media or the guest.
+
+Any Windows host can pre-check finalized public media without elevation: `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`. Installation uses the elevated `WukongWorkerSetup.exe install-reviewed setup.json <controller-key-hex> <sha256-of-enrollment.json>` and belongs only on the dedicated disposable VM.
+
+### Installation result and re-saving
+
+Successful offline setup writes the public `C:\ProgramData\WukongWorkers\<installation_id>\connection.json` receipt (schema 1, `receipt_version: 2`). It contains the installation/environment identity, the SSH user and port, the SSH host key and its fingerprint, and `candidate_addresses`: this guest's non-loopback IPv4 addresses, with RFC 1918 private addresses first and numeric ascending order within each group, de-duplicated and capped at 8. Candidate enumeration is best effort; a guest whose adapters cannot be read still completes the installation with an empty list. The protected record under ProgramData remains authoritative; the exported file is a public connection hint and never proves reachability or hypervisor isolation.
+
+After success, setup offers **保存安装结果 / Save install result** and opens the Windows save dialog with the default name `wukong-worker-<installation_id>.json`. If the dialog cannot open or the selected path cannot be written, the same bytes are copied to `%USERPROFILE%\Desktop\wukong-worker-<installation_id>.json` (or `%PUBLIC%` or its Desktop when the profile is unavailable or has no Desktop) and setup reports the actual path. Saving never changes installation success: the protected record in ProgramData is already complete.
+
+Starting setup with no arguments on a guest that already has a valid installation does not reinstall it. It shows a short "already installed" dialog and offers to save a refreshed result: the current adapter addresses are re-enumerated and only `candidate_addresses` changes, while the installation ID, SSH and host-key fields stay identical. Use this export after a guest address change instead of resetting the worker. Installation and repair still require the offline media and the reviewed `install-*`/`verify-enrollment` paths; the refresh flow performs no installation, service or firewall change.
 
 Native build identity includes the shared protocol crate, native/Python sources, locked inputs and build scripts. Assembly verifies this identity and preserves dependency licenses. Enrollment pins the controller signer and installation; SSH independently pins the worker host key. Use the [cross-platform environment guide](../../docs/design/cross-platform-environments.md) for connection and task binding, and [worker acceptance guide](../tests/README.md) for installed process/debugger/recovery fixtures.
 

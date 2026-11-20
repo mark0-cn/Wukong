@@ -8,8 +8,9 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
         .context("invalid workbench JSON")
 }
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    fs::create_dir_all(path.parent().context("file needs a parent")?)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
+    let parent = path.parent().context("file needs a parent")?;
+    fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     use std::io::Write;
     temporary.write_all(&serde_json::to_vec_pretty(value)?)?;
     temporary.as_file().sync_all()?;

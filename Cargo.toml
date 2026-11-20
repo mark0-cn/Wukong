@@ -69,15 +69,37 @@ lto = "thin"
 strip = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Globalization", "Win32_Security_Authorization", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Registry"] }
+windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Globalization", "Win32_NetworkManagement", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking", "Win32_Networking_WinSock", "Win32_Security_Authorization", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Registry"] }
+# Deterministic release-media archives for the built-in worker media finalizer.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [features]
 default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-build", "dep:tauri-plugin-updater"]
 custom-protocol = ["desktop", "tauri/custom-protocol"]
+# Local development packaging only (`cargo package-local`). A build with this
+# feature bundles `local-release.json` and completes first-run onboarding against
+# a locally built Docker image; CI release builds must never enable it.
+local-release = ["desktop"]
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
 
 [target.'cfg(windows)'.dev-dependencies]
 junction = { version = "2.1", default-features = false }
+
+[lints.clippy]
+# Every unsafe block states its invariant; the controller has two FFI blocks and the
+# Windows worker documented all 306 of its own.
+undocumented_unsafe_blocks = "warn"
+# Debug leftovers and unfinished markers must not reach a release build.
+dbg_macro = "warn"
+todo = "warn"
+# A suppression without a reason is an unexplained contract change.
+allow_attributes_without_reason = "warn"
+# Prefer `?` where a caller can act on the failure; an intentional panic uses
+# `expect` with the invariant that makes it impossible. Tests are exempt.
+unwrap_used = "warn"
+# A narrowing cast silently keeps the low bits; convert with `try_from` or state
+# the bound that makes the cast lossless.
+cast_possible_truncation = "warn"

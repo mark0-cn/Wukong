@@ -23,6 +23,10 @@ impl EvidenceService {
         args: &Value,
     ) -> Result<Value> {
         let evidence = string_list(args, "evidence_ids")?;
+        ensure!(
+            evidence.len() <= 128,
+            "evidence links are limited to 128 per record"
+        );
         self.store.verify_evidence_links(&agent.run_id, &evidence)?;
         self.effect(agent, call_id, |tx| {
             let mut coverage = if name == "coverage_update" {
@@ -69,6 +73,10 @@ impl EvidenceService {
         args: &Value,
     ) -> Result<Value> {
         let evidence = string_list(args, "evidence_ids")?;
+        ensure!(
+            evidence.len() <= 128,
+            "evidence links are limited to 128 per record"
+        );
         self.store.verify_evidence_links(&agent.run_id, &evidence)?;
         self.effect(agent, call_id, |tx| {
             let mut finding = if name == "finding_update" {

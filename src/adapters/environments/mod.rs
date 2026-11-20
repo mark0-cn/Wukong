@@ -235,7 +235,10 @@ impl EnvironmentRegistry {
         if let Some(path) = self.lab_paths.get(id) {
             let mut guards = self.lab_guards.lock().await;
             if !guards.contains_key(id) {
-                guards.insert(id.into(), lab_guard::acquire(path, false)?);
+                guards.insert(
+                    id.into(),
+                    lab_guard::acquire(path, lab_guard::LockMode::Shared)?,
+                );
             }
         }
         let client = self.client(id).await?;

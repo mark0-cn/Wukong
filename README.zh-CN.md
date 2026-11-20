@@ -118,15 +118,11 @@ Docker 题目、远程转发、调试、自检和迁移见 [Pwn 工作环境](do
 # 读取文件，不执行目标或调用模型
 wukong inspect ./sample.elf --strings
 
-# 使用生成的工作环境配置开展分析
-wukong --config .wukong/workbench/wukong.toml analyze ./sample.elf --task "Recover the input format with evidence"
-
-# 导出到新目录并检查完整性
-wukong report RUN_ID --output ./reports/analysis-01
-wukong verify-bundle ./reports/analysis-01
+# 使用生成的工作环境配置开展分析并导出报告包
+wukong --config .wukong/workbench/wukong.toml analyze ./sample.elf --task "Recover the input format with evidence" --output ./reports/analysis-01
 ```
 
-将 `RUN_ID` 和配置路径替换为实际值。消息、暂停恢复及分支控制见[任务管理](docs/user/usage.zh-CN.md#task-management-and-recovery)，或运行 `wukong --help`。
+将配置路径替换为实际值。恢复流程见[任务管理](docs/user/usage.zh-CN.md#task-management-and-recovery)；消息、暂停恢复及分支控制在桌面工作区中操作，或运行 `wukong --help`。
 
 <a id="1-prerequisites"></a>
 <a id="1-准备环境"></a>

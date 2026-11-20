@@ -24,7 +24,7 @@ pub struct AssessmentService {
 }
 
 pub struct PreparedAssessment {
-    _maintenance: crate::adapters::files::locks::FileLock,
+    _maintenance: crate::application::maintenance::updates::maintenance::MaintenanceLock,
     runner: AssessmentRunner,
     run: RunRecord,
     budget: Option<Budget>,
@@ -38,12 +38,21 @@ impl PreparedAssessment {
         self.runner.subscribe()
     }
     pub async fn drive(self, cancel: CancellationToken) -> Result<RunRecord> {
-        let result = self
-            .runner
+        // The future can be dropped by an aborted task, and ToolService has no Drop of
+        // its own, so teardown belongs to a guard rather than the happy path.
+        struct CloseTools(std::sync::Arc<crate::application::tools::ToolService>);
+        impl Drop for CloseTools {
+            fn drop(&mut self) {
+                let tools = std::sync::Arc::clone(&self.0);
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    handle.spawn(async move { tools.close().await });
+                }
+            }
+        }
+        let _close = CloseTools(std::sync::Arc::clone(&self.runner.tools));
+        self.runner
             .drive_with_budget(&self.run.id, cancel, self.budget)
-            .await;
-        self.runner.tools.close().await;
-        result
+            .await
     }
 }
 

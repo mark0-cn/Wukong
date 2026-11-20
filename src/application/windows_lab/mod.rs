@@ -7,6 +7,7 @@
 //! input never supplies a VMX path or a VMware command. An interrupted or
 //! timed-out operation stays `recovery_required` until an operator reconciles
 //! it, and no state transition re-issues an uncertain host effect.
+use crate::adapters::environments::EnvironmentConfig;
 use crate::config::WindowsLabVm;
 use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
@@ -29,9 +30,18 @@ mod execution;
 pub mod install;
 pub mod media;
 pub mod package;
+pub mod provision;
+pub mod provision_environment;
+mod provision_service;
 pub mod runner;
-pub mod service;
 use admin::{AdminFile, AdminRequest, LabAdmin};
+use provision::{
+    GuestNetwork, IsoBuilder, MediaFinalizer, OfflineDisk, ProvisionEnvironment,
+    RegisteredEnvironment,
+};
+pub use provision_service::{
+    CleanGuestOptions, CleanGuestOutcome, ProvisionOptions, ProvisionOutcome,
+};
 
 pub const STATE_SCHEMA: u32 = 2;
 
@@ -75,6 +85,27 @@ fn valid_label(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.len() <= max && !value.contains(['\n', '\r', '\0'])
 }
 
+/// Canonical configuration identity of one registered lab: the physical VM, the
+/// operator `[windows_lab.vms.<alias>]` entry and the mapped
+/// `[environments.<id>]` entry. `open` refuses a persisted state that records a
+/// different identity, so only the operation that legitimately rewrites the
+/// mapped environment (`lab provision --register`) may persist a recomputed
+/// hash. Both hash creators share this function so the adoption writes exactly
+/// the value the next command computes.
+fn configuration_sha256(
+    physical_id: &str,
+    config: &WindowsLabVm,
+    environment: Option<&EnvironmentConfig>,
+) -> Result<String> {
+    Ok(hex::encode(Sha256::digest(serde_json::to_vec(
+        &serde_json::json!({
+            "physical_vm": physical_id,
+            "config": config,
+            "environment": environment,
+        }),
+    )?)))
+}
+
 pub struct WindowsLab {
     vm_id: String,
     baseline: String,
@@ -85,9 +116,18 @@ pub struct WindowsLab {
     host: Arc<dyn VmHost>,
     worker: Option<Arc<dyn LabWorker>>,
     admin: Option<Arc<dyn LabAdmin>>,
+    offline: Option<Arc<dyn OfflineDisk>>,
+    iso_builder: Option<Arc<dyn IsoBuilder>>,
+    guest_network: Option<Arc<dyn GuestNetwork>>,
+    media_finalizer: Option<Arc<dyn MediaFinalizer>>,
+    environment_registrar: Option<Arc<dyn ProvisionEnvironment>>,
     gate: Mutex<()>,
     vmx: PathBuf,
     caller: Option<String>,
+    /// Operator configuration this lab was opened with, retained verbatim so a
+    /// successful `--register` can persist the guard hash the next command
+    /// recomputes from the rewritten configuration file.
+    vm_config: WindowsLabVm,
 }
 
 impl WindowsLab {
@@ -104,7 +144,7 @@ impl WindowsLab {
         state_dir: &Path,
         vm_id: &str,
         config: &WindowsLabVm,
-        environment: Option<&crate::adapters::environments::EnvironmentConfig>,
+        environment: Option<&EnvironmentConfig>,
         host: Arc<dyn VmHost>,
     ) -> Result<Self> {
         crate::adapters::environments::validate_id(vm_id)?;
@@ -115,9 +155,7 @@ impl WindowsLab {
         let physical_id = physical_identity(&config.vmx)?;
         let mut store = LabStore::new(state_dir);
         store.physical_id = Some(physical_id.clone());
-        store.configuration_sha256 = Some(hex::encode(Sha256::digest(serde_json::to_vec(
-            &serde_json::json!({"physical_vm":physical_id,"config":config,"environment":environment}),
-        )?)));
+        store.configuration_sha256 = Some(configuration_sha256(&physical_id, config, environment)?);
         // Read validates the persisted configuration before opening any capability.
         store.load(vm_id, &config.baseline_snapshot)?;
         Ok(Self {
@@ -130,9 +168,15 @@ impl WindowsLab {
             host,
             worker: None,
             admin: None,
+            offline: None,
+            iso_builder: None,
+            guest_network: None,
+            media_finalizer: None,
+            environment_registrar: None,
             gate: Mutex::new(()),
             vmx: config.vmx.clone(),
             caller: None,
+            vm_config: config.clone(),
         })
     }
 
@@ -181,6 +225,65 @@ impl WindowsLab {
     pub fn with_admin(mut self, admin: Arc<dyn LabAdmin>) -> Self {
         self.admin = Some(admin);
         self
+    }
+
+    /// Attach the offline disk-injection adapter for `lab provision`.
+    pub fn with_offline(mut self, offline: Arc<dyn OfflineDisk>) -> Self {
+        self.offline = Some(offline);
+        self
+    }
+
+    /// Attach the ISO builder used by `lab provision`.
+    pub fn with_iso_builder(mut self, builder: Arc<dyn IsoBuilder>) -> Self {
+        self.iso_builder = Some(builder);
+        self
+    }
+
+    /// Attach hypervisor guest-address discovery used for environment registration.
+    pub fn with_guest_network(mut self, network: Arc<dyn GuestNetwork>) -> Self {
+        self.guest_network = Some(network);
+        self
+    }
+
+    /// Attach the repository media finalize entry point.
+    pub fn with_media_finalizer(mut self, finalizer: Arc<dyn MediaFinalizer>) -> Self {
+        self.media_finalizer = Some(finalizer);
+        self
+    }
+
+    /// Attach the controller environment registration/doctor hook. The CLI
+    /// supplies it only for `--register`/`--verify-environment`.
+    pub fn with_environment_registrar(mut self, registrar: Arc<dyn ProvisionEnvironment>) -> Self {
+        self.environment_registrar = Some(registrar);
+        self
+    }
+
+    /// Adopt the configuration identity written by this operation's successful
+    /// environment registration. Registration rewrites the mapped
+    /// `[environments.<id>]` entry, which changes the guard hash `open` compares
+    /// against, so the persisted state and physical-VM identity must be rebound
+    /// in the same commit. Only the mapped entry may move: a registration that
+    /// writes an environment this lab does not map leaves the guard untouched,
+    /// and any change this operation did not write keeps being refused by
+    /// `LabStore::load`/`lock`.
+    pub(super) fn adopt_registered_configuration(
+        &self,
+        state: &mut LabState,
+        registered: &RegisteredEnvironment,
+    ) -> Result<()> {
+        if self.vm_config.environment.as_deref() != Some(registered.environment_id.as_str()) {
+            return Ok(());
+        }
+        let physical_id = self
+            .store
+            .physical_id
+            .as_deref()
+            .context("registered lab VM has no physical identity")?;
+        let configuration_sha256 =
+            configuration_sha256(physical_id, &self.vm_config, Some(&registered.environment))?;
+        self.store
+            .adopt_configuration(state, &configuration_sha256)
+            .context("adopt the registered lab environment")
     }
 
     pub async fn status(&self) -> Result<serde_json::Value> {
@@ -234,7 +337,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         self.mark_restart_recovery(&mut state)?;
@@ -243,6 +346,16 @@ impl WindowsLab {
             "lab VM {} is {:?}; restore or reconcile the previous experiment first",
             self.vm_id,
             state.phase
+        );
+        ensure!(
+            state
+                .last_provision
+                .as_ref()
+                .is_none_or(|provision| !matches!(
+                    provision.status,
+                    RunStatus::Running | RunStatus::Unknown
+                )),
+            "offline provisioning state is uncertain; re-provision the VM and reconcile it before preparing an experiment"
         );
         let maintenance = if let Some(worker) = &self.worker
             && self.host.running().await?
@@ -262,7 +375,8 @@ impl WindowsLab {
             owner: owner.to_owned(),
             purpose: purpose.to_owned(),
             spec_sha256: spec_sha256.clone(),
-            spec: spec.clone(),
+            spec: Some(spec.clone()),
+            provision: None,
             package_sha256: package_sha256.clone(),
             install_sha256: install_sha256.clone(),
             snapshot: snapshot.clone(),
@@ -326,7 +440,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         let active = state
@@ -376,7 +490,8 @@ impl WindowsLab {
             owner: active.owner.clone(),
             purpose: active.purpose.clone(),
             spec_sha256: active.spec_sha256.clone(),
-            spec: active.spec.clone(),
+            spec: Some(active.spec.clone()),
+            provision: None,
             package_sha256: active.package_sha256.clone(),
             install_sha256: active.install_sha256.clone(),
             snapshot: state.baseline_snapshot.clone(),
@@ -464,7 +579,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let state = self.store.load(&self.vm_id, &self.baseline)?;
         ensure!(
@@ -518,7 +633,7 @@ impl WindowsLab {
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
             &crate::adapters::environments::lab_guard::path(&self.vmx)?,
-            true,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         let pending = state
@@ -531,28 +646,53 @@ impl WindowsLab {
             pending.operation_id
         );
         match outcome {
-            ReconcileOutcome::Completed => {
-                state.phase = match pending.kind {
-                    OperationKind::Prepare => LabPhase::Ready,
-                    OperationKind::Restore => LabPhase::Idle,
-                };
-                state.active = (pending.kind == OperationKind::Prepare).then(|| ActiveExperiment {
-                    lab_id: pending.lab_id.clone(),
-                    owner: pending.owner.clone(),
-                    purpose: pending.purpose.clone(),
-                    generation: pending.generation,
-                    spec_sha256: pending.spec_sha256.clone(),
-                    spec: pending.spec.clone(),
-                    snapshot: (pending.kind == OperationKind::Prepare)
-                        .then(|| pending.snapshot.clone()),
-                    package_sha256: pending.package_sha256.clone(),
-                    install_sha256: pending.install_sha256.clone(),
-                    started_at: pending.started_at.clone(),
-                });
-                state.pending = None;
-                state.last_error = None;
-            }
+            ReconcileOutcome::Completed => match pending.kind {
+                OperationKind::Prepare => {
+                    state.phase = LabPhase::Ready;
+                    state.active = Some(ActiveExperiment {
+                        lab_id: pending.lab_id.clone(),
+                        owner: pending.owner.clone(),
+                        purpose: pending.purpose.clone(),
+                        generation: pending.generation,
+                        spec_sha256: pending.spec_sha256.clone(),
+                        spec: pending
+                            .spec
+                            .clone()
+                            .context("pending prepare operation lost its spec")?,
+                        snapshot: Some(pending.snapshot.clone()),
+                        package_sha256: pending.package_sha256.clone(),
+                        install_sha256: pending.install_sha256.clone(),
+                        started_at: pending.started_at.clone(),
+                    });
+                    state.pending = None;
+                    state.last_error = None;
+                }
+                OperationKind::Restore => {
+                    state.phase = LabPhase::Idle;
+                    state.active = None;
+                    state.pending = None;
+                    state.last_error = None;
+                }
+                OperationKind::Provision => {
+                    self.cleanup_provision_artifacts(&pending).await?;
+                    state.phase = LabPhase::Idle;
+                    state.active = None;
+                    state.pending = None;
+                    state.last_error = None;
+                    if let Some(record) = state.last_provision.as_mut() {
+                        record.status = RunStatus::Completed;
+                        record.settled = true;
+                        record.ended_at = record.ended_at.clone().or_else(|| Some(now()));
+                        record.error = None;
+                    }
+                }
+            },
             ReconcileOutcome::Failed => {
+                if pending.kind == OperationKind::Provision {
+                    self.cleanup_provision_artifacts(&pending).await.context(
+                        "restore the VMX and remove the generated ISO before recording failure",
+                    )?;
+                }
                 state.phase = LabPhase::Failed;
                 state.active = None;
                 state.pending = None;
@@ -560,6 +700,16 @@ impl WindowsLab {
                     "operator recorded failure for {:?} operation {operation_id}",
                     pending.kind
                 ));
+                if pending.kind == OperationKind::Provision
+                    && let Some(record) = state.last_provision.as_mut()
+                {
+                    record.status = RunStatus::Failed;
+                    record.settled = true;
+                    record.ended_at = Some(now());
+                    record.error = Some(format!(
+                        "operator recorded failure for provisioning operation {operation_id}"
+                    ));
+                }
             }
             ReconcileOutcome::Unknown => {
                 state.phase = LabPhase::RecoveryRequired;
@@ -599,11 +749,34 @@ impl WindowsLab {
     /// A controller restart must not silently re-issue an unfinished effect.
     fn mark_restart_recovery(&self, state: &mut LabState) -> Result<()> {
         if state.pending.is_some()
-            && matches!(state.phase, LabPhase::Preparing | LabPhase::Restoring)
+            && matches!(
+                state.phase,
+                LabPhase::Preparing | LabPhase::Restoring | LabPhase::Provisioning
+            )
         {
             state.phase = LabPhase::RecoveryRequired;
             state.last_error = Some(
                 "controller restarted while a host operation was pending; inspect the VM and reconcile with its operation id"
+                    .into(),
+            );
+            self.store.save(state)?;
+        }
+        if state
+            .last_provision
+            .as_ref()
+            .is_some_and(|provision| provision.status == RunStatus::Running)
+            && state.pending.is_none()
+        {
+            if let Some(provision) = state.last_provision.as_mut() {
+                provision.status = RunStatus::Unknown;
+                provision.ended_at = Some(now());
+                provision.error = Some(
+                    "controller restarted during offline provisioning; re-provision the VM before reuse"
+                        .into(),
+                );
+            }
+            state.last_error = Some(
+                "controller restarted during offline provisioning; inspect the powered-off VM, remove guest leftovers with `wukong lab clean-guest --vm <alias> --operation <operation_id>` before retrying"
                     .into(),
             );
             self.store.save(state)?;
@@ -778,7 +951,10 @@ pub(crate) fn check_execution_admission(
             state.pending.is_none()
                 && !matches!(
                     state.phase,
-                    LabPhase::Preparing | LabPhase::Restoring | LabPhase::RecoveryRequired
+                    LabPhase::Preparing
+                        | LabPhase::Restoring
+                        | LabPhase::Provisioning
+                        | LabPhase::RecoveryRequired
                 )
                 && state
                     .last_run
@@ -787,7 +963,14 @@ pub(crate) fn check_execution_admission(
                 && state.last_install.as_ref().is_none_or(|install| !matches!(
                     install.status,
                     RunStatus::Running | RunStatus::Unknown
-                )),
+                ))
+                && state
+                    .last_provision
+                    .as_ref()
+                    .is_none_or(|provision| !matches!(
+                        provision.status,
+                        RunStatus::Running | RunStatus::Unknown
+                    )),
             "lab VM has an unresolved maintenance/execution effect; observe and reconcile it before starting new work"
         );
     }

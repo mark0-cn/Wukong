@@ -128,12 +128,16 @@ def file_index(root):
     return files
 
 
-def assemble(cache, output, native, keys):
+def stage(cache, output, native):
+    """Stage the unsigned payload tree and return its manifest draft inputs.
+
+    No controller key participates here, so CI can build the exact payload
+    without private material. The returned mapping carries the manifest draft,
+    the authenticated native binaries directory and the native build metadata.
+    """
     binaries, native_metadata = native_build(native)
     validate_debugger(native, native_metadata.get("debugger"))
-    output, keys = no_links(output), no_links(keys)
-    if not keys.is_absolute() or keys == output or output in keys.parents:
-        raise ValueError("Controller key storage must stay outside the package")
+    output = no_links(output)
     before = identity()
     prepare(cache, output)
     shutil.copyfile(
@@ -212,6 +216,15 @@ def assemble(cache, output, native, keys):
     )
     if identity() != before:
         raise ValueError("Worker sources changed while assembling the offline payload")
+    return dict(manifest=manifest, binaries=binaries, native_build=native_metadata)
+
+
+def assemble(cache, output, native, keys):
+    output, keys = no_links(output), no_links(keys)
+    if not keys.is_absolute() or keys == output or output in keys.parents:
+        raise ValueError("Controller key storage must stay outside the package")
+    staged = stage(cache, output, native)
+    binaries, manifest = staged["binaries"], staged["manifest"]
     # The operator draft and protected key never enter the deliverable directory.
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".worker-seal-") as temporary:
         draft = Path(temporary) / "manifest-draft.json"

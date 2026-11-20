@@ -19,6 +19,8 @@ pub(crate) struct Local(pub(crate) *mut c_void);
 impl Drop for Local {
     fn drop(&mut self) {
         if !self.0.is_null() {
+            // SAFETY: `Local` is the sole owner of a non-null LocalAlloc/LocalFree allocation
+            // (from `ConvertStringSidToSidW`, `GetNamedSecurityInfoW`, ...), freed once here.
             unsafe {
                 LocalFree(self.0);
             }
@@ -36,13 +38,19 @@ pub fn check(value: i32) -> Result<()> {
 pub(crate) fn sid_text(sid: PSID) -> Result<String> {
     ensure!(!sid.is_null(), "native identity has no SID");
     let mut text = null_mut();
+    // SAFETY: the `ensure!` above proves `sid` is non-null, and `ConvertSidToStringSidW`
+    // writes a new LocalAlloc'd string into `text`, adopted by `Local` on the next line.
     check(unsafe { ConvertSidToStringSidW(sid, &mut text) })?;
     let _memory = Local(text.cast());
     let mut length = 0;
+    // SAFETY: `text` is the NUL-terminated LocalAlloc'd string from the call above, so this
+    // scan cannot pass the terminator; the 256 cap merely stops an unterminated string.
     while length < 256 && unsafe { *text.add(length) } != 0 {
         length += 1;
     }
     ensure!(length < 256, "unbounded native SID");
+    // SAFETY: `length` counts to the terminator, proven below 256 by the `ensure!` above, so
+    // the slice stays inside the same `Local`-owned string.
     Ok(String::from_utf16(unsafe {
         std::slice::from_raw_parts(text, length)
     })?)
@@ -71,10 +79,14 @@ pub(crate) fn verify_descriptor_with_children(
 ) -> Result<()> {
     let mut actual_owner = null_mut();
     let mut defaulted = 0;
+    // SAFETY: `descriptor` is a caller-supplied valid security descriptor (owned by `Local`
+    // in every call path), and both out-parameters are valid `&mut` locals.
     check(unsafe { GetSecurityDescriptorOwner(descriptor, &mut actual_owner, &mut defaulted) })?;
     ensure!(sid_text(actual_owner)? == owner, "unexpected native owner");
     let mut acl = null_mut();
     let mut present = 0;
+    // SAFETY: same caller-supplied descriptor, still alive; `acl` then points into it and is
+    // only read while the descriptor stays alive in the caller.
     check(unsafe {
         GetSecurityDescriptorDacl(descriptor, &mut present, &mut acl, &mut defaulted)
     })?;
@@ -83,22 +95,34 @@ pub(crate) fn verify_descriptor_with_children(
         "native private object has a null ACL"
     );
     let (mut control, mut revision) = (0, 0);
+    // SAFETY: the same live descriptor; `control`/`revision` are stack locals the API fills,
+    // and the `ensure!` below tests the bits it reported.
     check(unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) })?;
     ensure!(
         (!protected || control & SE_DACL_PROTECTED != 0)
+            // SAFETY: `acl` was proven non-null and inside `descriptor` by the `ensure!`
+            // above, so reading its `AceCount` header field stays in bounds.
             && unsafe { (*acl).AceCount as usize } == grants.len() + children.len(),
         "native ACL is unprotected or has unexpected principals"
     );
     let mut actual = std::collections::BTreeMap::new();
     let mut actual_children = std::collections::BTreeMap::new();
+    // SAFETY: `acl` is that non-null live DACL, and `AceCount` bounds the loop so every
+    // `GetAce` index below is one the DACL actually holds.
     for index in 0..unsafe { (*acl).AceCount } {
         let mut ace = null_mut();
+        // SAFETY: `acl` is the live DACL and `index` is below its `AceCount`; `GetAce` only
+        // reads the DACL and returns a pointer into memory owned by `descriptor`.
         check(unsafe { GetAce(acl, index as u32, &mut ace) })?;
+        // SAFETY: `GetAce` succeeded and returned an ACE inside the DACL, which starts with
+        // an ACE_HEADER; `descriptor` keeps that memory alive for this borrow.
         let header = unsafe { &*ace.cast::<ACE_HEADER>() };
         ensure!(
             header.AceType == 0 && header.AceSize as usize >= size_of::<ACCESS_ALLOWED_ACE>(),
             "invalid native ACL entry"
         );
+        // SAFETY: the `ensure!` above proved this ACE is a type-0 ACCESS_ALLOWED_ACE of at
+        // least `size_of::<ACCESS_ALLOWED_ACE>()` bytes, so the wider cast stays in bounds.
         let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
         let sid = sid_text(addr_of!(allowed.SidStart).cast_mut().cast())?;
         if header.AceFlags & INHERIT_ONLY_ACE as u8 != 0 {

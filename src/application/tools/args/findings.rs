@@ -20,6 +20,7 @@ pub(in crate::application::tools) struct FindingFileArgs {
     pub stage: Option<FindingStage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub location: Option<Map<String, Value>>,
+    #[schemars(length(max = 128))]
     pub evidence_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_id: Option<String>,

@@ -4,35 +4,28 @@ use crate::{
     host::accounts::{self, Role},
     host::authority::{Authority, SignedEnrollment},
     host::deployment::{self, Deployment},
-    host::service_access,
+    host::network,
     host::staging,
-    isolation::environment,
-    isolation::processes,
     isolation::security::{self, AclPolicy},
     rpc::pipe_transport,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
-    io::Write,
     mem::size_of,
     path::{Path, PathBuf},
-    ptr::{null, null_mut},
-    time::{Duration, Instant},
+    ptr::null_mut,
 };
 use windows_sys::Win32::{
     Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
-    Storage::FileSystem::{READ_CONTROL, WRITE_DAC, WRITE_OWNER},
-    System::{
-        Services::*,
-        Threading::{GetCurrentProcess, OpenProcessToken},
-    },
+    System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
 use wukong_worker_package::{
-    Compatibility, PublicKey, SshPublicKey, VerifiedEnrollment, VerifiedManifest, verify_package,
+    Compatibility, ConnectionReceipt, PublicKey, RECEIPT_VERSION, VerifiedEnrollment,
+    VerifiedManifest, verify_package,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -92,10 +85,14 @@ impl Plan {
 }
 pub fn elevated() -> Result<bool> {
     let mut token = null_mut();
+    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing, and `token` is a
+    // null-initialized out-param; `check` proves success before `Handle` takes ownership.
     security::check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) })?;
     let token = security::Handle(token);
     let mut elevation = TOKEN_ELEVATION::default();
     let mut returned = 0;
+    // SAFETY: `token.0` is a live `Handle`, `elevation` is a live `TOKEN_ELEVATION` on this
+    // frame, and the call's declared length is exactly `size_of::<TOKEN_ELEVATION>()`.
     security::check(unsafe {
         GetTokenInformation(
             token.0,
@@ -107,169 +104,35 @@ pub fn elevated() -> Result<bool> {
     })?;
     Ok(elevation.TokenIsElevated != 0)
 }
-fn copy_new(source: &Path, target: &Path, policy: &AclPolicy, maximum: u64) -> Result<()> {
-    let bytes = crate::artifacts::io::read_bytes(source, maximum)?;
-    let mut output = policy.create_file(target)?;
-    output.write_all(&bytes)?;
-    output.sync_all()?;
-    drop(output);
-    policy.verify(target, false)
-}
-fn ssh_path(path: &Path) -> Result<String> {
-    let value = path
-        .to_str()
-        .context("SSH paths must be Unicode")?
-        .replace('\\', "/");
+/// Recheck the reviewed enrollment in the elevated process before installing.
+pub fn install_reviewed(
+    configuration: &Path,
+    key: &PublicKey,
+    enrollment_hash: &str,
+) -> Result<ConnectionReceipt> {
     ensure!(
-        !value.contains(['"', '\n', '\r', '\0']),
-        "invalid SSH configuration path"
+        elevated()?,
+        "administrator elevation is required for VM installation"
     );
-    Ok(format!("\"{value}\""))
-}
-fn fixed_command(
-    executable: &Path,
-    arguments: &[std::ffi::OsString],
-    root: &Path,
-    timeout: Duration,
-) -> Result<()> {
-    security::no_links(executable)?;
-    let tool = match executable.file_name().and_then(OsStr::to_str) {
-        Some("ssh-keygen.exe") => "ssh-keygen",
-        Some("sshd.exe") => "sshd",
-        _ => anyhow::bail!("unexpected fixed offline installation tool"),
-    };
-    // These two reviewed commands never emit key material. Retain their
-    // diagnostics privately instead of losing pre-service failures to NUL.
-    let log = AclPolicy::private_vm()
-        .create_file(&root.join(format!("metadata/install-tool-{tool}.log")))?;
-    let mut command = std::process::Command::new(executable);
-    use std::os::windows::process::CommandExt;
-    command
-        .args(arguments)
-        .env_clear()
-        .envs(environment::system(root)?)
-        .current_dir(root)
-        .stdin(std::process::Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log)
-        .creation_flags(0x08000000);
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("cannot launch fixed offline installation tool {tool}"))?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            ensure!(
-                status.success(),
-                "fixed offline installation tool {tool} failed: {status}; inspect its protected install-tool log"
-            );
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            child.kill()?;
-            let _ = child.wait();
-            anyhow::bail!("fixed offline installation tool {tool} exceeded its deadline");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-struct Service(SC_HANDLE);
-impl Drop for Service {
-    fn drop(&mut self) {
-        unsafe {
-            CloseServiceHandle(self.0);
-        }
-    }
-}
-fn register_service(
-    root: &Path,
-    deployment: &Deployment,
-    manifest: &VerifiedManifest,
-) -> Result<()> {
-    let manager = Service(unsafe { OpenSCManagerW(null(), null(), SC_MANAGER_CREATE_SERVICE) });
+    let plan = Plan::read(configuration, key)?;
     ensure!(
-        !manager.0.is_null(),
-        "cannot open SCM for offline worker installation: {}",
-        std::io::Error::last_os_error()
+        hex::encode(Sha256::digest(
+            plan.enrollment.enrollment().canonical_bytes()?
+        )) == enrollment_hash,
+        "offline enrollment changed after setup review"
     );
-    let name = security::wide(OsStr::new(&pipe_transport::service_name(
-        &deployment.installation_id,
-    )?))?;
-    let command = processes::command_line(&[
-        security::local_file_path(
-            &deployment
-                .package(root)
-                .join(&manifest.manifest().entrypoints.worker),
-        )?
-        .into_os_string(),
-        "service".into(),
-        deployment.installation_id.clone().into(),
-        security::local_file_path(&root.join("metadata/deployment.json"))?.into_os_string(),
-    ])?;
-    let handle = unsafe {
-        CreateServiceW(
-            manager.0,
-            name.as_ptr(),
-            name.as_ptr(),
-            SERVICE_START | SERVICE_QUERY_STATUS | READ_CONTROL | WRITE_DAC | WRITE_OWNER,
-            SERVICE_WIN32_OWN_PROCESS,
-            SERVICE_AUTO_START,
-            SERVICE_ERROR_NORMAL,
-            command.as_ptr(),
-            null(),
-            null_mut(),
-            null(),
-            null(),
-            null(),
-        )
-    };
-    ensure!(
-        !handle.is_null(),
-        "cannot create owned worker service; no existing service will be adopted: {}",
-        std::io::Error::last_os_error()
-    );
-    let service = Service(handle);
-    service_access::apply(service.0, &deployment.account(Role::Management)?.sid)
-        .context("set owned service status-only relay access")?;
-    security::check(unsafe { StartServiceW(service.0, 0, null()) })?;
-    let deadline = Instant::now() + Duration::from_secs(240);
-    loop {
-        let mut status = SERVICE_STATUS_PROCESS::default();
-        let mut returned = 0;
-        security::check(unsafe {
-            QueryServiceStatusEx(
-                service.0,
-                SC_STATUS_PROCESS_INFO,
-                (&mut status as *mut SERVICE_STATUS_PROCESS).cast(),
-                size_of::<SERVICE_STATUS_PROCESS>() as u32,
-                &mut returned,
-            )
-        })?;
-        if status.dwCurrentState == SERVICE_RUNNING {
-            return Ok(());
-        }
-        ensure!(
-            status.dwCurrentState != SERVICE_STOPPED,
-            "offline worker service failed readiness (Windows error {}); inspect protected service diagnostics",
-            status.dwWin32ExitCode
-        );
-        ensure!(
-            Instant::now() < deadline,
-            "offline worker service did not reach readiness"
-        );
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    install(plan)
 }
 
 /// Elevated VM-only operation. The setup GUI reviews this concrete plan first.
 /// Task tests never invoke this on the developer's installed environment.
-pub fn install(plan: Plan) -> Result<Value> {
+fn install(plan: Plan) -> Result<ConnectionReceipt> {
     ensure!(
         elevated()?,
         "offline worker installation requires VM administrator elevation"
     );
     let enrollment = plan.enrollment.enrollment();
-    let base = environment::program_data()?.join("WukongWorkers");
+    let base = super::installation_receipt::install_base()?;
     let private = AclPolicy::private_vm();
     let public = AclPolicy::code_vm();
     if base.exists() {
@@ -336,7 +199,7 @@ pub fn install(plan: Plan) -> Result<Value> {
         &code,
     )?;
     for name in ["enrollment.json", "enrollment.sig"] {
-        copy_new(
+        crate::artifacts::io::copy_new(
             &plan.base.join("enrollment").join(name),
             &metadata.join(name),
             &private,
@@ -358,85 +221,10 @@ pub fn install(plan: Plan) -> Result<Value> {
         &private.clone().with_account(&worker.sid, false)?,
     )?;
     let entry = &plan.manifest.manifest().entrypoints;
-    code.create_directory(&root.join("bootstrap"))?;
-    let relay = root.join("bootstrap/wukong-worker.exe");
-    copy_new(
-        &package.join(&entry.worker),
-        &relay,
-        &code,
-        64 * 1024 * 1024,
-    )?;
-    // ssh-keygen creates its files before we can apply an explicit file ACL.
-    // Keep the entire generation directory private from its first creation.
-    private.create_directory(&root.join("ssh"))?;
-    private.create_directory(&metadata.join("system-tmp"))?;
-    let host_key = root.join("ssh/ssh_host_ed25519_key");
-    fixed_command(
-        &package.join(&entry.ssh_keygen),
-        &[
-            "-q".into(),
-            "-t".into(),
-            "ed25519".into(),
-            "-N".into(),
-            "".into(),
-            "-f".into(),
-            host_key.as_os_str().to_owned(),
-        ],
-        &root,
-        Duration::from_secs(30),
-    )?;
-    private.apply(&host_key, false)?;
-    private.apply(&host_key.with_extension("pub"), false)?;
-    let key_text = String::from_utf8(crate::artifacts::io::read_bytes(
-        &host_key.with_extension("pub"),
-        1024,
-    )?)?;
-    let fields = key_text.split_whitespace().collect::<Vec<_>>();
-    ensure!(fields.len() >= 2, "invalid generated SSH public host key");
-    let host_public = SshPublicKey {
-        algorithm: fields[0].into(),
-        key: fields[1].into(),
-    };
+    let host_public =
+        super::install_ssh::configure(&root, &package, &deployment, enrollment, entry, &code)?;
     let fingerprint = host_public.fingerprint()?;
     let management = deployment.account(Role::Management)?;
-    let mut authorized = private
-        .clone()
-        .with_account(&management.sid, false)?
-        .create_file(&root.join("bootstrap/authorized_keys"))?;
-    writeln!(
-        authorized,
-        "restrict,from=\"{}\" {}",
-        enrollment.management_peer,
-        enrollment.ssh_public_key.authorized_key()?
-    )?;
-    authorized.sync_all()?;
-    drop(authorized);
-    let config = format!(
-        "Port {}\nListenAddress 0.0.0.0\nHostKey {}\nAuthorizedKeysFile {}\nAuthenticationMethods publickey\nPubkeyAuthentication yes\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitEmptyPasswords no\nPermitTTY no\nDisableForwarding yes\nAllowAgentForwarding no\nAllowTcpForwarding no\nX11Forwarding no\nPermitTunnel no\nPermitUserRC no\nPermitUserEnvironment no\nStrictModes yes\nUseDNS no\nLoginGraceTime 30\nMaxAuthTries 3\nMaxSessions 16\nAllowUsers {}@{}\nForceCommand {} relay {}\nLogLevel VERBOSE\n",
-        enrollment.ssh_port,
-        ssh_path(&host_key)?,
-        ssh_path(&root.join("bootstrap/authorized_keys"))?,
-        management.name,
-        enrollment.management_peer,
-        ssh_path(&relay)?,
-        deployment.installation_id
-    );
-    let mut output = private.create_file(&root.join("ssh/sshd_config"))?;
-    output.write_all(config.as_bytes())?;
-    output.sync_all()?;
-    drop(output);
-    fixed_command(
-        &package.join(&entry.sshd),
-        &[
-            "-e".into(),
-            "-ddd".into(),
-            "-t".into(),
-            "-f".into(),
-            root.join("ssh/sshd_config").into_os_string(),
-        ],
-        &root,
-        Duration::from_secs(30),
-    )?;
     crate::artifacts::io::write_new_json(&metadata.join("deployment.json"), &deployment, &private)?;
     deployment
         .verify(&root)
@@ -453,7 +241,7 @@ pub fn install(plan: Plan) -> Result<Value> {
         &json!({"name":pipe_transport::service_name(&deployment.installation_id)?}),
         &private,
     )?;
-    register_service(&root, &deployment, &plan.manifest).with_context(|| {
+    super::install_service::register(&root, &deployment, &plan.manifest).with_context(|| {
         format!(
             "register and start owned worker service; startup diagnostic: {}",
             super::startup::failure_summary(
@@ -464,7 +252,24 @@ pub fn install(plan: Plan) -> Result<Value> {
             .unwrap_or_else(|_| "current bounded diagnostic unavailable".into())
         )
     })?;
-    let result = json!({"schema":1,"installed":true,"installation_id":deployment.installation_id,"environment_id":enrollment.environment_id,"generation":enrollment.generation,"manifest_sha256":plan.manifest.sha256(),"ssh_user":management.name,"ssh_port":enrollment.ssh_port,"host_key":host_public,"host_fingerprint":fingerprint,"production_isolation_verified":false});
-    crate::artifacts::io::write_new_json(&root.join("connection.json"), &result, &code)?;
-    Ok(result)
+    // Candidate addresses are captured after the guest network state is final for
+    // this install attempt; enumeration is best effort and never fails the install.
+    let candidates = network::receipt_candidates(&network::SystemAdapters);
+    let receipt = ConnectionReceipt {
+        schema: 1,
+        receipt_version: RECEIPT_VERSION,
+        installed: true,
+        installation_id: deployment.installation_id.clone(),
+        environment_id: enrollment.environment_id.clone(),
+        generation: enrollment.generation,
+        manifest_sha256: plan.manifest.sha256().into(),
+        ssh_user: management.name.clone(),
+        ssh_port: enrollment.ssh_port,
+        host_key: host_public,
+        host_fingerprint: fingerprint,
+        candidate_addresses: candidates,
+        production_isolation_verified: false,
+    };
+    crate::artifacts::io::write_new_json(&root.join("connection.json"), &receipt, &code)?;
+    Ok(receipt)
 }

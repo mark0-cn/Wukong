@@ -83,7 +83,12 @@ impl Locale {
 }
 fn bundle(locale: Locale, source: &str) -> FluentBundle<FluentResource> {
     let resource = FluentResource::try_new(source.into()).expect("validated translation resource");
-    let mut bundle = FluentBundle::new_concurrent(vec![locale.tag().parse().unwrap()]);
+    let mut bundle = FluentBundle::new_concurrent(vec![
+        locale
+            .tag()
+            .parse()
+            .expect("locale tags are valid language identifiers"),
+    ]);
     bundle.set_use_isolating(false);
     bundle
         .add_resource(resource)

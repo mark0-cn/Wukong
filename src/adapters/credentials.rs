@@ -32,8 +32,9 @@ fn persistent(name: &str) -> Option<String> {
     ] {
         let path: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
         let mut buffer = vec![0u16; 32768];
-        let mut bytes = (buffer.len() * 2) as u32;
-        // RegGetValueW only reads this named environment value. The bounded buffer
+        let mut bytes =
+            u32::try_from(buffer.len() * 2).expect("the fixed registry buffer size fits u32");
+        // SAFETY: RegGetValueW only reads this named environment value. The bounded buffer
         // is aligned for UTF-16 and the API reports the number of bytes written.
         let result = unsafe {
             RegGetValueW(

@@ -5,11 +5,11 @@ use super::{
 };
 use crate::i18n::Message as UiMessage;
 use crate::{
-    application::assessment::AssessmentService,
+    application::{assessment::AssessmentService, queries::FindingQueries},
     config::AppConfig,
     domain::*,
     interfaces::report,
-    queries::{FindingDetails, FindingQueries},
+    queries::FindingDetails,
     storage::Store,
 };
 use anyhow::{Result, ensure};
@@ -32,7 +32,7 @@ struct ContextState {
     state_override: Option<PathBuf>,
     selected: Option<String>,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ExecutionInfo {
     pub operation: String,
     pub run_id: Option<String>,
@@ -42,13 +42,13 @@ struct Active {
     info: ExecutionInfo,
     cancel: CancellationToken,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Notice {
     pub id: u64,
     pub error: bool,
     pub message: UiMessage,
 }
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct HostStatus {
     pub epoch: u64,
     pub initial_run: Option<String>,
@@ -65,7 +65,7 @@ pub struct WorkspaceEnvelope {
     pub host: HostStatus,
     pub workspace: WorkspaceResponse,
 }
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EvidenceView {
     pub id: String,
     pub source: String,
@@ -94,6 +94,24 @@ impl Drop for Operation {
     }
 }
 impl Service {
+    /// A poisoned lock means an earlier panic left the host state inconsistent;
+    /// recover the guard so the UI can still report the failure instead of
+    /// panicking on every later command.
+    fn state_lock(&self) -> std::sync::MutexGuard<'_, ContextState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn active_lock(&self) -> std::sync::MutexGuard<'_, Option<Active>> {
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    fn notice_lock(&self) -> std::sync::MutexGuard<'_, Option<Notice>> {
+        self.notice
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
     pub(crate) fn set_data_directory(&self, epoch: u64, directory: PathBuf) -> Result<()> {
         ensure!(
             directory.is_absolute(),
@@ -122,8 +140,8 @@ impl Service {
         &self,
         epoch: u64,
     ) -> Result<(AppConfig, PathBuf, Operation)> {
-        let state = self.state.lock().unwrap();
-        let active = self.active.lock().unwrap();
+        let state = self.state_lock();
+        let active = self.active_lock();
         ensure!(
             state.epoch == epoch && !self.closing.load(Ordering::SeqCst),
             "workspace changed or closing"
@@ -140,7 +158,7 @@ impl Service {
         ))
     }
     pub(crate) fn reload_after_maintenance(&self) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state_lock();
         state.config = AppConfig::load(Some(&state.path))?;
         state.epoch += 1;
         drop(state);
@@ -179,11 +197,11 @@ impl Service {
     }
     fn notice(&self, error: bool, message: UiMessage) {
         let id = self.changes.borrow().wrapping_add(1);
-        *self.notice.lock().unwrap() = Some(Notice { id, error, message });
+        *self.notice_lock() = Some(Notice { id, error, message });
         self.changed();
     }
     fn context(&self, epoch: u64) -> Result<ContextState> {
-        let state = self.state.lock().unwrap();
+        let state = self.state_lock();
         ensure!(
             state.epoch == epoch,
             UiMessage::new("system-workspace-configuration-changed-refresh-and-retry")
@@ -195,8 +213,8 @@ impl Service {
         Ok(state.clone())
     }
     pub fn status(&self) -> HostStatus {
-        let state = self.state.lock().unwrap();
-        let active = self.active.lock().unwrap();
+        let state = self.state_lock();
+        let active = self.active_lock();
         HostStatus {
             epoch: state.epoch,
             initial_run: state.selected.clone(),
@@ -206,14 +224,14 @@ impl Service {
             budget: state.config.budget.clone(),
             execution: active.as_ref().map(|active| active.info.clone()),
             pending_operations: self.operations.load(Ordering::SeqCst),
-            notice: self.notice.lock().unwrap().clone(),
+            notice: self.notice_lock().clone(),
         }
     }
     pub fn busy(&self) -> bool {
-        self.active.lock().unwrap().is_some() || self.operations.load(Ordering::SeqCst) > 0
+        self.active_lock().is_some() || self.operations.load(Ordering::SeqCst) > 0
     }
     pub fn read(&self, mut request: WorkspaceRequest) -> Result<WorkspaceEnvelope> {
-        let context = self.state.lock().unwrap().clone();
+        let context = self.state_lock().clone();
         request.run = request.run.or_else(|| context.selected.clone());
         let workspace = workspace::read(&context.store, context.epoch, &request)?;
         let host = self.status();
@@ -246,8 +264,8 @@ impl Service {
         let operation = uuid::Uuid::new_v4().to_string();
         let cancel = CancellationToken::new();
         let context = {
-            let state = self.state.lock().unwrap();
-            let mut active = self.active.lock().unwrap();
+            let state = self.state_lock();
+            let mut active = self.active_lock();
             ensure!(
                 state.epoch == epoch,
                 UiMessage::new("system-the-workspace-changed-refresh-and-retry")
@@ -289,7 +307,7 @@ impl Service {
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
-                *self.active.lock().unwrap() = None;
+                *self.active_lock() = None;
                 self.notice(
                     true,
                     UiMessage::new("system-start-failed").detail(format!("{error:#}")),
@@ -298,7 +316,7 @@ impl Service {
             }
         };
         let id = prepared.run().id.clone();
-        if let Some(active) = self.active.lock().unwrap().as_mut() {
+        if let Some(active) = self.active_lock().as_mut() {
             active.info.run_id = Some(id.clone());
             active.info.phase = "running";
         }
@@ -313,7 +331,7 @@ impl Service {
             let outcome = loop {
                 tokio::select! {result=&mut driver=>break result.map_err(anyhow::Error::from).and_then(|result|result),event=events.recv()=>{match event{Ok(_)|Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>controller.changed(),Err(tokio::sync::broadcast::error::RecvError::Closed)=>{break driver.await.map_err(anyhow::Error::from).and_then(|result|result);}}}}
             };
-            let mut active = controller.active.lock().unwrap();
+            let mut active = controller.active_lock();
             if active
                 .as_ref()
                 .is_some_and(|active| active.info.operation == operation)
@@ -349,7 +367,7 @@ impl Service {
         let (context, _operation) = self.operation(epoch)?;
         AssessmentService::new(context.config, context.store)
             .pause(run, "operator paused from desktop")?;
-        if let Some(active) = self.active.lock().unwrap().as_ref()
+        if let Some(active) = self.active_lock().as_ref()
             && active.info.run_id.as_deref() == Some(run)
         {
             active.cancel.cancel();
@@ -404,7 +422,7 @@ impl Service {
         Ok(receipt)
     }
     fn operation(&self, epoch: u64) -> Result<(ContextState, Operation)> {
-        let state = self.state.lock().unwrap();
+        let state = self.state_lock();
         ensure!(
             state.epoch == epoch,
             UiMessage::new("system-the-workspace-changed-refresh-and-retry")
@@ -424,8 +442,8 @@ impl Service {
         let _maintenance =
             crate::application::maintenance::updates::maintenance::assessment_guard()?;
         let (context, _operation) = {
-            let state = self.state.lock().unwrap();
-            let active = self.active.lock().unwrap();
+            let state = self.state_lock();
+            let active = self.active_lock();
             ensure!(
                 state.epoch == epoch && !self.closing.load(Ordering::SeqCst),
                 "workspace changed or is closing"
@@ -448,7 +466,7 @@ impl Service {
                 workbench.root.join("wukong.toml")
             };
             let config = AppConfig::load(Some(&config_path))?;
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state_lock();
             state.config = config;
             state.path = config_path;
             state.epoch += 1;
@@ -509,8 +527,8 @@ impl Service {
         mut document: ConfigDocument,
         edits: Vec<ConfigEdit>,
     ) -> Result<ConfigDocument> {
-        let mut state = self.state.lock().unwrap();
-        let active = self.active.lock().unwrap();
+        let mut state = self.state_lock();
+        let active = self.active_lock();
         ensure!(
             state.epoch == epoch,
             UiMessage::new("system-the-workspace-changed-reopen-settings")
@@ -596,10 +614,10 @@ impl Service {
     }
     pub async fn shutdown(&self) -> Result<()> {
         {
-            let _state = self.state.lock().unwrap();
+            let _state = self.state_lock();
             self.closing.store(true, Ordering::SeqCst);
         }
-        if let Some(active) = self.active.lock().unwrap().as_ref() {
+        if let Some(active) = self.active_lock().as_ref() {
             active.cancel.cancel();
         }
         self.changed();

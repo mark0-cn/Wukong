@@ -10,7 +10,7 @@ English · [简体中文](maintenance.zh-CN.md)
 
 - `application/agent_runtime` assembles Rig and drives lifecycle. `admission` controls admission; `models` manages requests/metering; `coordination` projects messages/state; `business_tools` integrates effects. `application/agent_runtime/host` exposes business operations; `application/assessment/supervisor` manages heartbeats/background observation independently; `application/model_catalog`, `application/usage`, `bootstrap` own model selection, accounting and assembly.
 - `application/tools` retains the execution pipeline/shared validation. `application/effects` owns durable receipts; `catalog` registers schemas, roles, recovery policy and handlers. `handlers` routes business operations; `coordination` handles shared documents/tasks; `analysis` static queries; `execution` worker dispatch; `verification` independent admission/certification; `files`, `jobs`, `sessions` their resources. Argument/handler subdirectories group by responsibility while one catalog registers them.
-- `queries` defines neutral DTOs; `application/queries` owns Store-backed query facades. `storage/queries/workspace_delta` and `storage/queries/report` implement SQL. `storage/queries/workspace_snapshot` reads a complete snapshot in one transaction; `interfaces/desktop/workspace` and `interfaces/desktop/presentation` transform it after the transaction without further queries. `ui/src/shared/api/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
+- `queries` defines neutral DTOs. Desktop, CLI and report code use the Store-backed facades in `application/queries`. The `storage/queries` modules own SQL and read a complete workspace snapshot in one transaction. Desktop presentation transforms it after the transaction without further queries. The architecture checks reject direct imports from `storage/queries` in `interfaces`. `ui/src/shared/api/commands.ts` constrains command arguments/responses; lifecycle effects belong in corresponding hooks.
 - `application/coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `adapters/binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
 - `storage` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `storage/conversations` owns conversation payloads/revisions. Current state schema is 5, without legacy migration.
 
@@ -52,16 +52,16 @@ Use neutral charcoal, gold for primary/selected actions, blue for running, green
 
 ## Tool documentation
 
-Definitions, parameter schemas, roles, model visibility and display message IDs share one registry; bilingual text uses Fluent. `Visibility::Internal` marks internal entries rather than name blacklists; internal transactions retain permission checks. Desktop aliases exist only for native Rig tools/legacy events. New builtins require catalog message IDs and both translated titles. Generate Markdown from the registry:
+Definitions, parameter schemas, roles, model visibility and display message IDs share one registry; bilingual text uses Fluent. `Visibility::Internal` marks internal entries rather than name blacklists; internal transactions retain permission checks. Desktop aliases exist only for native Rig tools/legacy events. New builtins require catalog message IDs and both translated titles. Generate Markdown from the registry with the developer-only example:
 
 ```sh
-cargo run -- tool-catalog > docs/reference/tool-catalog.md
-cargo run -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
-cargo run -- --json tool-catalog
+cargo run --example export_catalogs -- tool-catalog > docs/reference/tool-catalog.md
+cargo run --example export_catalogs -- --locale zh-CN tool-catalog > docs/reference/tool-catalog.zh-CN.md
+cargo run --example export_catalogs -- --json tool-catalog
 cargo test --test tool_catalog
 ```
 
-Export needs no model credentials and opens neither configuration nor state. Tests compare generated output with committed documentation to catch stale catalogs.
+Export needs no model credentials and reads neither configuration nor state. Tests compare generated output with committed documentation to catch stale catalogs.
 
 <a id="skill-覆盖清单"></a>
 
@@ -70,9 +70,9 @@ Export needs no model credentials and opens neither configuration nor state. Tes
 `prompts/coverage.json` associates builtin methods with tools, sources and mechanism fixtures using `SkillManifest.related_tools`, `sources`, `fixtures`. Regenerate [coverage](../reference/skill-coverage.md):
 
 ```sh
-cargo run -- skill-catalog > docs/reference/skill-coverage.md
-cargo run -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
-cargo run -- --json skill-catalog
+cargo run --example export_catalogs -- skill-catalog > docs/reference/skill-coverage.md
+cargo run --example export_catalogs -- --locale zh-CN skill-catalog > docs/reference/skill-coverage.zh-CN.md
+cargo run --example export_catalogs -- --json skill-catalog
 cargo test --test tool_catalog
 ```
 

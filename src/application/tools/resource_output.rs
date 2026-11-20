@@ -25,16 +25,14 @@ impl ExecutionService {
                         Method::JobArtifacts.decode(json!({"job_id":job.worker_resource_id}))?,
                     )
                     .await?;
-                let path = manifest["artifacts"]
+                let path = manifest
                     .as_array()
-                    .and_then(|items| {
-                        items
-                            .iter()
-                            .filter_map(|item| item["path"].as_str())
-                            .find(|path| {
-                                path.ends_with(&format!("/{stream}"))
-                                    || path.ends_with(&format!("/output.{stream}"))
-                            })
+                    .context("worker artifact manifest is not an array")?
+                    .iter()
+                    .filter_map(|item| item["path"].as_str())
+                    .find(|path| {
+                        path.ends_with(&format!("/{stream}"))
+                            || path.ends_with(&format!("/output.{stream}"))
                     })
                     .context(
                         "output stream not published by worker yet; query job_status and retry",
@@ -226,7 +224,7 @@ mod tests {
             assert_eq!(end["eof"], state == SessionState::Closed);
         }
         let mut other = agent.clone();
-        other.id = "foreign-agent".into();
+        other.metadata.id = "foreign-agent".into();
         assert!(
             execution
                 .resource_read(&other, "foreign-read", &input)

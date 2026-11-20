@@ -525,6 +525,8 @@ mod tests {
         }
         ensure!(ready, "trusted dump fixture did not start");
         let file = tempfile::NamedTempFile::new()?;
+        // SAFETY: `OwnedChild` still owns the live child process, so its handle and pid are valid,
+        // `file` keeps the dump destination open, and the three optional pointers are null.
         crate::isolation::security::check(unsafe {
             MiniDumpWriteDump(
                 child.0.as_raw_handle(),

@@ -65,17 +65,37 @@ RPC 在调用管理器前，将已注册处理器解析为资源操作；资源�
 
 ## 离线交付与验证
 
+安装界面和无人值守部署都由原生安装器执行经审核的安装。安装器编排受保护状态、SSH 配置、服务控制管理器激活和公开连接回执发布。界面负责确认与回执导出。
+
 在 x64 MSVC 环境构建。模型凭据和签名私钥只保留在控制器。安装/卸载验收只在专用 VM 或隔离 runner 上执行，不覆盖开发者安装。
+
+CI 在没有控制器密钥的情况下暂存准确的载荷和原生二进制文件；操作员使用控制器密钥目录对可下载模板执行 finalize：
 
 ```powershell
 python -m scripts.worker.toolchain --cache target/windows-offline-cache --download
 python -m scripts.worker.build_native
-python -m scripts.worker.layout --cache target/windows-offline-cache --output target/windows-offline-layout
-python -m scripts.worker.assemble --cache target/windows-offline-cache --output target/windows-worker-package --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY
+python -m scripts.worker.media template --cache target/windows-offline-cache --native target/windows-worker-native --output target/windows-worker-media-template --version VERSION
+python -m scripts.worker.media check --template target/windows-worker-media-template --report target/windows-worker-media-check.json
+python -m scripts.worker.media pack --template target/windows-worker-media-template --version VERSION --output target/windows-worker-media
+python -m scripts.worker.media finalize --template ABSOLUTE_TEMPLATE_DIRECTORY --keys ABSOLUTE_CONTROLLER_KEY_DIRECTORY --spec enrollment-spec.json --output ABSOLUTE_MEDIA_DIRECTORY --generate-ssh-key ABSOLUTE_SSH_PRIVATE_PATH
 cargo fmt --manifest-path workers/windows/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path workers/windows/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 ```
+
+`template` 暂存 `payload/`、`binaries/{wukong-worker.exe,wukong-package.exe}`、未签名的 `manifest-draft.json`、`native-build.json` 与 `media-template.json`；随后 `check` 在临时目录用临时密钥对该模板执行 finalize，并运行 `WukongWorkerSetup.exe verify-enrollment`，因此 CI 无需提权或安装即可验证密封、登记与介质装配。发布构建会发布确定性归档 `wukong-windows-worker-media-<version>.zip`；请按 `SHA256SUMS` 校验并在密钥目录之外解包。
+
+`finalize` 要求使用位于模板和输出之外的绝对控制器密钥目录。登记规格（`schema: 1`）提供 32 位小写十六进制 `installation_id`、由 1–64 个 ASCII 字母/数字/下划线/连字符组成的 `environment_id`、`generation`（默认 1）、IPv4 `management_peer`（拒绝环回、未指定、组播和广播地址）、`ssh_port`、可选的 `execution_boundary`（仅允许 `disposable_vm`），以及规范的 `ssh_public_key {algorithm, key}` 或 `--generate-ssh-key` 二者之一。SSH 密钥由包内 `ssh-keygen.exe` 生成；私钥写到介质之外，只有公钥进入签名登记记录。finalize 会密封已暂存载荷、签署登记、装配公开介质（`WukongWorkerSetup.exe`、`setup.json`、`payload/`、`enrollment/`、可选 `recovery/`）并写入带哈希的 `media.json` 回执。若密钥目录或任何私钥文件名将出现在模板或输出内，命令会失败关闭。绝不要把控制器密钥目录、SSH 私钥或模型凭据复制进介质或客体。
+
+任意 Windows 主机都可在不提权的情况下预检最终公开介质：`WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`。安装使用提权的 `WukongWorkerSetup.exe install-reviewed setup.json <controller-key-hex> <sha256-of-enrollment.json>`，且只应在专用可丢弃 VM 上执行。
+
+### 安装回执与重新保存
+
+离线安装成功后，会在受保护的 `C:\ProgramData\WukongWorkers\<installation_id>\connection.json` 写入公开回执（schema 1，`receipt_version: 2`）。内容包括安装/环境身份、SSH 用户与端口、SSH 主机公钥及其指纹，以及 `candidate_addresses`：本客体非环回 IPv4 地址，RFC 1918 私有地址优先，各组内按数值升序，去重后最多 8 个。地址枚举是尽力而为的：即使无法读取网卡，安装也会以空列表完成。ProgramData 中的受保护记录仍是权威来源；导出的文件只是公开连接提示，不证明可达性或 hypervisor 隔离。
+
+安装成功后，安装程序提供“保存安装结果 / Save install result”，并以默认文件名 `wukong-worker-<installation_id>.json` 打开 Windows 保存对话框。若对话框无法打开，或所选路径无法写入，同一字节内容会被复制到 `%USERPROFILE%\Desktop\wukong-worker-<installation_id>.json`（当用户配置不可用或没有桌面目录时改用 `%PUBLIC%` 或其桌面目录），并显示实际路径。保存不会改变安装成功状态：ProgramData 中的受保护记录此时已经完整。
+
+在已存在有效安装的客体上以无参数方式再次启动安装程序不会重装；它会显示简短的“已安装”对话框，并询问是否保存刷新后的结果：重新枚举当前网卡地址，只改变 `candidate_addresses`，安装 ID、SSH 与主机密钥字段保持完全一致。客体地址变化后应使用此导出，而不是重置 worker。安装和修复仍必须使用离线介质及经过审查的 `install-*`/`verify-enrollment` 路径；刷新流程不会执行安装、服务或防火墙变更。
 
 原生构建身份包含共用协议 crate、原生/Python 源码、锁定输入和构建脚本。组装时验证该身份并保留依赖许可证。登记绑定控制器签名者和安装身份；SSH 独立绑定 Worker 主机密钥。连接与任务绑定见[跨平台环境指南](../../docs/design/cross-platform-environments.zh-CN.md)，实际安装后的进程/调试器/恢复用例见[Worker 验收指南](../tests/README.zh-CN.md)。
 

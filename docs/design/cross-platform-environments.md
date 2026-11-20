@@ -4,6 +4,8 @@ English · [简体中文](cross-platform-environments.zh-CN.md)
 
 ## Environment and task bindings
 
+The controller builds backend-specific relay commands and uses one bounded stdio channel and RPC session implementation for each backend. The session pins worker identity across reconnects. The environment registry owns platform verification and the separate lease connection. Application use cases own durable request and receipt handling.
+
 The controller owns the environment registry, model credentials, task database and evidence store. Each registered environment declares its platform and transport; connecting is lazy, so an unavailable environment does not prevent another environment from running. `environment_list` reports configuration and connection state, not readiness. `environment_doctor` checks the worker's actual operating system and tools. A platform mismatch rejects the connection.
 
 An assessment snapshots its environment configuration. The root uses `default_environment`; native `task` accepts `environment_id`, otherwise inheriting its parent's binding. The binding is immutable. Deduplication includes environment identity alongside role and scope. Environment configuration changes reject further execution in that assessment rather than silently selecting another worker. Children may probe only their assigned environment; root may probe registered environments in the assessment.

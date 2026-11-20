@@ -45,7 +45,9 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 
 在 Windows x64 或 Linux x64 的源码目录执行 `cargo package-local`。
 入口检查源码已提交、工作区干净和构建工具，再调用 Tauri 生成当前平台的 NSIS EXE 或 AppImage，输出到 `target/local-installers/`。
-不下载工具镜像、不发布版本。首次运行客户端时从对应正式 Release 获取签名环境清单，所以未发布版本的本地构建不能通过在线向导获取该版本环境。
+不发布版本。Windows 安装包默认内置离线 Worker 安装程序，安装后位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`：命令在自动发现的 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，暂存为 `target/worker-setup/WukongWorkerSetup.exe`，与 CI 一样通过 Tauri `--config` 资源覆盖加入安装包（[内置 Worker 安装程序](desktop-updates.zh-CN.md#bundled-worker-setup)）。
+这要求 Windows x64 与 Visual Studio C++ 生成工具，首次运行可能下载缺失的锁定工具链资源；安装包约增大 2–4 MB。
+`cargo package-local` 生成的是**本地发布**安装包：首次引导使用内置的 `local-release.json` 与本机已有、从独立 CI 工作台镜像仓库拉取或本地构建的 Docker 镜像，而不是线上签名目录，因此未发布的源码也能准备环境（[本地发布构建](local-builds.zh-CN.md)）。需要旧的依赖线上目录的安装包时使用 `--online`；CI 发布打包不会启用本地发布模式。
 
 ```sh
 cargo package-local --check
@@ -53,9 +55,10 @@ cargo package-local --output target/installers/build-1
 cargo package-local --signed
 ```
 
-已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，系统库及安装器工具由实际构建验证。
+已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，包括 Windows Worker 安装程序所需的 x64 MSVC 环境、离线工具链可用性和原生 Worker 源码；系统库及安装器工具由实际构建验证。
 `--signed` 需要 `TAURI_SIGNING_PRIVATE_KEY`；普通本地构建无需发布密钥。
-Windows 需要 MSVC、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
+Windows 需要 MSVC（Worker 安装程序自动发现）、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
+本地发布打包还要求运行中的 Docker daemon 与 linux/amd64 工作台镜像（[本地发布构建](local-builds.zh-CN.md)）。
 Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检查，不承诺覆盖所有发行版。
 旧 ZIP 包脚本保留用于开发夹具，正式流水线及 `cargo package-local` 不再以 ZIP 为用户安装入口。
 
@@ -65,7 +68,7 @@ Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检�
 
 ## 日常 CI
 
-`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、五个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
+`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
 
 Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
 
@@ -106,8 +109,9 @@ tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `mas
 2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
 4. Windows/Linux 均使用已校验桌面客户端直接打包 NSIS EXE/AppImage，不重复编译；Linux 验收 CLI 单独复用；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
-5. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
-6. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
+5. 在 `windows-2025` 上构建离线 Windows Worker 介质模板（不接触控制器密钥），用临时密钥执行检查，打包确定性 zip 并加入发布附件；签名桌面目录会记录该附件供桌面下载。
+6. 上传 GitHub Release 草稿，给同一个镜像 digest 添加固定版本标签，正式发布 Release。
+7. 正式版仅在没有更高正式版本时推进 Docker Hub `latest` 与 GitHub latest。发布检查最后核对附件列表与镜像 digest。
 
 固定版本不会覆盖已发布镜像。GitHub 与 Docker Hub 没有跨服务原子事务，失败时可能留有候选或草稿/固定镜像标签；修复后使用 Actions **Re-run failed jobs**，复用原始 artifacts 和候选 digest。已经发布的附件若与重试产物不同，流程拒绝覆盖，应发布新版本。
 
@@ -146,6 +150,16 @@ Actions → **Release** → Run workflow，选择 master 和 `operation=inspect`
 
 候选标签与 buildcache 共用公开镜像仓库，需按空间情况定期清理无引用的旧候选。CI Token 没有 Delete 权限，因此工作流不删除仓库标签。正式版本及用户正在使用的 digest 应保留。
 
+<a id="offline-windows-worker-media"></a>
+
+## 离线 Windows Worker 介质
+
+发布构建还会在 `windows-2025` 的 `windows-worker` job 中发布 `wukong-windows-worker-media-<version>.zip`。该 job 运行共用的 Windows Worker 检查，在没有任何控制器私钥的情况下暂存未签名载荷和已校验的原生二进制文件，用临时密钥执行一次 finalize 检查，并打包确定性归档。归档根目录 `wukong-windows-worker-media-<version>/` 包含 `payload/`、`binaries/`、`manifest-draft.json`、`native-build.json` 与 `media-template.json`。该 zip 是独立发布附件，不是应用安装程序或更新目标：它不在 `platforms` 条目中，没有更新签名，桌面更新器不会下载它。
+
+打包任务根据已验收产物生成签名桌面目录（`latest.json`，签名为 `latest.json.sig`），并把暂存的 zip 记录为可选 `worker_media` 条目：`version`、`name`、`size`、`sha256` 与固定到对应 `v<version>` Release 附件的 `url`。`release.json` 为发布工具镜像同一份条目。桌面先校验目录签名，再只用固定版本的 URL 和已签名的 `size`/`sha256` 下载并核对匹配的离线 Worker 模板。未暂存模板的演练会省略 `worker_media`；该字段可选，旧客户端与旧目录仍然有效。
+
+操作员下载附件、按 `SHA256SUMS` 校验并解包后，运行 `python -m scripts.worker.media finalize --template <解包后的模板> --keys <绝对控制器密钥目录> --spec <登记规格> --output <新的介质目录>`，以密封载荷、签署登记并生成离线 `WukongWorkerSetup.exe` 介质。控制器密钥目录和 SSH 私钥必须位于模板和输出之外。安装前，任意 Windows 主机都可在不提权的情况下运行 `WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`；安装需要提权，且只应在专用可丢弃 VM 上执行。完整命令与规格字段见[原生 Windows Worker 组件](../../workers/windows/README.zh-CN.md)。
+
 <a id="acceptance-boundary"></a>
 
 ## 验收边界
@@ -158,8 +172,7 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 
 ## 应用内更新信任与恢复
 
-客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。
-下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
+客户端读取正式 Release 的 `latest.json` 和 `latest.json.sig`，先验证清单签名，再读取版本、平台、镜像 digest 与兼容性。可选 `worker_media` 条目是离线 Windows Worker 模板的配置元数据，不是应用更新产物；不使用它的客户端会忽略该字段。下载 EXE/AppImage 后再次验证文件签名、SHA256 与大小；不使用 Docker `latest` 决定运行环境。
 公钥位于 `src/interfaces/desktop/update-public.key` 和 Tauri 配置，必须保持一致。私钥存于 Actions Secret，并由管理员在仓库外备份；丢失密钥不能通过重新生成密钥为已有客户端无缝更新。
 更新签名不替代 Windows Authenticode；当前安装文件没有系统代码签名。
 

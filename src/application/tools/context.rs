@@ -74,6 +74,7 @@ impl ToolContext {
             analysis,
             lab: LabService {
                 operations: service.lab_operations.clone(),
+                open_lab: service.open_lab,
                 output_limit: service.limits.max_output_bytes,
                 store: service.store.clone(),
                 execution,

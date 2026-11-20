@@ -2,7 +2,7 @@
 
 [English](tool-catalog.md) · 简体中文
 
-由 `wukong --locale zh-CN tool-catalog` 从工具注册表生成。不要手动编辑。
+由 `cargo run --example export_catalogs -- --locale zh-CN tool-catalog` 从工具注册表生成。不要手动编辑。
 
 Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业务工具。MCP 工具需选择 external 分组。下表列出内置业务工具的角色边界及后端要求（保留技术标识）。实际模型列表还会根据环境预检过滤；执行仍校验目标、证据、会话归属和当前后端能力。中文说明仅用于文档，不改变模型协议。
 

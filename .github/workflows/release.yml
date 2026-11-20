@@ -106,6 +106,40 @@ jobs:
             test "$FALLBACK_RESULT" = success
           fi
 
+  windows-worker:
+    if: >-
+      always() && needs.metadata.result == 'success' && needs.checks.result == 'success'
+    needs: [metadata, checks]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Build, stage and check offline worker media
+        run: ./scripts/ci/check_windows_worker.ps1
+      - name: Pack deterministic offline media template
+        run: |
+          python -m scripts.worker.media pack --template target/windows-worker-media-template --version "${{ needs.metadata.outputs.version }}" --output target/windows-worker-media
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-worker-media-v1
+          path: target/windows-worker-media/*.zip
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-worker-media-report-v1
+          path: target/windows-worker-media-check.json
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+
   windows-client:
     needs: metadata
     if: needs.metadata.outputs.windows_run == '' && needs.metadata.outputs.windows_installer_id == ''
@@ -266,8 +300,9 @@ jobs:
   package:
     if: >-
       always() && needs.metadata.result == 'success' && needs.acceptance.result == 'success' &&
-      needs.checks.result == 'success' && needs.windows-installer.result == 'success' && needs.linux-installer.result == 'success'
-    needs: [metadata, acceptance, windows-installer, linux-installer, checks]
+      needs.checks.result == 'success' && needs.windows-installer.result == 'success' &&
+      needs.linux-installer.result == 'success' && needs.windows-worker.result == 'success'
+    needs: [metadata, acceptance, windows-installer, linux-installer, windows-worker, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -298,6 +333,10 @@ jobs:
           path: dist
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: windows-worker-media-v1
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
           name: image-validation
           path: validation
       - name: Package and verify
@@ -310,7 +349,7 @@ jobs:
           rm dist/installer-windows.json dist/installer-linux.json
           python -m scripts.release.release_notes --output release-content.md
           python -m scripts.release.desktop_manifest --directory dist --validation validation --content release-content.json
-          client/wukong verify-update --directory dist
+          python -m scripts.release.verify_update --directory dist
           cp validation/validation-summary.json validation/doctor.json dist/
           python -m scripts.release.cli checksums dist
           python -m scripts.release.release_report
@@ -360,7 +399,7 @@ jobs:
 
   summary:
     if: always() && (github.event_name == 'push' || inputs.operation == 'rehearse')
-    needs: [metadata, checks, windows-client, linux-client, linux-desktop-client, windows-installer, linux-installer, image, acceptance, package, publish]
+    needs: [metadata, checks, windows-client, linux-client, linux-desktop-client, windows-worker, windows-installer, linux-installer, image, acceptance, package, publish]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

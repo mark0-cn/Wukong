@@ -39,6 +39,51 @@ export interface WindowsConnectionInput {
   connection_json: string; name: string; host: string; identity_file: string;
   confirmed_fingerprint: string; make_default: boolean;
 }
+export type WorkerMediaState = 'generated' | 'installed_pending' | 'available';
+export interface WorkerMediaInstallation {
+  installation_id: string; environment_id: string; environment_name: string;
+  state: WorkerMediaState; app_version: string; ssh_port: number;
+  management_peer: string; network_prefix_len: number;
+  zip_path: string; zip_present: boolean; media_path: string; media_present: boolean;
+  created_at: string; registered_environment_id: string | null;
+  registered_environment_name: string | null; last_address: string | null;
+  candidate_addresses: string[]; warning: string | null;
+}
+export interface WorkerMediaEnvironment {
+  environment_id: string; name: string; platform: string; installation_id: string | null;
+  ssh_host: string | null; managed_ssh: boolean; worker_media_state: WorkerMediaState | null;
+}
+export interface WorkerMediaStatus {
+  environments: WorkerMediaEnvironment[];
+  installations: WorkerMediaInstallation[];
+}
+export interface WorkerMediaNetwork {
+  id: string; name: string; description: string; ipv4: string; prefix_len: number;
+  rfc1918: boolean; virtual_adapter: boolean; recommended: boolean;
+}
+export interface WorkerMediaTemplate {
+  path: string; source: 'local' | 'downloaded' | 'cached';
+  version: string | null; sha256: string | null;
+}
+export interface WorkerMediaInstructions {
+  summary: string; setup_executable: string; receipt_filename: string; steps: string[];
+}
+export interface WorkerMediaGeneration {
+  installation_id: string; environment_id: string; environment_name: string;
+  installation_state: WorkerMediaState; app_version: string;
+  zip_path: string; zip_sha256: string; zip_size: number; zip_entries: number;
+  media_path: string; registry_path: string; ssh_port: number;
+  management_peer: string; network_prefix_len: number; network: WorkerMediaNetwork;
+  template: WorkerMediaTemplate; instructions: WorkerMediaInstructions;
+}
+export interface WorkerMediaImportEnvironment {
+  environment_id: string; name: string; ssh_host: string | null;
+}
+export interface WorkerMediaImportResult {
+  installation_id: string; environment_id: string; state: WorkerMediaState;
+  environment: WorkerMediaImportEnvironment | null; address: string | null;
+  candidate_count: number; guidance: string | null;
+}
 
 /** Native command boundary: result types follow command names, never callers. */
 export interface Commands {
@@ -61,6 +106,14 @@ export interface Commands {
   config_preview: Command<{ document: ConfigDocument; edits: ConfigEdit[] }, ConfigDocument>;
   windows_connection_preview: Command<{ document: ConfigDocument; edits: ConfigEdit[]; input: WindowsConnectionInput }, ConfigDocument>;
   pick_ssh_identity: Command<undefined, string | null>;
+  worker_media_status: Command<Epoch, WorkerMediaStatus>;
+  worker_media_networks: Command<undefined, WorkerMediaNetwork[]>;
+  worker_media_generate: Command<{ epoch: number; template?: string; output: string; environmentName?: string; network?: string }, WorkerMediaGeneration>;
+  worker_media_import: Command<{ epoch: number; receipt: string; confirmedFingerprint: string; name?: string }, WorkerMediaImportResult>;
+  worker_media_retry: Command<{ epoch: number; installationId: string }, WorkerMediaImportResult>;
+  pick_worker_template: Command<undefined, string | null>;
+  pick_worker_output: Command<undefined, string | null>;
+  pick_worker_receipt: Command<undefined, string | null>;
   config_save: Command<Epoch & { document: ConfigDocument; edits: ConfigEdit[] }, ConfigDocument>;
   finding_details: Command<Item, FindingDetails>;
   evidence_preview: Command<Item & { offset: number }, EvidenceView>;
