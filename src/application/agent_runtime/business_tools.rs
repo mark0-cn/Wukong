@@ -99,7 +99,7 @@ impl Serve for BusinessTool {
             .clone()
             .unwrap_or_else(|| format!("{}:rig:{}", agent_id, dispatch.id()));
         let mut task = runtime.spawn(async move {
-            let mut output = application
+            let output = application
                 .runner
                 .execute(
                     &agent_id,
@@ -108,33 +108,6 @@ impl Serve for BusinessTool {
                     serde_json::from_str(&args)?,
                 )
                 .await?;
-            if !output.is_error
-                && !matches!(
-                    name.as_str(),
-                    "load_skill" | "context_search" | "context_read"
-                )
-                && application.runner.execution().summarize_tool_outputs
-                && output.value.to_string().len()
-                    > application.runner.execution().summarize_threshold_chars
-            {
-                let agent: AgentMetadata = application.runner.agent(&agent_id)?;
-                let (value, usage) = application
-                    .runner
-                    .engine_for(agent.role)
-                    .summarize_tool_output(
-                        name.as_str(),
-                        &output.value,
-                        application.runner.execution().summarize_max_tokens,
-                    )
-                    .await;
-                application.runner.account_usage(&agent_id, usage, false)?;
-                output.value = value;
-                application
-                    .runner
-                    .replace_call_result(&call_id, &output.value, output.is_error)?;
-            }
-            // Conditional task waits add domain predicates. Their open tool
-            // effect belongs to Rig, so its cancellation drops this future.
             let mut changes = application.runner.subscribe_changes();
             while application.runner.agent(&agent_id)?.status == Status::Waiting {
                 changes.changed().await?;

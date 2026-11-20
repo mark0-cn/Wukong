@@ -53,7 +53,11 @@ mod platform {
             if text.len() <= MAX_TOOL_DIAGNOSTIC {
                 text.to_owned()
             } else {
-                format!("{}…", &text[..MAX_TOOL_DIAGNOSTIC])
+                let mut boundary = MAX_TOOL_DIAGNOSTIC;
+                while !text.is_char_boundary(boundary) {
+                    boundary -= 1;
+                }
+                format!("{}…", &text[..boundary])
             }
         }
     }
@@ -1262,6 +1266,20 @@ mod platform {
         const SUPPORTED: &[&str] = &[
             "cat", "checksum", "download", "is-dir", "is-file", "ls", "mkdir-p", "sync", "upload",
         ];
+
+        #[test]
+        fn diagnostic_truncates_on_utf8_boundary() {
+            let output = ToolOutput {
+                success: false,
+                stdout: format!("{}界", "a".repeat(MAX_TOOL_DIAGNOSTIC - 1)).into_bytes(),
+                stderr: Vec::new(),
+            };
+
+            assert_eq!(
+                output.diagnostic(),
+                format!("{}…", "a".repeat(MAX_TOOL_DIAGNOSTIC - 1))
+            );
+        }
 
         #[test]
         fn guestfish_download_script_uses_only_supported_commands() {

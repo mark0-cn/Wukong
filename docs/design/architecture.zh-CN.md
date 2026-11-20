@@ -60,7 +60,7 @@ Windows 的执行管理入口只有原生 Worker。控制器负责业务任务�
 | `storage` | SQLite 事务、事件与邮箱、按内容哈希保存的原始产物 |
 | `application/coordinator` | 共享事务入口；`runs`、`tasks`、`messages`、`waits`、`completion` 分别管理运行、子任务、消息、依赖等待与完成 |
 | `application/agents`、`prompts/` | 角色与能力提示词装配；`src/application/prompts.rs` 统一维护内置目录 |
-| `adapters/models` | provider 配置与原生连接、结构化工具摘要及摘要用量 hook |
+| `adapters/models` | provider 配置与原生连接 |
 | `application/assessment/runner`、`bootstrap` | 运行生命周期与具体依赖装配 |
 | `application/agent_runtime/host`、`application/model_catalog`、`application/usage` | 内核可调用的业务接口、角色模型选择、用量及预算记账 |
 | `application/agent_runtime` | Rig 执行与日志、子任务及消息协议的业务接入，模型与工具准入、原生会话投影 |
@@ -181,7 +181,7 @@ flowchart TB
 2. 根 agent 调用原生 `task`，使用 description、prompt、role、scope 及可选 contract 等字段。业务层事务写入子任务后，Rig 异步创建子 agent 并返回。按角色、scope 去重；前驱未完成时只阻止子任务的模型请求，不阻塞创建者。
 3. 每个 agent 有独立的原生 Conversation；AgentPlugin 驱动模型与工具效果，SessionLogPlugin 保存可恢复日志，EffectLogPlugin 保存效果记录。SQLite 保留业务账本与供 CLI/GUI 查询的会话投影。并发额度按在途模型请求计算，等待中的父任务不占模型名额。
 4. SubagentsPlugin 负责创建、请求、报告与取消。`wait` 等待一个可达 agent，`wait_for_agents` 提供业务成功条件。完成通知按 generation 去重，并绑定一次原生 Report。普通信息不释放等待；已完成任务的新工作必须使用 `follow_up_agent`。
-5. 工具 schema 和校验复用 Rig。原始结果写入证据目录，模型只获取有界摘要和证据 ID；摘要采用 AgentRunner 的类型化输出和 AgentHook 计量，身份及状态字段由宿主保留。通用分析信息写入共享笔记、待办与 coverage；threat model 仅在安全边界分析中按需建立。
+5. 工具 schema 和校验复用 Rig。原始结果写入证据目录，模型获取有界的原始结果和证据 ID，不调用第二个模型生成摘要；身份及状态字段由宿主保留。通用分析信息写入共享笔记、待办与 coverage；threat model 仅在安全边界分析中按需建立。
 6. 会话保留、工具调用配对及摘要替换复用 rig-memory，保留共享资料和原始会话的证据引用。继承上下文只复制已闭合的父对话，不为尚未返回的工具调用制造结果。重试采用 Rig 的错误分类与 Retry-After；用量计价采用 Rig Pricing，业务层继续执行预算暂停。
 7. 已确认影响必须关联独立 verifier 的验证记录。`agent_finish` 与 `finish_scan` 先通过业务验收，包括契约、证据和会话清理，再由原生协议报告完成；普通文本答案不能绕过这些门槛。
 
@@ -219,13 +219,13 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 `recon`、`reverse`、`hunter`、`fuzz`、`crash`、`exploit`、`reporter` 是能力，`formats`、`types`、`algorithms`、`state_machine`、`binary_diff` 等提供具体方法。同一 analyst 可以在自己的问题范围内连续使用不同方法；不会仅因切换能力就创建后继任务。同范围的活跃 analyst 共用去重入口，独立 verifier 可以另建同范围的复核任务。hunter 可以从限定的研究范围开始发现并检验假设，无需预先给定漏洞假设。普通报告由 root 汇总，需要大型报告产物时才委派带 reporter 的 analyst。
 
-角色指令由控制器自动安装，不能作为附加 skill 加载。`load_skill` 将本地能力的正文、SHA256 与原始证据引用保存为 agent 的活动指令快照，在下一次新模型请求的系统提示词中生效。已冻结的请求保持原样；源文件后续变化不会悄悄改写已加载的快照。同名活动快照替代初始 skill 的正文，避免两份版本并存。动态指令不经过工具结果摘要，压缩和恢复保留其内容。单个 skill 上限为 64 KiB；初始和动态能力合计最多 5 个不同名称。能力只补充方法、证据和产物，任务结束由主角色统一管理；恢复成功后继续原任务。
+角色指令由控制器自动安装，不能作为附加 skill 加载。`load_skill` 将本地能力的正文、SHA256 与原始证据引用保存为 agent 的活动指令快照，在下一次新模型请求的系统提示词中生效。已冻结的请求保持原样；源文件后续变化不会悄悄改写已加载的快照。同名活动快照替代初始 skill 的正文，避免两份版本并存。动态指令直接加入请求，压缩和恢复保留其内容。单个 skill 上限为 64 KiB；初始和动态能力合计最多 5 个不同名称。能力只补充方法、证据和产物，任务结束由主角色统一管理；恢复成功后继续原任务。
 
 提示词集中在 `prompts/`：`base.md` 保存通用规则，`roles/` 保存身份与生命周期，`capabilities/` 保存专项能力，`methods/` 保存具体技术，`support/` 保存工具与恢复指导，`examples/` 保存有完整示范价值的案例。`src/application/prompts.rs` 注册名称、类别、用途、内置正文与可选示例引用；提示词中的能力发现目录、内置加载、错误提示和角色 skill 限制均从这份注册表派生。发现目录只包含名称和用途，正文及示例仍按角色和选中的 skill 装配。仅重复正文的 fuzz/crash 短示例已移除。
 
 调用名称保持 `reverse`、`hunter` 等，不包含目录。`skills_dir` 继续通过平铺的 `<name>.md` 覆盖内置正文或提供自定义方法；`demos_dir` 默认指向 `prompts/examples`，也可指定平铺的自定义示例目录。目录缺失时跳过示例，内置正文已嵌入程序，不依赖运行时读取仓库文件。
 
-共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置，不经过模型摘要。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
+共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
 `src/application/tools/catalog.rs` 统一定义工具 schema、角色边界和后端要求。每次模型请求前，环境预检将实际能力与任务授权及持久化的可选分组选择取交集；root 保持延迟连接。`tool_catalog` 报告可用性，`tool_select` 只改变工具展示，不授予权限。核心和资源生命周期工具始终可见；配置的 MCP 工具需选择 external 分组。Rig 只向模型暴露 `task`；消息与等待使用 `send_message_to_agent` 和 `wait_for_agents`。root 通过 `finish_scan`、子任务通过 `agent_finish` 完成，两者都只接受一个结构化 result。调用时再次校验角色、授权、目标身份、证据、资源归属和后端能力。只有 verifier 可以认证独立分析或影响。通过仅供开发使用的 `cargo run --example export_catalogs -- tool-catalog` 生成[工具目录](../reference/tool-catalog.zh-CN.md)，`--json` 导出 schema。
 

@@ -397,6 +397,133 @@ async fn shared_context_is_scoped_bounded_and_exactly_retrievable() -> Result<()
 }
 
 #[tokio::test]
+async fn coverage_record_upserts_one_stable_row_per_agent_and_scope() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let other = child(&coordinator, &run.root_id, Role::Analyst, "other")?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let evidence = store.artifact(
+        &run.id,
+        &agent.id,
+        "coverage-fixture",
+        "fixture",
+        b"coverage observation",
+        "text/plain",
+        json!({}),
+    )?;
+    let first = service
+        .execute(
+            &agent.id,
+            "coverage-open",
+            "coverage_record",
+            json!({"scope":"  parser   input \t","kind":" static  analysis ","outcome":"needs_follow_up","notes":"open","evidence_ids":[evidence.id]}),
+        )
+        .await?;
+    assert!(!first.is_error, "{first:?}");
+    let first = result(&first);
+    assert_eq!(first["scope"], "parser input");
+    assert_eq!(first["kind"], "static analysis");
+    let id = first["id"].as_str().unwrap().to_owned();
+    let created_at = first["created_at"].as_str().unwrap().to_owned();
+
+    let completed = service
+        .execute(
+            &agent.id,
+            "coverage-complete",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"completed","notes":"done"}),
+        )
+        .await?;
+    let completed = result(&completed);
+    assert_eq!(completed["id"], id);
+    assert_eq!(completed["created_at"], created_at);
+    assert_eq!(completed["outcome"], "completed");
+    assert_eq!(completed["notes"], "done");
+    assert_eq!(completed["evidence_ids"], json!([evidence.id]));
+
+    let other_agent = service
+        .execute(
+            &other.id,
+            "coverage-other-agent",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"completed"}),
+        )
+        .await?;
+    assert_ne!(result(&other_agent)["id"], id);
+    let different_scope = service
+        .execute(
+            &agent.id,
+            "coverage-case-sensitive",
+            "coverage_record",
+            json!({"scope":"Parser Input","kind":"static analysis","outcome":"inconclusive"}),
+        )
+        .await?;
+    assert_ne!(result(&different_scope)["id"], id);
+    let rows = store.records::<Coverage>(&run.id)?;
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.iter().filter(|row| row.id == id).count(), 1);
+    assert!(
+        service
+            .definitions(Role::Analyst)
+            .iter()
+            .all(|tool| tool.name != "coverage_update")
+    );
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn coverage_record_reconciles_legacy_duplicate_rows() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, run, agent) = fixture(temp.path())?;
+    for (id, scope, kind, created_at) in [
+        (
+            "legacy-a",
+            " parser   input ",
+            "static  analysis",
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "legacy-b",
+            "parser input",
+            "static analysis",
+            "2026-01-02T00:00:00Z",
+        ),
+    ] {
+        let timestamp =
+            chrono::DateTime::parse_from_rfc3339(created_at)?.with_timezone(&chrono::Utc);
+        store.save_record(&Coverage {
+            id: id.into(),
+            run_id: run.id.clone(),
+            agent_id: agent.id.clone(),
+            scope: scope.into(),
+            kind: kind.into(),
+            outcome: "needs_follow_up".into(),
+            notes: "legacy".into(),
+            evidence_ids: vec![],
+            created_at: timestamp,
+            updated_at: timestamp,
+        })?;
+    }
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let output = service
+        .execute(
+            &agent.id,
+            "coverage-legacy-complete",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"completed"}),
+        )
+        .await?;
+    assert!(!output.is_error, "{output:?}");
+    assert_eq!(result(&output)["id"], "legacy-a");
+    let rows = store.records::<Coverage>(&run.id)?;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.outcome == "completed"));
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn role_catalog_enforces_coordinator_boundary() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let (store, _, run, _agent) = fixture(temp.path())?;
@@ -1403,6 +1530,79 @@ async fn large_outputs_remain_original_and_can_be_read_in_ranges() -> Result<()>
             serde_json::to_vec(&output.value)?.len() <= 1024,
             "envelope overhead exceeded byte bound at length {length}"
         );
+    }
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn evidence_read_aligns_utf8_pages_without_changing_original_bytes() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, _, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let original = "a界b".as_bytes();
+    let evidence = store.artifact(
+        &run.id,
+        &agent.id,
+        "utf8-fixture",
+        "fixture",
+        original,
+        "application/octet-stream",
+        json!({}),
+    )?;
+    for (index, offset, length, expected_offset, expected, next_offset) in [
+        (0, 0, 2, 0, "a", Some(1)),
+        (1, 1, 1, 1, "界", Some(4)),
+        (2, 4, 1, 4, "b", None),
+        (3, 2, 1, 4, "b", None),
+    ] {
+        let output = service
+            .execute(
+                &agent.id,
+                &format!("utf8-read-{index}"),
+                "evidence_read",
+                json!({"evidence_id":evidence.id,"offset":offset,"length":length}),
+            )
+            .await?;
+        assert!(!output.is_error);
+        let page = result(&output);
+        assert_eq!(page["content"]["encoding"], "utf8");
+        assert_eq!(page["content"]["data"], expected);
+        assert_eq!(page["offset"], expected_offset);
+        assert_eq!(page["length"], expected.len());
+        assert_eq!(page["next_offset"], json!(next_offset));
+        if offset != expected_offset || length != expected.len() {
+            assert_eq!(page["boundary_adjusted"], true);
+            assert_eq!(page["requested_offset"], offset);
+            assert_eq!(page["requested_length"], length);
+        }
+    }
+    assert_eq!(store.read_evidence(&run.id, &evidence.id)?, original);
+
+    for (index, bytes) in [b"\x80a".as_slice(), b"a\xe7\x95".as_slice()]
+        .into_iter()
+        .enumerate()
+    {
+        let binary = store.artifact(
+            &run.id,
+            &agent.id,
+            &format!("binary-fixture-{index}"),
+            "fixture",
+            bytes,
+            "application/octet-stream",
+            json!({}),
+        )?;
+        let output = service
+            .execute(
+                &agent.id,
+                &format!("binary-read-{index}"),
+                "evidence_read",
+                json!({"evidence_id":binary.id,"offset":0,"length":bytes.len()}),
+            )
+            .await?;
+        assert_eq!(result(&output)["content"]["encoding"], "base64");
+        assert_eq!(result(&output)["offset"], 0);
+        assert_eq!(result(&output)["length"], bytes.len());
     }
     service.close().await;
     Ok(())

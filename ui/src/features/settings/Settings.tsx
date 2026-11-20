@@ -37,7 +37,6 @@ const groups = (form: Record<string, Json>): { title: string; fields: Field[] }[
     { path: 'default_environment', label: t('settings-default-analysis-environment'), kind: 'environment' },
     ...(Object.values(environmentMap(form)).some(environment => environment.platform === 'linux') ? [{ path: 'workbench.docker_executable', label: t('settings-docker-executable') }] : []),
     { path: 'execution.stream', label: t('settings-stream-model-responses'), kind: 'checkbox' },
-    { path: 'execution.summarize_tool_outputs', label: t('settings-summarize-large-tool-outputs-in-model-context'), kind: 'checkbox' },
   ] },
   ...Object.entries(environmentMap(form)).map(([id, value]) => ({ title: `${String(value.name ?? id)} · ${id}`, fields: [
     { path: `environments.${id}.name`, label: t('settings-environment-name') },

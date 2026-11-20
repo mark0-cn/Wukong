@@ -45,7 +45,7 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 
 在 Windows x64 或 Linux x64 的源码目录执行 `cargo package-local`。
 入口检查源码已提交、工作区干净和构建工具，再调用 Tauri 生成当前平台的 NSIS EXE 或 AppImage，输出到 `target/local-installers/`。
-不发布版本。Windows 安装包默认内置离线 Worker 安装程序，安装后位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`：命令在自动发现的 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，暂存为 `target/worker-setup/WukongWorkerSetup.exe`，与 CI 一样通过 Tauri `--config` 资源覆盖加入安装包（[内置 Worker 安装程序](desktop-updates.zh-CN.md#bundled-worker-setup)）。
+不发布版本。Windows 安装包默认内置离线 Worker 安装程序，安装后位于 `<安装目录>\worker-setup\WukongWorkerSetup.exe`：命令在自动发现的 x64 MSVC 环境中用 `python -m scripts.worker.build_native` 构建它，暂存为 `target/worker-setup/WukongWorkerSetup.exe`，与 CI 一样通过 Tauri `--config` 资源覆盖加入安装包（[内置 Worker 安装程序](desktop-updates.zh-CN.md#bundled-worker-setup)）。同一个环境（包括可写的 `target/tmp`）会传播给随后的 Tauri/桌面子进程。
 这要求 Windows x64 与 Visual Studio C++ 生成工具，首次运行可能下载缺失的锁定工具链资源；安装包约增大 2–4 MB。
 `cargo package-local` 生成的是**本地发布**安装包：首次引导使用内置的 `local-release.json` 与本机已有、从独立 CI 工作台镜像仓库拉取或本地构建的 Docker 镜像，而不是线上签名目录，因此未发布的源码也能准备环境（[本地发布构建](local-builds.zh-CN.md)）。需要旧的依赖线上目录的安装包时使用 `--online`；CI 发布打包不会启用本地发布模式。
 
@@ -55,9 +55,9 @@ cargo package-local --output target/installers/build-1
 cargo package-local --signed
 ```
 
-已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，包括 Windows Worker 安装程序所需的 x64 MSVC 环境、离线工具链可用性和原生 Worker 源码；系统库及安装器工具由实际构建验证。
+已有输出目录拒绝覆盖。`--check` 检查源码和工具入口，包括 Windows Worker 安装程序所需的 x64 MSVC 环境、离线工具链可用性和原生 Worker 源码；还会把临时文件指向 `target/tmp`，实际编译、归档和链接一个 SDK 小程序。系统库及安装器工具由实际构建验证。
 `--signed` 需要 `TAURI_SIGNING_PRIVATE_KEY`；普通本地构建无需发布密钥。
-Windows 需要 MSVC（Worker 安装程序自动发现）、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
+Windows 需要 MSVC（Worker 与桌面原生构建都会自动发现）、Rust、Node.js/npm、Python；Linux 还需要 Tauri WebKitGTK、GTK、AppIndicator、patchelf 等构建依赖。
 本地发布打包还要求运行中的 Docker daemon 与 linux/amd64 工作台镜像（[本地发布构建](local-builds.zh-CN.md)）。
 Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检查，不承诺覆盖所有发行版。
 旧 ZIP 包脚本保留用于开发夹具，正式流水线及 `cargo package-local` 不再以 ZIP 为用户安装入口。
@@ -68,7 +68,7 @@ Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检�
 
 ## 日常 CI
 
-`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
+`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；原生 Cargo 命令使用共享 MSVC 入口，并在恢复的 Rust 缓存之外冷构建 `aws-lc-sys`/`ring`/`libsqlite3-sys` 预检，失败时只保留这三个包的有界 build script 诊断。Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
 
 Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
 

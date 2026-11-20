@@ -70,9 +70,9 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm run build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo build --locked --features custom-protocol -j 2
+          python -m scripts.dev.msvc_cargo -- build --locked --features custom-protocol -j 2
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          npx --no-install tauri bundle --debug --ci --features custom-protocol --bundles nsis --no-sign
+          python -m scripts.dev.msvc_cargo --exec -- npx.cmd --no-install tauri bundle --debug --ci --features custom-protocol --bundles nsis --no-sign
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Test actual NSIS installation and scoped uninstall on disposable runner
         shell: pwsh

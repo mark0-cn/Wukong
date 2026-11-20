@@ -95,11 +95,6 @@ stream = true
 model_retries = 2
 compact_after_chars = 200000
 keep_recent_messages = 12
-# Replace large tool-result envelopes in the model context with a short LM
-# summary (original bytes stay in evidence; replay stays exact).
-summarize_tool_outputs = true
-summarize_threshold_chars = 6000
-summarize_max_tokens = 400
 
 # Third-party MCP stdio server, credentials are environment VARIABLE NAMES.
 # [[mcp]]

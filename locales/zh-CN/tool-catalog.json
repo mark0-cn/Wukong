@@ -48,12 +48,8 @@
     "text": "按 agent、scope 或 outcome 分页列出覆盖摘要；通过 after 继续 next_cursor。notes 仅为预览，full_evidence_id 保留完整页面。"
   },
   "coverage_record": {
-    "source": "Record inspected scope, outcome and supporting evidence. needs_follow_up blocks root completion.",
-    "text": "记录检查范围、结果及支持证据。needs_follow_up 阻止 root 完成。"
-  },
-  "coverage_update": {
-    "source": "Update a coverage record's outcome, notes and evidence.",
-    "text": "更新覆盖记录的结果、笔记和证据。"
+    "source": "Record or update inspected scope, outcome and supporting evidence. Repeating the same normalized scope/kind for an agent updates one row; needs_follow_up blocks root completion.",
+    "text": "记录或更新检查范围、结果及支持证据。同一 agent 重复记录相同规范化 scope/kind 时更新同一行；needs_follow_up 阻止 root 完成。"
   },
   "crash_replay": {
     "source": "Start a persistent clean-directory crash reproduction job.",
@@ -104,8 +100,8 @@
     "text": "列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。"
   },
   "evidence_read": {
-    "source": "Read a bounded byte range from an integrity-checked evidence artifact. Non-UTF8 is base64.",
-    "text": "读取完整性已核对证据的有界字节范围；非 UTF-8 使用 base64。"
+    "source": "Read a bounded byte range from an integrity-checked evidence artifact. UTF-8 pages align to character boundaries and report requested/actual offsets; invalid UTF-8 is base64.",
+    "text": "读取完整性已核对证据的有界字节范围；UTF-8 页面按字符边界对齐并报告请求/实际偏移，无效 UTF-8 使用 base64。"
   },
   "evidence_search": {
     "source": "Find same-run evidence metadata by producer, target hash, content hash, job, media type or source. Bounded stable ID pages; follow next_cursor using after. Read content with evidence_read.",

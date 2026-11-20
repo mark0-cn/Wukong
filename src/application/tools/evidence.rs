@@ -19,7 +19,6 @@ impl EvidenceService {
         &self,
         agent: &AgentMetadata,
         call_id: &str,
-        name: &str,
         args: &Value,
     ) -> Result<Value> {
         let evidence = string_list(args, "evidence_ids")?;
@@ -28,30 +27,58 @@ impl EvidenceService {
             "evidence links are limited to 128 per record"
         );
         self.store.verify_evidence_links(&agent.run_id, &evidence)?;
+        let scope = text(args, "scope")?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let kind = text(args, "kind")?
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let identity = stable(
+            "cov",
+            &serde_json::to_string(&(&agent.run_id, &agent.id, &scope, &kind))?,
+        );
         self.effect(agent, call_id, |tx| {
-            let mut coverage = if name == "coverage_update" {
-                let record: Coverage = tx
-                    .get_record(text(args, "id")?)?
-                    .context("coverage missing")?;
-                ensure!(
-                    record.run_id == agent.run_id,
-                    "coverage belongs to another run"
-                );
-                record
-            } else {
+            let mut matching = tx
+                .records::<Coverage>(&agent.run_id)?
+                .into_iter()
+                .filter(|record| {
+                    record.agent_id == agent.id
+                        && record
+                            .scope
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            == scope
+                        && record.kind.split_whitespace().collect::<Vec<_>>().join(" ") == kind
+                })
+                .collect::<Vec<_>>();
+            matching.sort_by(|left, right| {
+                (left.id != identity, &left.created_at, &left.id).cmp(&(
+                    right.id != identity,
+                    &right.created_at,
+                    &right.id,
+                ))
+            });
+            let mut coverage = if matching.is_empty() {
                 Coverage {
-                    id: stable("cov", call_id),
+                    id: identity.clone(),
                     run_id: agent.run_id.clone(),
                     agent_id: agent.id.clone(),
-                    scope: text(args, "scope")?.into(),
-                    kind: text(args, "kind")?.into(),
+                    scope: scope.clone(),
+                    kind: kind.clone(),
                     outcome: String::new(),
                     notes: String::new(),
                     evidence_ids: vec![],
                     created_at: now(),
                     updated_at: now(),
                 }
+            } else {
+                matching.remove(0)
             };
+            coverage.scope = scope.clone();
+            coverage.kind = kind.clone();
             coverage.outcome = text(args, "outcome")?.into();
             if let Some(notes) = args["notes"].as_str() {
                 coverage.notes = notes.into();
@@ -61,6 +88,11 @@ impl EvidenceService {
             }
             coverage.updated_at = now();
             tx.save_record(&coverage)?;
+            for mut duplicate in matching {
+                duplicate.outcome = coverage.outcome.clone();
+                duplicate.updated_at = coverage.updated_at;
+                tx.save_record(&duplicate)?;
+            }
             Ok(serde_json::to_value(coverage)?)
         })
     }

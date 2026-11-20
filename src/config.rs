@@ -63,12 +63,6 @@ pub struct ExecutionConfig {
     pub output_recovery_attempts: u32,
     pub compact_after_chars: usize,
     pub keep_recent_messages: usize,
-    /// When enabled, large tool-result envelopes are replaced in the model
-    /// context by a short LM summary (plus the evidence ID). The original
-    /// bytes remain in evidence and the call record; replay stays exact.
-    pub summarize_tool_outputs: bool,
-    pub summarize_threshold_chars: usize,
-    pub summarize_max_tokens: u64,
 }
 impl Default for ExecutionConfig {
     fn default() -> Self {
@@ -78,9 +72,6 @@ impl Default for ExecutionConfig {
             output_recovery_attempts: 1,
             compact_after_chars: 200000,
             keep_recent_messages: 12,
-            summarize_tool_outputs: true,
-            summarize_threshold_chars: 6000,
-            summarize_max_tokens: 400,
         }
     }
 }
@@ -584,6 +575,23 @@ mod tests {
         config.environments.clear();
         config.default_environment = None;
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn removed_tool_summarizer_settings_are_ignored_when_loading_old_files() {
+        let config: AppConfig = toml::from_str(
+            r#"
+            [execution]
+            summarize_tool_outputs = true
+            summarize_threshold_chars = 6000
+            summarize_max_tokens = 400
+        "#,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(config.execution).unwrap(),
+            serde_json::to_value(ExecutionConfig::default()).unwrap()
+        );
     }
 
     #[test]

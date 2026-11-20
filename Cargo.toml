@@ -64,6 +64,26 @@ fluent-bundle = "0.16.0"
 unic-langid = "0.9.6"
 sys-locale = "0.3.2"
 
+# Avoid MSVC D8050 in Rust build-script process chains without disabling
+# Wukong's own debug information or filtering compiler arguments in a local shim.
+[profile.dev.package.aws-lc-sys]
+debug = 0
+
+[profile.dev.package.ring]
+debug = 0
+
+[profile.dev.package.libsqlite3-sys]
+debug = 0
+
+[profile.test.package.aws-lc-sys]
+debug = 0
+
+[profile.test.package.ring]
+debug = 0
+
+[profile.test.package.libsqlite3-sys]
+debug = 0
+
 [profile.release]
 lto = "thin"
 strip = true

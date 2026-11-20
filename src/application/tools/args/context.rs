@@ -96,18 +96,6 @@ pub(in crate::application::tools) struct CoverageRecordArgs {
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(in crate::application::tools) struct CoverageUpdateArgs {
-    #[schemars(length(min = 1))]
-    pub id: String,
-    pub outcome: CoverageOutcome,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evidence_ids: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub(in crate::application::tools) struct CoverageListArgs {
     pub agent_id: Option<String>,
     pub scope: Option<String>,

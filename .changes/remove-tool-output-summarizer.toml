@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Remove the secondary model tool-output summarizer and its settings. Tool calls now return bounded original results while complete hashed evidence remains available through evidence_read; obsolete summarizer settings in existing configuration files are ignored."
+zh_CN = "移除二次模型工具输出摘要及其配置项。工具调用现在返回有界的原始结果，完整哈希证据仍可通过 evidence_read 读取；现有配置文件中的废弃摘要配置项会被忽略。"

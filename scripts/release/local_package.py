@@ -8,8 +8,10 @@ import shutil
 import subprocess
 import tempfile
 
+from scripts._lib import msvc
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import read_json, version, write_json
+from scripts.release import worker_setup
 from scripts.release.cli import checksums, package, validate_image
 from scripts.release.release_metadata import DEFAULT_REPOSITORY, release_image
 
@@ -26,9 +28,9 @@ def checkout_identity():
     return revision
 
 
-def run(command):
+def run(command, environment=None):
     print("Running: " + subprocess.list2cmdline([str(arg) for arg in command]), flush=True)
-    subprocess.run(command, cwd=ROOT, check=True)
+    subprocess.run(command, cwd=ROOT, env=environment, check=True)
 
 
 def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
@@ -44,6 +46,8 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
     cargo = shutil.which(os.environ.get("CARGO", "cargo"))
     if not npm or not cargo:
         raise ValueError("Node.js/npm and Cargo must be installed and available on PATH.")
+    environment = worker_setup.build_environment()
+    msvc.preflight(environment, ROOT)
     if metadata is not None:
         if not metadata.is_file():
             raise ValueError(
@@ -62,8 +66,8 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
         print("Preflight passed. No build or package was created.")
         return
 
-    run([npm, "ci"])
-    run([npm, "run", "build"])
+    run([npm, "ci"], environment)
+    run([npm, "run", "build"], environment)
     target = "x86_64-pc-windows-msvc"
     run(
         [
@@ -77,7 +81,8 @@ def build(metadata, output, check_only=False, repository=DEFAULT_REPOSITORY):
             target,
             "--target-dir",
             str(ROOT / "target"),
-        ]
+        ],
+        environment,
     )
     binary = ROOT / "target" / target / "release" / "wukong.exe"
     if not binary.is_file():

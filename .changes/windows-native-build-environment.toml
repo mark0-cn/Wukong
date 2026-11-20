@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Unify Windows native builds behind a real MSVC/SDK entry point that validates compiler, archiver, linker and child-process temporary writes. Propagate the same environment to worker and desktop/Tauri builds, and add a cache-independent cold native dependency preflight to Windows CI."
+zh_CN = "Windows 原生构建现在统一使用真实 MSVC/SDK 入口，验证编译器、归档器、链接器及子进程临时文件写入。同一环境会传给 Worker 和桌面/Tauri 构建，Windows CI 新增不受缓存影响的冷原生依赖预检。"

@@ -49,10 +49,10 @@ pub(in crate::application::tools) fn handle_coverage_record<'a>(
     tools: &'a evidence::EvidenceService,
     agent: &'a AgentMetadata,
     call_id: &'a str,
-    name: &'a str,
+    _name: &'a str,
     args: Value,
 ) -> BoxFuture<'a, Result<Value>> {
-    Box::pin(async move { tools.coverage(agent, call_id, name, &args) })
+    Box::pin(async move { tools.coverage(agent, call_id, &args) })
 }
 
 pub(in crate::application::tools) fn handle_coverage_list<'a>(

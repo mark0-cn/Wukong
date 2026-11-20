@@ -44,10 +44,16 @@ jobs:
       - name: Build embedded desktop release
         if: inputs.target != 'linux'
         shell: bash
+        env:
+          TARGET: ${{ inputs.target }}
         run: |
           npm ci
           npm run build
-          cargo build --locked --release --features custom-protocol
+          if [[ "$TARGET" == windows ]]; then
+            python -m scripts.dev.msvc_cargo -- build --locked --release --features custom-protocol
+          else
+            cargo build --locked --release --features custom-protocol
+          fi
           ./target/release/wukong --version
       - name: Install Linux acceptance build dependencies
         if: inputs.target == 'linux'

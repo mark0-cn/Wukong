@@ -21,7 +21,7 @@ cargo package-local --check
 cargo package-local --output target/installers/local-release-1
 ```
 
-`--check` 只校验源码与工具入口。实际构建会运行 `npm ci`；在 Windows 上构建 Worker 安装程序；解析本地 Docker 镜像；写入 `target/local-release.json` 并作为 Tauri 资源 `local-release.json` 打包；最后以 `custom-protocol` 与 `local-release` Cargo feature 构建客户端。描述文件还会记录 `image_registry`，即另一台机器引导时可按需拉取的按版本固定的 CI 工作台镜像。重复运行会替换只包含旧 `package-local` 安装包的 `--output` 目录；含无关文件或子目录的目录会被拒绝而不会被删除。`--signed` 仍可用于 updater 签名测试，但已签名的本地发布包依然是开发产物，不会被发布。`--online` 则生成旧的、依赖线上目录的安装包。
+`--check` 校验源码与工具入口；在 Windows 上还会发现 x64 MSVC/SDK 环境，把临时文件指向 `target/tmp`，并实际编译、归档和链接一个 SDK 小程序。实际构建会运行 `npm ci`；在 Windows 上构建 Worker 安装程序；解析本地 Docker 镜像；写入 `target/local-release.json` 并作为 Tauri 资源 `local-release.json` 打包；最后以 `custom-protocol` 与 `local-release` Cargo feature 构建客户端。同一个已初始化的 MSVC 环境会传给 Worker 和随后的 Tauri/桌面子进程；独立诊断工具链时使用 `python -m scripts.dev.msvc_cargo --check`。描述文件还会记录 `image_registry`，即另一台机器引导时可按需拉取的按版本固定的 CI 工作台镜像。重复运行会替换只包含旧 `package-local` 安装包的 `--output` 目录；含无关文件或子目录的目录会被拒绝而不会被删除。`--signed` 仍可用于 updater 签名测试，但已签名的本地发布包依然是开发产物，不会被发布。`--online` 则生成旧的、依赖线上目录的安装包。
 
 CI 发布打包不使用此模式：`scripts/release/build_installer.py` 默认仍是线上配置，发布工作流都不会启用 `local-release` feature。使用 `tauri dev` 或启用该 feature 的 `cargo run` 时，Tauri 可能不会把内置资源复制到开发可执行文件旁；可把 `WUKONG_LOCAL_RELEASE_JSON` 指向描述文件的绝对路径以走同一运行路径。
 

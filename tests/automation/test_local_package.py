@@ -61,12 +61,20 @@ class LocalPackageTests(unittest.TestCase):
         self.stack.enter_context(
             patch("scripts.release.cli.subprocess.check_output", return_value=self.revision)
         )
+        self.environment = {"PATH": "C:/msvc", "TMP": str(self.root / "target/tmp")}
+        self.stack.enter_context(
+            patch.object(
+                local_package.worker_setup, "build_environment", return_value=self.environment
+            )
+        )
+        self.stack.enter_context(patch.object(local_package.msvc, "preflight"))
         self.commands = []
         self.runner = self.stack.enter_context(
             patch.object(local_package, "run", side_effect=self.fake_run)
         )
 
-    def fake_run(self, command):
+    def fake_run(self, command, environment=None):
+        self.assertIs(environment, self.environment)
         self.commands.append(command)
         if "--locked" in command:
             binary = self.root / "target/x86_64-pc-windows-msvc/release/wukong.exe"

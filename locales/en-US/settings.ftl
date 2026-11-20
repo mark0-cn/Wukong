@@ -29,7 +29,6 @@ settings-ssh-host = SSH host
 settings-python-executable = Python executable
 settings-runtime-bridge-path = Runtime bridge path
 settings-stream-model-responses = Stream model responses
-settings-summarize-large-tool-outputs-in-model-context = Summarize large tool outputs in model context
 settings-discard-settings-draft-and-reload = Discard settings draft and reload?
 settings-workspace-settings = Workspace settings
 settings-new-tasks-use-the-current-configuration-resumed = New tasks use the current configuration. Resumed tasks keep their saved configuration. Closing this dialog preserves the draft.

@@ -194,14 +194,6 @@ impl KernelHost {
     ) -> Result<ToolOutcome> {
         self.tools.execute(agent, call, name, args).await
     }
-    pub(crate) fn replace_call_result(
-        &self,
-        call: &str,
-        value: &Value,
-        is_error: bool,
-    ) -> Result<()> {
-        self.tools.replace_call_result(call, value, is_error)
-    }
     pub(crate) fn subscribe_changes(&self) -> tokio::sync::watch::Receiver<u64> {
         self.store.subscribe_changes()
     }
@@ -243,13 +235,8 @@ impl KernelHost {
     ) -> Result<()> {
         self.coordinator.set_status(id, status, reason)
     }
-    pub(crate) fn account_usage(
-        &self,
-        id: &str,
-        usage: rig::completion::Usage,
-        turn: bool,
-    ) -> Result<()> {
-        self.usage.account_usage(id, usage, turn)
+    pub(crate) fn account_usage(&self, id: &str, usage: rig::completion::Usage) -> Result<()> {
+        self.usage.account_usage(id, usage)
     }
     pub(crate) fn checkpoint_evidence(
         &self,

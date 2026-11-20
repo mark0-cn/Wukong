@@ -199,21 +199,6 @@ impl<'a> DurableEffects<'a> {
             Ok(value)
         })
     }
-    pub(crate) fn replace_result(&self, call: &str, value: &Value, is_error: bool) -> Result<()> {
-        self.store.write(|tx| {
-            let mut record: ToolCallRecord = tx.get_record(call)?.context("tool call missing")?;
-            ensure!(
-                matches!(record.state, CallState::Completed | CallState::Failed),
-                "only settled call results may be replaced"
-            );
-            record.result = Some(serde_json::to_value(EffectOutcome {
-                value: value.clone(),
-                is_error,
-            })?);
-            record.updated_at = now();
-            tx.save_record(&record)
-        })
-    }
     pub(crate) fn worker_reply(
         &self,
         agent: &AgentMetadata,
@@ -609,12 +594,19 @@ mod tests {
             ..Default::default()
         };
         let (store, agent) = fixture_snapshot(dir.path(), serde_json::to_value(&config)?)?;
-        let args = json!({"command":"printf x >> \"$WUKONG_STATE_DIR/counter\"; printf done"});
+        let args = json!({"command":"echo x>>counter"});
         let mut tools = ToolService::new(config.clone(), store.clone()).await?;
         let first = tools
             .execute(&agent.id, "crash-boundary", "exec_command", args.clone())
             .await?;
         assert!(!first.is_error, "{first:?}");
+        assert_eq!(first.value["result"]["exit_code"], 0, "{first:?}");
+        let working_directory = first.value["result"]["execution"]["cwd"]
+            .as_str()
+            .context("trusted execution did not report its working directory")?;
+        let counter = std::path::Path::new(working_directory).join("counter");
+        let initial = std::fs::read(&counter)?;
+        assert!(!initial.is_empty());
         for lose_controller_receipt in [false, true] {
             // The worker committed, but the controller crashed before recording
             // its final envelope (and optionally before persisting the RPC reply).
@@ -638,18 +630,9 @@ mod tests {
                 .execute(&agent.id, "crash-boundary", "exec_command", args.clone())
                 .await?;
             assert!(!replay.is_error, "{replay:?}");
+            assert_eq!(replay.value["result"]["exit_code"], 0, "{replay:?}");
             assert_eq!(replay.value["result"], first.value["result"]);
-            assert_eq!(
-                std::fs::read(
-                    config.environments["fixture"]
-                        .runtime
-                        .trusted_local()
-                        .unwrap()
-                        .state_dir
-                        .join("counter")
-                )?,
-                b"x"
-            );
+            assert_eq!(std::fs::read(&counter)?, initial);
         }
         tools
             .bound_to(&agent)

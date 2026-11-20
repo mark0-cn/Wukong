@@ -16,6 +16,12 @@ Use this path to develop Wukong or run a checkout whose version has no published
 - For dynamic analysis: Docker with Linux containers, at least 25 GiB free for images/temporary layers, and Python 3.12+ to run source toolchain download scripts. Host GDB/pwntools installations are not needed with Docker tools.
 - A supported model service and model name; configure credentials through environment variable names.
 
+Development and test profiles disable debug information for the `aws-lc-sys`, `ring` and `libsqlite3-sys` FFI packages. This prevents MSVC `D8050` debug-record failures in Cargo build-script process chains while retaining Wukong's own debug information. The package-level trade-off also applies on Linux; release profiles are unchanged. It does not replace the required MSVC/SDK installation.
+
+On Windows, use `python -m scripts.dev.msvc_cargo --check` to discover the x64 Visual Studio C++ tools and Windows SDK, route `TMP`/`TEMP` to `target/tmp`, and compile, archive and link a small `<stdint.h>` probe through real child processes. Prefix Cargo commands with `python -m scripts.dev.msvc_cargo --`, for example `python -m scripts.dev.msvc_cargo -- test --locked --all-targets`. The entry point reports only toolchain paths/versions and preserves explicit `CC`/`CXX` overrides rather than silently replacing them. `D8050` indicates native debug-record failure (the scoped profiles above avoid its `/Z7` trigger); `C1083` for standard headers indicates missing/incomplete MSVC or SDK setup; `LNK1104` during temporary/output writes requires checking the reported writable temp path. Do not use a compiler-argument-filtering shim as a project default.
+
+`python -m scripts.dev.msvc_cargo --native-preflight` additionally cold-builds the three native packages in a fresh target directory, independently of restored Rust caches. A failed preflight retains only its task-owned target for build-script diagnostics. AWS-LC feature probes may fail individually as part of an upstream fallback; use the final build-script/Cargo result, not an isolated probe exit code.
+
 macOS has no official desktop installer in this release pipeline. The first dynamic backend targets Linux x86_64 ELF; native DbgEng/LLDB backends are not implemented.
 
 <a id="获取并构建客户端"></a>

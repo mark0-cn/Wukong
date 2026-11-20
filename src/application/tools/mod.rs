@@ -271,13 +271,6 @@ impl ToolService {
         }
     }
 
-    /// Substitute a completed call's recorded result (e.g. an LM-summarized
-    /// envelope). Evidence and the original bytes are untouched; every later
-    /// durable replay returns the substituted result.
-    pub fn replace_call_result(&self, call_id: &str, value: &Value, is_error: bool) -> Result<()> {
-        self.effects().replace_result(call_id, value, is_error)
-    }
-
     pub async fn execute(
         &self,
         agent_id: &str,

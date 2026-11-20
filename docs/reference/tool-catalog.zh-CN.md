@@ -20,8 +20,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `context_read` | 全部 | 否 | controller | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |
 | `context_search` | 全部 | 否 | controller | 按文本、kind、作者 scope 或 agent_id 搜索同 run 的笔记、待办和可选威胁模型。返回有界预览和 next_offset；用 context_read 读取完整正文及 amendments。 |
 | `coverage_list` | 全部 | 否 | controller | 按 agent、scope 或 outcome 分页列出覆盖摘要；通过 after 继续 next_cursor。notes 仅为预览，full_evidence_id 保留完整页面。 |
-| `coverage_record` | 全部 | 是 | controller | 记录检查范围、结果及支持证据。needs_follow_up 阻止 root 完成。 |
-| `coverage_update` | 全部 | 是 | controller | 更新覆盖记录的结果、笔记和证据。 |
+| `coverage_record` | 全部 | 是 | controller | 记录或更新检查范围、结果及支持证据。同一 agent 重复记录相同规范化 scope/kind 时更新同一行；needs_follow_up 阻止 root 完成。 |
 | `crash_replay` | analyst / verifier | 是 | crash.replay | 在干净目录启动持久化崩溃复现 job。 |
 | `crash_snapshot` | analyst / verifier | 否 | core.snapshot | 从自己拥有且已停止的调试会话获取寄存器、PC/SP、故障地址、指令、栈和模块身份，或检查同 run 的 core。强签名要求实际模块哈希；未知身份保持未解决。 |
 | `cyclic_offset` | analyst / verifier | 否 | cyclic.offset | 在同 run 的 cyclic pattern 中找唯一偏移。必须提供原始 alphabet/n 及内存顺序恰好 n 字节；拒绝不一致生成参数，不猜字节序或隐式截断寄存器。 |
@@ -34,7 +33,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `emulate_run` | analyst / verifier | 否 | emu.run | 从起始地址用 Unicorn 有界模拟暂存目标：映射 ELF 段和栈，运行到 count 条指令或 PC 到 until 地址，返回寄存器及所需内存 data_base64。目标不原生执行；可用于 VM/手工代码（解释器循环、x87/FPU）而无需自写 Unicorn harness。init_regs 设置前提寄存器，memory 注入字节；watchdog 限制失控循环，未知指令错误包含地址。 |
 | `environment_doctor` | 全部 | 否 | explicit probe | 探测已登记环境的实际平台和工具；子任务只能探测分配给自己的环境。 |
 | `environment_list` | 全部 | 否 | controller | 列出已登记的分析环境，不建立连接；配置存在不代表环境已就绪。 |
-| `evidence_read` | 全部 | 否 | controller | 读取完整性已核对证据的有界字节范围；非 UTF-8 使用 base64。 |
+| `evidence_read` | 全部 | 否 | controller | 读取完整性已核对证据的有界字节范围；UTF-8 页面按字符边界对齐并报告请求/实际偏移，无效 UTF-8 使用 base64。 |
 | `evidence_search` | 全部 | 否 | controller | 按产出 agent、目标哈希、内容哈希、作业、媒体类型或来源检索本次运行的证据元数据。按稳定 ID 分页，通过 after 继续 next_cursor；使用 evidence_read 读取内容。 |
 | `exec_command` | analyst / verifier | 是 | exec.run | 在 worker 同步执行一条有界 shell 命令，返回 stdout/stderr/退出码。每次使用新临时目录；target 接收 stage_target 路径，并通过 $TARGET 暴露解析后文件（例如 "printf '<payload>' \| $TARGET"）。适合快速检查和 stdin PoC；长任务用 job_start 并重定向日志。files/... 只在直接 argv 项解析，不在 shell 字符串中解析；状态根使用 $WUKONG_STATE_DIR。 |
 | `file_get` | analyst / verifier | 否 | file.stat + file.read | 取回同 run 已声明的 worker 文件，并将原始字节保存为证据。 |

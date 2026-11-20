@@ -29,7 +29,6 @@ settings-ssh-host = SSH 主机
 settings-python-executable = Python 可执行文件
 settings-runtime-bridge-path = 运行时桥接程序路径
 settings-stream-model-responses = 模型流式输出
-settings-summarize-large-tool-outputs-in-model-context = 压缩模型上下文中的大型工具输出
 settings-discard-settings-draft-and-reload = 放弃当前设置草稿并重新加载？
 settings-workspace-settings = 工作区设置
 settings-new-tasks-use-the-current-configuration-resumed = 新任务使用当前配置；恢复任务沿用历史配置。关闭窗口会保留设置草稿。
