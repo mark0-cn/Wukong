@@ -1,3 +1,0 @@
-kind = "feature"
-en = "Bundle the Windows worker setup executable into the Wukong installer, so a current-user installation already contains it at worker-setup/WukongWorkerSetup.exe. The offline worker media template, including its payload, remains a separate signed release asset."
-zh_CN = "Wukong Windows 安装包内置 Worker 安装程序，当前用户安装后即可在 worker-setup/WukongWorkerSetup.exe 找到它；包含载荷的离线 Worker 介质模板仍作为独立的签名发布附件提供。"

@@ -1,9 +1,0 @@
-/* Ordered by the original cascade; theme and split layout remain separate. */
-@import "./styles/base.css";
-@import "./styles/workspace.css";
-@import "./styles/conversation.css";
-@import "./styles/agents-overview.css";
-@import "./styles/findings.css";
-@import "./styles/settings.css";
-@import "./styles/responsive.css";
-@import "./styles/maintenance.css";

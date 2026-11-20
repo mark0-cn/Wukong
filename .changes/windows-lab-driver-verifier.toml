@@ -1,3 +1,0 @@
-kind = "feature"
-en = "Document and validate driver installation, test signing and Driver Verifier in the lab: a self-signed WDM test driver loaded under testsigning and again under standard Verifier flags after reboots; a baseline restore removed the service, test certificate and Verifier settings. PatchGuard bypass stays outside the lab."
-zh_CN = "在实验室中记录并验证驱动安装、测试签名与 Driver Verifier：自签名 WDM 测试驱动在 testsigning 下加载，重启后又在标准 Verifier 标志下再次加载；恢复基线移除了服务、测试证书和 Verifier 设置。PatchGuard 绕过不纳入实验室。"

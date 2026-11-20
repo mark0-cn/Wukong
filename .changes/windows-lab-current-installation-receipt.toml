@@ -1,3 +1,0 @@
-kind = "breaking"
-en = "Windows Worker setup and offline VM provisioning share the current v2 connection receipt. If an installation only produced a v1 receipt, install current media in a fresh disposable Windows VM and import the new receipt."
-zh_CN = "Windows Worker 安装与 VM 离线部署统一使用当前 v2 连接回执。如果原安装只生成了 v1 回执，请在新的一次性 Windows VM 中使用当前介质安装并导入新回执。"

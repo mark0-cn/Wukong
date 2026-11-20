@@ -1,3 +1,0 @@
-kind = "feature"
-en = "The desktop app now exposes the offline Windows worker setup as two actions: generate controller-credential-free installation media from the signed release template (or a local template file) after choosing the management network, then import the exported connection receipt to verify and register the managed SSH environment. Imports persist pending state for retry, update an existing registration instead of duplicating it, and never pin a different host key or leave a partially registered environment behind."
-zh_CN = "桌面应用现以两个操作完成离线 Windows Worker 安装：先从签名发行模板（或本地模板文件）选择管理网络并生成不含控制器凭据的安装介质，再导入导出的连接回执以校验并注册受管 SSH 环境。导入会持久化待处理状态以便重试，对已注册安装更新现有环境而非重复添加，并且不会替换已固定的其他主机密钥，也不会留下注册到一半的环境。"

@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Include configured MCP tools in the paginated catalog, retain Lab cleanup controls when switching groups, validate resource stream inputs and backend support, and keep output EOF and differential completion tied to observed state."
-zh_CN = "分页工具目录纳入已配置的 MCP 工具，切换分组后仍保留 Lab 清理控制；校验资源流参数和后端支持，并根据实际观测状态判断输出 EOF 与差分测试完成情况。"

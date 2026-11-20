@@ -1,6 +1,0 @@
-* text=auto eol=lf
-*.png binary
-*.jpg binary
-*.gif binary
-src/application/windows_lab/provision/fixtures/*.bin binary
-src/application/windows_lab/provision/fixtures/boot_task.xml binary

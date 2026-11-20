@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Keep worker shutdown blocked until recovered sessions have confirmed cleanup, using the same resource completion rules as maintenance."
-zh_CN = "恢复会话确认清理前阻止 Worker 关停，并与环境维护共用资源完成规则。"

@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Windows lab deployment and cleanup previews hold VM admission locks while leaving the registered VM identity and operation state untouched."
-zh_CN = "Windows 实验环境的部署和清理预览会持有 VM 准入锁，同时保持已登记的 VM 身份和操作状态不变。"

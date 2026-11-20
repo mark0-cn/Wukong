@@ -1,2 +1,0 @@
-# Development-only formatter/linter; never part of worker runtime bundles.
-ruff==0.14.5

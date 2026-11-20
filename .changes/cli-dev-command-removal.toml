@@ -1,3 +1,0 @@
-kind = "breaking"
-en = "Remove the developer and release-only CLI commands `tool-catalog`, `skill-catalog`, `recover-update` and `verify-update`; the underlying library functions remain. Regenerate catalogs with `cargo run --example export_catalogs`, validate a release with `python -m scripts.release.verify_update --directory dist`, and use the Wukong-Recovery executable for recovery. The removed command names have no compatibility path."
-zh_CN = "移除仅供开发与发布使用的 CLI 命令 `tool-catalog`、`skill-catalog`、`recover-update` 与 `verify-update`，底层库函数保持不变。目录清单改用 `cargo run --example export_catalogs` 生成，发布校验改用 `python -m scripts.release.verify_update --directory dist`，恢复使用 Wukong-Recovery 可执行文件。移除的命令名不提供兼容入口。"

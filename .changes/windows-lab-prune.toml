@@ -1,3 +1,0 @@
-kind = "feature"
-en = "Prune lab snapshots: restore deletes its experiment snapshot best-effort, and `wukong lab prune` removes older lab snapshots while keeping the baseline and any active experiment."
-zh_CN = "清理实验快照：restore 尽力删除本次实验快照，`wukong lab prune` 删除更早的实验快照，同时保留基线与活动实验。"

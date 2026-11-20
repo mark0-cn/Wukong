@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Report unreadable Linux worker session records during recovery with bounded diagnostics, while preserving damaged records and refusing to reopen lost sessions."
-zh_CN = "Linux Worker 恢复时以有界诊断报告无法读取的会话记录，同时保留损坏记录，并继续拒绝重新打开已丢失的会话。"

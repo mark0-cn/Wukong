@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Bind general-analysis verification to individual claims and exact artifacts; reproduction checks require the verifier's recorded execution, and unsupported or untested claims remain explicit. Tool callers must now supply checks and limitations to analysis_verify."
-zh_CN = "将通用分析验证绑定到具体声明和精确产物；复现检查必须关联验证者的执行记录，明确保留未支持或未测试的声明。工具调用方现在必须向 analysis_verify 提供 checks 和 limitations。"

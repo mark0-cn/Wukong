@@ -1,3 +1,0 @@
-kind = "feature"
-en = "Validate the administrative channel on a provisioned VM clone: a packaged install.ps1 created a real Windows service (exit code 0), the baseline restore removed it and pruned the experiment snapshot, and the administrator login remained usable. Offline provisioning used a LocalSystem setup service injected into the powered-off clone."
-zh_CN = "在置备的 VM 克隆上验证管理通道：打包的 install.ps1 创建了真实 Windows 服务（退出码 0），恢复基线后服务被移除、实验快照被清理，管理员登录仍可用。离线置备通过向关机克隆注入 LocalSystem 安装服务完成。"

@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Reject LaunchSpec-overriding job_start arguments before dispatch, and store the bundle process timeout in the LaunchSpec. A Windows-bound analyst no longer receives an uncertain job after passing timeout_secs with launch_spec, and bundle runs no longer default to a 30-second service lifetime."
-zh_CN = "在派发前拒绝与 LaunchSpec 冲突的 job_start 参数，并把 bundle 进程超时写入 LaunchSpec。绑定 Windows 的分析师不会再因为同时传 timeout_secs 与 launch_spec 得到 uncertain job，bundle 服务也不会默认只有 30 秒寿命。"

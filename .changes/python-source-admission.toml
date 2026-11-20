@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Validate exactly one Python source form and admit file scripts with owner, hash and UTF-8 byte limits on Linux and Windows."
-zh_CN = "在 Linux 和 Windows 上严格验证 Python 源码的两种输入形式互斥，并按所有者、哈希和 UTF-8 字节上限接纳文件脚本。"

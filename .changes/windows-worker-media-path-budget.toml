@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Keep offline worker media finalize inside Windows MAX_PATH: staging now uses a short absolute workspace (TEMP/TMP, then the system temporary directory, then the output parent) and copies the finished media when the workspace is on another volume, while finalize rejects an over-deep media output before copying with an explicit error that names the offending path and asks the operator to shorten the controller state directory. Short-path behavior, media hashes and receipts are unchanged."
-zh_CN = "让离线 Worker 介质 finalize 适配 Windows MAX_PATH：暂存改用较短的绝对工作区（依次为 TEMP/TMP、系统临时目录、输出父目录），工作区与输出不同卷时复制已完成的介质；finalize 会在复制前拒绝过深的介质输出，并以明确错误指出越界路径、要求操作者缩短控制器状态目录。短路径下的行为、介质哈希与回执保持不变。"

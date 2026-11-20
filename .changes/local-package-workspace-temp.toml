@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Local `cargo package-local` builds now route Windows compiler and linker temporary files into the repository's `target/tmp` directory instead of the inherited TMP/TEMP, which can be an 8.3 short path that child linkers cannot write and which failed the build with LNK1104."
-zh_CN = "本机 `cargo package-local` 构建现在把 Windows 编译器/链接器的临时文件统一放到仓库的 `target/tmp`，不再使用可能为 8.3 短路径、子链接器无法写入并导致 LNK1104 的继承 TMP/TEMP。"

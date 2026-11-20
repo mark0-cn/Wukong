@@ -1,3 +1,0 @@
-kind = "feature"
-en = "Require independent, hash-bound predicate acceptance for generated self-check scripts. Python and Shell validation now exercises abnormal exits, signals, timeout, missing output and contradictory observations alongside real reproduction evidence. Reuse a completed owned task for new delivery requirements without losing its constraints or history."
-zh_CN = "为生成的自检脚本提供独立且绑定哈希的判定验收。Python 与 Shell 验收覆盖异常退出、信号、超时、输出缺失和矛盾观测，并保留单独的真实复现证据。可复用已完成的归属任务承接新交付要求，保留其约束和历史。"

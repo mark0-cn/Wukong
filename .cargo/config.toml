@@ -1,2 +1,0 @@
-[alias]
-package-local = "run --quiet --locked --manifest-path xtask/Cargo.toml --target-dir target/xtask --"

@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Allow maintenance admission to be reentrant within one process. Onboarding activates the tool environment under one exclusive guard, and saving the configuration no longer fails with a false concurrent-update error when it takes the same exclusive guard again."
-zh_CN = "允许同一进程内重入维护准入。新手引导持有同一个独占锁激活工具环境，保存配置时再次获取该独占锁不再误报存在并发更新。"

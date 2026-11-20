@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Wait for queued task reports to reach the agent inbox before continuing after wait_for_agents, so the next model request sees completed results and can finish without an unread-report rejection."
-zh_CN = "wait_for_agents 恢复前等待排队的任务报告进入 Agent 收件箱，使下一次模型请求能看到已完成的结果，避免因未读报告而拒绝正常完成。"

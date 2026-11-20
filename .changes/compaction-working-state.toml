@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Compaction now carries bounded durable job observations, artifact identities, tool errors and working notes forward, including early discoveries, so repeated compaction does not depend on a final manually saved dossier. Observations remain distinct from independently verified facts."
-zh_CN = "上下文压缩现在保留有界的持久作业观察、产物身份、工具错误和工作笔记，包括早期发现，不再仅依赖最后手工保存的总结；观察与独立验证事实仍明确区分。"

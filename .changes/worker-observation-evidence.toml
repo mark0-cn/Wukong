@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Isolate background worker failures with fair bounded observation, preserve cleanup request identities, and resume evidence synchronization per file. Execution-finished notices are distinct from evidence-ready completion; verification and successful assessment require complete evidence."
-zh_CN = "通过公平且有界的观察隔离后台 worker 故障，保留清理请求身份，并按文件恢复证据同步。执行结束通知与证据就绪完成分离；验证和成功评估必须具备完整证据。"

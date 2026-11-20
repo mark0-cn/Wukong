@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Include bounded architecture, exception and frame identities when the sealed Windows startup debugger fixture stops unexpectedly, so hosted installation failures can be diagnosed from their protected logs."
-zh_CN = "Windows 密封启动调试器夹具异常停止时，记录有界的架构、异常及帧身份，使 hosted 安装失败可通过受保护日志定位。"

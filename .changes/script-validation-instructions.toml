@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Automatically include script validation instructions for tasks requiring self_check_v1, including follow-up delivery tasks, so producers receive the required standalone protocol before generating artifacts."
-zh_CN = "为要求 self_check_v1 的任务自动提供脚本验收指令，续任务交付同样适用，让生产者在生成产物前收到必需的独立协议说明。"

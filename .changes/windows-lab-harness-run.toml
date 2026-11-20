@@ -1,3 +1,0 @@
-kind = "feature"
-en = "Execute a packaged prebuilt user-mode EXE through the registered Windows worker from the lab CLI: lease-bound upload, one bounded job, immutable run receipts, and unknown-outcome reconciliation by baseline restore."
-zh_CN = "通过实验 CLI 在已登记 Windows worker 上执行打包的预编译用户态 EXE：租约绑定上传、单个有界 job、不可变运行回执，以及通过恢复基线核对未知结果。"

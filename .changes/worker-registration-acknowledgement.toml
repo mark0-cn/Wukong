@@ -1,3 +1,0 @@
-kind = "fix"
-en = "Require a parent acknowledgement after durable Python supervisor registration before claiming execution. A visible but unconfirmed registration cannot run a job when persistence and revocation both fail, or when the parent exits before acknowledgement."
-zh_CN = "Python supervisor 登记持久化成功后，必须收到父进程确认才能认领执行。即使登记文件已可见，若持久化确认和撤销均失败，或父进程在确认前退出，也不能启动作业。"
