@@ -213,6 +213,24 @@ class ExecutionBoundaries(unittest.TestCase):
                 str(path),
             )
 
+    def test_status_and_bundle_checks_are_independent_of_runtime_workflows(self):
+        for name, forbidden in [
+            (
+                "application/maintenance/updates/health.rs",
+                r"\b(?:tauri|interfaces)\s*::",
+            ),
+            (
+                "application/windows_worker_setup/inventory.rs",
+                r"\b(?:probe|EnvironmentRegistry|RuntimeClient|prepare_import|mark_available)\b",
+            ),
+            (
+                "interfaces/report/bundle.rs",
+                r"\b(?:Store\b|(?:domain|storage|application|queries)\s*::)",
+            ),
+        ]:
+            source = (ROOT / "src" / name).read_text(encoding="utf-8")
+            self.assertNotRegex(source, forbidden, name)
+
     def test_contract_has_no_controller_or_platform_dependencies(self):
         manifest = tomllib.loads((ROOT / "workers/protocol/Cargo.toml").read_text(encoding="utf-8"))
         for name, dependency in manifest["dependencies"].items():

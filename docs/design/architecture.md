@@ -16,6 +16,27 @@ The [2026-11-15 cleanup acceptance](../history/validation/2026-11-15-architectur
 
 The controller source is grouped by responsibility: `domain` holds durable records and pure rules; `queries` holds neutral read models; `application` owns use cases, agent integration and maintenance; `storage` owns transactions and artifacts; `adapters` owns worker/provider/filesystem integration; `interfaces` owns CLI, desktop and reports. `bootstrap` assembles dependencies. Existing public Rust paths are re-exported centrally in `src/lib.rs`; internal imports use the owning module. Private runner tests remain beside the runner, and installed-worker SSH fixtures live under `src/adapters/worker/ssh/tests`.
 
+```mermaid
+flowchart TB
+    IN["Interfaces<br/>Desktop · CLI · Report"]
+    subgraph CONTROL["Rust controller"]
+        APP["Application<br/>Assessment · Tools · Queries · Maintenance"]
+        DOMAIN["Domain<br/>Task records and business rules"]
+        IO["Infrastructure<br/>SQLite · Evidence files · Provider and Worker adapters"]
+        APP --> DOMAIN
+        APP --> IO
+    end
+    PROTO["Shared Worker protocol v3"]
+    LINUX["Linux Worker<br/>Python RPC · Resource ownership · OS adapters"]
+    WIN["Windows Worker · disposable VM<br/>Native RPC · ResourceManager · OS adapters"]
+    IN --> APP
+    IO <--> PROTO
+    PROTO <--> LINUX
+    PROTO <--> WIN
+```
+
+The application query facades supply neutral snapshots. Desktop health commands delegate observation to `application/maintenance/updates/health`, and the Windows setup page reads its inventory through `application/windows_worker_setup/inventory`. `interfaces/report/bundle` owns the file manifest and offline integrity checks for exported reports.
+
 Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
 
 Controller connections/configuration/identity/leases live under `src/adapters/worker` and `src/adapters/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/application/effects` and `src/storage` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.

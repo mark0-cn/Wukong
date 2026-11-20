@@ -16,6 +16,27 @@
 
 控制器源码按职责归组：`domain` 保存持久记录和纯规则，`queries` 保存中立读取模型，`application` 管理用例、Agent 集成和维护，`storage` 管理事务与制品，`adapters` 管理 Worker/模型提供方/文件系统接入，`interfaces` 管理 CLI、桌面和报告。`bootstrap` 装配依赖。现有公开 Rust 路径集中在 `src/lib.rs` 重导出，内部导入直接指向所属模块。runner 的私有测试与实现相邻，已安装 Worker 的 SSH 夹具位于 `src/adapters/worker/ssh/tests`。
 
+```mermaid
+flowchart TB
+    IN["接口层<br/>桌面端 · CLI · 报告"]
+    subgraph CONTROL["Rust 控制器"]
+        APP["应用层<br/>评估 · 工具 · 查询 · 维护"]
+        DOMAIN["领域层<br/>任务记录与业务规则"]
+        IO["基础设施<br/>SQLite · 证据文件 · 模型与 Worker 适配器"]
+        APP --> DOMAIN
+        APP --> IO
+    end
+    PROTO["共享 Worker 协议 v3"]
+    LINUX["Linux Worker<br/>Python RPC · 资源所有权 · 系统适配器"]
+    WIN["Windows Worker · 可丢弃 VM<br/>原生 RPC · ResourceManager · 系统适配器"]
+    IN --> APP
+    IO <--> PROTO
+    PROTO <--> LINUX
+    PROTO <--> WIN
+```
+
+应用层查询入口提供中立快照。桌面健康命令将观测交给 `application/maintenance/updates/health`，Windows 安装页面通过 `application/windows_worker_setup/inventory` 读取清单。`interfaces/report/bundle` 管理导出报告的文件清单和离线完整性校验。
+
 公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v3。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。
 
 控制器连接、配置、身份及租约位于 `src/adapters/worker` 与 `src/adapters/environments`；`ToolContext` 将已绑定 Worker 传给文件、作业、会话和验证用例。`WorkerGateway` 保留稳定请求 ID 及未改写的 Worker 回执，由相应用例将资源 ID 转成控制器归属记录。`src/application/effects` 和 `src/storage` 保存业务收据、证据及通知，Worker 执行账本另行记录外部副作用。重复的会话启动回执不能重新打开控制器已关闭的会话，也不能抹掉其 transcript。
