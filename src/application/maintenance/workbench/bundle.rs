@@ -409,16 +409,17 @@ mod tests {
             "provider-two".to_owned(),
             "debug-companion".to_owned(),
         ];
-        let mut operations = Vec::new();
+        let mut stops = Vec::new();
+        let mut restarts = Vec::new();
         let mut stop = |name: &str| {
-            operations.push(format!("stop {name}"));
+            stops.push(format!("stop {name}"));
             if name == "provider-one" {
                 anyhow::bail!("injected stop failure");
             }
             Ok(())
         };
         let mut restart = |name: &str| {
-            operations.push(format!("start {name}"));
+            restarts.push(format!("start {name}"));
             Ok(())
         };
 
@@ -426,15 +427,14 @@ mod tests {
 
         assert_eq!(error.to_string(), "injected stop failure");
         assert_eq!(
-            operations,
+            stops,
             [
                 "stop debug-companion",
                 "stop provider-two",
                 "stop provider-one",
-                "start provider-two",
-                "start debug-companion",
             ]
         );
+        assert_eq!(restarts, ["start provider-two", "start debug-companion"]);
     }
 
     #[test]
