@@ -1,8 +1,9 @@
 import { t, text, useLocale, currentLocale } from '../../shared/i18n';
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, FileSearch, ShieldCheck } from 'lucide-react';
 import { api, errorText, errorValue } from '../../shared/api/bridge';
-import type { Evidence, EvidenceView, Finding, FindingDetails, Json } from '../../shared/api/types';
+import type { Evidence, Finding, Json } from '../../shared/api/types';
 import { CopyButton } from '../../shared/ui/CopyButton';
 import { Markdown } from '../../shared/ui/Markdown';
 import { labels, Status } from '../../shared/ui/Status';
@@ -18,15 +19,14 @@ function EnvironmentFacts({ value }: { value: Json }) {
 export function EvidenceReader({ evidence, epoch, run }: { evidence: Evidence; epoch: number; run: string }) {
   useLocale();
   const [offset, setOffset] = useState(0);
-  const [preview, setPreview] = useState<EvidenceView>();
-  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
-  useEffect(() => {
-    let alive = true;
-    setPreview(undefined); setError('');
-    void api('evidence_preview', { epoch, run, id: evidence.id, offset }).then(value => { if (alive) setPreview(value); })
-      .catch(error => { if (alive) setError(errorValue(error)); });
-    return () => { alive = false; };
-  }, [epoch, run, evidence.id, offset]);
+  const result = useQuery({
+    queryKey: ['evidence-preview', epoch, run, evidence.id, offset],
+    queryFn: () => api('evidence_preview', { epoch, run, id: evidence.id, offset }),
+    retry: false,
+    gcTime: 0,
+  });
+  const preview = result.data;
+  const error = result.error ? errorValue(result.error) : '';
   return <section className="evidence-reader"><div className="evidence-heading"><strong>{evidence.source}</strong><CopyButton value={evidence.source} label={t('ui-copy-source')} /><span>{evidence.media_type} · {evidence.size.toLocaleString(currentLocale())} B</span></div>
     <div className="evidence-paging"><button aria-label={t('workspace-previous-evidence-page')} disabled={offset === 0} onClick={() => setOffset(value => Math.max(0, value - 16_384))}><ChevronLeft size={14} /></button>
       <span>{preview ? `${preview.offset.toLocaleString(currentLocale())}–${preview.end.toLocaleString(currentLocale())} / ${preview.size.toLocaleString(currentLocale())} B${preview.binary ? t('workspace-hexadecimal') : ''}` : t('workspace-loading-evidence')}</span>
@@ -37,16 +37,16 @@ export function EvidenceReader({ evidence, epoch, run }: { evidence: Evidence; e
 }
 function FindingInspector({ epoch, run, finding, onAgent }: { epoch: number; run: string; finding: Finding; onAgent: (id: string) => void }) {
   useLocale();
-  const [details, setDetails] = useState<FindingDetails>();
-  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
+  const result = useQuery({
+    queryKey: ['finding-details', epoch, run, finding.id, finding.updated_at],
+    queryFn: () => api('finding_details', { epoch, run, id: finding.id }),
+    retry: false,
+    gcTime: 0,
+  });
+  const details = result.data;
+  const error = result.error ? errorValue(result.error) : '';
   const [evidence, setEvidence] = useState<string>();
-  useEffect(() => {
-    let alive = true;
-    setDetails(undefined); setError(''); setEvidence(undefined);
-    void api('finding_details', { epoch, run, id: finding.id }).then(value => { if (alive) setDetails(value); })
-      .catch(error => { if (alive) setError(errorValue(error)); });
-    return () => { alive = false; };
-  }, [epoch, run, finding.id, finding.updated_at]);
+  useEffect(() => setEvidence(undefined), [epoch, run, finding.id, finding.updated_at]);
   if (error) return <p className="error" role="alert">{errorText(error)}</p>;
   if (!details) return <p className="muted">{t('workspace-loading-finding-and-verification')}</p>;
   const selected = details.evidence.find(value => value.id === evidence) ?? (details.evidence.length === 1 ? details.evidence[0] : undefined);

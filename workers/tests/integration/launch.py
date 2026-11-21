@@ -29,6 +29,28 @@ int main(int argc,char **argv) {
 """
 
 
+def dynamic_runtime(binary):
+    """Copy the trusted fixture's actual loader and libraries into the LaunchSpec."""
+    result = subprocess.run(["ldd", str(binary)], check=True, capture_output=True, text=True)
+    paths = []
+    loader = None
+    for line in result.stdout.splitlines():
+        fields = line.strip().split()
+        candidate = None
+        if len(fields) >= 3 and fields[1] == "=>":
+            candidate = fields[2]
+        elif fields and fields[0].startswith("/"):
+            candidate = fields[0]
+            loader = candidate
+        if candidate and Path(candidate).is_absolute():
+            paths.append(Path(candidate))
+    assert loader is not None and paths, result.stdout
+    assert len({path.name for path in paths}) == len(paths)
+    for path in paths:
+        assert path.is_file(), path
+    return Path(loader).name, {path.name: path.read_bytes() for path in paths}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
@@ -43,18 +65,30 @@ def main():
             ["gcc", "-O0", "-g", str(root / "fixture.c"), "-o", str(root / "fixture")], check=True
         )
         binary = (root / "fixture").read_bytes()
+        loader_name, runtime_libraries = dynamic_runtime(root / "fixture")
     client = Client(state)
     try:
         doctor = client.call("doctor")
         assert doctor["capabilities"]["process_jobs"], doctor
         program = client.put("case/bin/target", binary, True)
+        libraries = {
+            name: client.put("case/lib/" + name, content, True)
+            for name, content in runtime_libraries.items()
+        }
         peer = b"wukong-peer\n"
         client.put("case/data/peer.bin", peer)
         data = b"launch\x00\xff\r\n"
         payload = client.put("inputs/data.bin", data)
         (state / "files/case/work").mkdir()
         reports = []
-        for mode in ["stdin_pipe", "argv_file"]:
+        derived_hashes = []
+        cases = [
+            ("stdin_pipe", False),
+            ("argv_file", False),
+            ("stdin_pipe", True),
+            ("stdin_pipe", True),
+        ]
+        for index, (mode, derived) in enumerate(cases):
             spec = dict(
                 schema_version=1,
                 base="files/case",
@@ -72,9 +106,17 @@ def main():
                 loader=None,
                 library_path=None,
             )
-            manifest = client.put("case/" + mode + ".json", json.dumps(spec).encode())
+            if derived:
+                spec["loader"] = "lib/" + loader_name
+                spec["library_path"] = "lib"
+                spec["files"].update(
+                    {"lib/" + name: artifact["sha256"] for name, artifact in libraries.items()}
+                )
+            manifest = client.put(f"case/{index}-{mode}.json", json.dumps(spec).encode())
             params = dict(
-                launch_spec=manifest["path"], input=payload["path"], request_id="launch-" + mode
+                launch_spec=manifest["path"],
+                input=payload["path"],
+                request_id=f"launch-{index}-{mode}",
             )
             job = client.call("job.start", **params)
             status = client.finish(job)
@@ -82,6 +124,10 @@ def main():
             assert (
                 status["result"]["metadata_protected"] and status["result"]["experiment_uid"] > 0
             ), status
+            if derived:
+                executed = status["result"]["executed_target_sha256"]
+                assert executed != program["sha256"], status
+                derived_hashes.append(executed)
             stdout = client.call("file.get", path="jobs/" + job["job_id"] + "/output.stdout")
             assert base64.b64decode(stdout["data_base64"]) == data, stdout
             artifacts = client.call("job.artifacts", job_id=job["job_id"])
@@ -89,15 +135,24 @@ def main():
             observed = client.call("file.get", path=marker["path"])
             assert base64.b64decode(observed["data_base64"]) == peer, observed
             assert client.call("job.start", **params)["job_id"] == job["job_id"]
-            reports.append(dict(mode=mode, status=status, stdout=stdout, created=observed))
+            reports.append(
+                dict(mode=mode, derived=derived, status=status, stdout=stdout, created=observed)
+            )
+        assert len(set(derived_hashes)) == 1 and len(derived_hashes) == 2, derived_hashes
         assert (
             hashlib.sha256((state / program["path"]).read_bytes()).hexdigest() == program["sha256"]
         )
+        for artifact in libraries.values():
+            assert (
+                hashlib.sha256((state / artifact["path"]).read_bytes()).hexdigest()
+                == artifact["sha256"]
+            )
         assert not (state / "files/case/work/created.bin").exists()
         output = dict(
             passed=True,
             scope="linux_isolated_launch_spec",
             source_sha256=hashlib.sha256(SOURCE.encode()).hexdigest(),
+            derived_target_sha256=derived_hashes[0],
             cases=reports,
         )
         (state / "launch-results.json").write_text(json.dumps(output, indent=2))
