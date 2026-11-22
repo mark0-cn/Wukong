@@ -1417,6 +1417,37 @@ pub fn resolve_guest_disk(vmx: &str, vmx_path: &Path) -> Result<GuestDisk> {
     bail!("VMX declares no boot disk on nvme0:0, scsi0:0 or sata0:0")
 }
 
+/// Restore the operator's pre-provision VMX after snapshot reconciliation while
+/// retaining the fresh delta filename written by VMware's revert operation.
+/// Every other byte comes from the original backup; the active disk value is
+/// accepted only after the normal local-VMDK containment and file checks.
+pub fn restore_vmx_preserving_active_disk(
+    original: &[u8],
+    current: &[u8],
+    vmx_path: &Path,
+) -> Result<Vec<u8>> {
+    let original = std::str::from_utf8(original).context("VMX backup is not valid UTF-8")?;
+    let current = std::str::from_utf8(current).context("current VMX is not valid UTF-8")?;
+    let active = resolve_guest_disk(current, vmx_path)?;
+    let key = format!("{}.fileName", active.device);
+    let value = vmx_entry(current, &key).context("active VMX lost its boot disk entry")?;
+    let mut matched = false;
+    let mut restored = String::with_capacity(original.len());
+    for line in original.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\r', '\n']);
+        let terminator = &line[body.len()..];
+        if vmx_entry_key(body) == Some(key.as_str()) {
+            ensure!(!matched, "VMX backup contains duplicate boot disk entries");
+            restored.push_str(&format!("{key} = {value}{terminator}"));
+            matched = true;
+        } else {
+            restored.push_str(line);
+        }
+    }
+    ensure!(matched, "VMX backup lost its original boot disk entry");
+    Ok(restored.into_bytes())
+}
+
 /// Result of a planned VMX device edit; `text` is the complete replacement file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VmxEdit {

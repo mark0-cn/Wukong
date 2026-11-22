@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Preserve VMware's fresh active delta filename when provisioning reconciliation restores the original VMX, preventing settled rollback or publication from referencing a deleted VMDK. Offline native upgrade receipts now retain bounded installer stdout and stderr so failed upgrades expose their actual cause."
+zh_CN = "部署调和恢复原 VMX 时保留 VMware 新生成的活动 delta 文件名，避免已稳定的回滚或发布引用已删除的 VMDK。离线原生升级回执现在保留有长度上限的安装器 stdout 和 stderr，使升级失败能够报告真实原因。"

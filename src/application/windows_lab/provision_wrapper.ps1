@@ -116,15 +116,14 @@ try {
         if ([string]$verified.execution_boundary -ne 'disposable_vm') {
             throw 'offline media execution boundary is unsupported'
         }
-        $installText = (& $setup install-reviewed (Join-Path $mediaRoot 'setup.json') ([string]$plan.controller_public_key) ([string]$plan.enrollment_sha256))
+        $installText = (& $setup install-reviewed (Join-Path $mediaRoot 'setup.json') ([string]$plan.controller_public_key) ([string]$plan.enrollment_sha256) 2>&1 | Out-String).Trim()
         $exitCode = $LASTEXITCODE
         $receipt.exit_code = $exitCode
-        $installText = @($installText) -join "`n"
         if ($installText.Length -gt 65536) {
             throw 'worker installation output exceeded the controller budget'
         }
         if ($exitCode -ne 0) {
-            throw ('worker installation failed with exit code ' + $exitCode)
+            throw ('worker installation failed with exit code ' + $exitCode + ': ' + $installText)
         }
         try {
             $connection = $installText | ConvertFrom-Json
