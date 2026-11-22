@@ -1,6 +1,6 @@
 pygdbmi==0.11.0.0
 
-filelock==4.2.10
+filelock==4.2.12
 atomicwrites==1.4.1
 picire==26.11
 chardet==7.7.0
