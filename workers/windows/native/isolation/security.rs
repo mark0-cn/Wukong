@@ -392,6 +392,47 @@ impl AclPolicy {
         check(unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) })?;
         self.verify(path, false)
     }
+    /// Atomically replace an existing protected mutable record. Execution
+    /// authority admissions and other immutable records continue to use `publish`.
+    pub(crate) fn replace(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        use std::io::Write;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        let parent = path.parent().context("native replacement has no parent")?;
+        self.verify(parent, true)?;
+        ensure!(
+            path.exists(),
+            "protected replacement destination is missing"
+        );
+        self.verify(path, false)?;
+        let temporary = parent.join(format!(
+            "{}.tmp",
+            hex::encode(crate::host::accounts::random_bytes::<16>()?)
+        ));
+        let result = (|| -> Result<()> {
+            let mut file = self.create_file(&temporary)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            let from = wide(temporary.as_os_str())?;
+            let to = wide(path.as_os_str())?;
+            // SAFETY: both live buffers are NUL-terminated and contain no embedded
+            // NUL; MoveFileExW only reads them and reports failure through `check`.
+            check(unsafe {
+                MoveFileExW(
+                    from.as_ptr(),
+                    to.as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            })?;
+            self.verify(path, false)
+        })();
+        if temporary.exists() {
+            let _ = fs::remove_file(temporary);
+        }
+        result
+    }
     pub fn private_vm() -> Self {
         Self {
             owner: "S-1-5-32-544".into(),

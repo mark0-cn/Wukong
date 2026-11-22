@@ -117,5 +117,5 @@ crash is reproduction, not impact. Independent verification belongs to a
 separate verifier, which also cannot use `artifact_validate` on Windows.
 
 Out of scope without a new contract and backend: kernel or driver targets,
-hypervisor isolation claims, automatic VM snapshots, GUI automation and network
+hypervisor isolation claims, custom VM snapshot policies, GUI automation and network
 protocol fuzzing.

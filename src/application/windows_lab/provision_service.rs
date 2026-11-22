@@ -24,7 +24,7 @@ mod recovery;
 
 use crate::application::windows_lab::provision::ProvisionArtifactPaths;
 use anyhow::{Context, Result, ensure};
-use execution::{step_error, write_synced};
+use execution::step_error;
 use planning::planned_actions;
 use recovery::remove_provision_working_files;
 use serde::Serialize;
@@ -81,9 +81,8 @@ pub struct CleanGuestOutcome {
     pub service_key_removed: Option<String>,
 }
 
-/// Durable facts for one provisioning attempt that do not depend on the guest
-/// disk. They are persisted before the configured baseline is replaced, because
-/// the committed boot disk can only be resolved after that deletion.
+/// Durable facts for one provisioning attempt, including the resolved boot disk.
+/// Replacement keeps the old base until the staged worker passes readiness.
 struct ProvisionIntent {
     provision_id: String,
     paths: ProvisionArtifactPaths,
@@ -114,6 +113,7 @@ struct PlannedProvision {
     guest_files: Vec<GuestFile>,
     boot_task: BootTaskInjection,
     baseline: String,
+    replaces_baseline: bool,
     iso_builder: Arc<dyn IsoBuilder>,
     timeout: Duration,
 }
@@ -129,6 +129,7 @@ impl PlannedProvision {
         disk: ProvisionDiskPlan,
         boot_task: BootTaskInjection,
         baseline: String,
+        replaces_baseline: bool,
         iso_builder: Arc<dyn IsoBuilder>,
         timeout: Duration,
     ) -> Self {
@@ -145,6 +146,7 @@ impl PlannedProvision {
             guest_files: intent.guest_files,
             boot_task,
             baseline,
+            replaces_baseline,
             iso_builder,
             timeout,
         }
@@ -283,38 +285,11 @@ impl WindowsLab {
             source,
             identity_file,
         )?;
-        let (plan, mut record) = if replaces_baseline {
-            // The powered-off VM still boots the configured baseline snapshot's
-            // delta, so the committed boot disk cannot be resolved yet. Back up
-            // the VMX and persist the intent before deleting exactly the
-            // configured baseline, then resolve and validate the committed disk.
-            let vmx_before = self.read_vmx_bytes()?;
-            write_synced(&intent.paths.vmx_backup, &vmx_before)?;
-            let (_, mut record) =
-                self.persist_provision_intent(&mut state, &intent, None, true, None)?;
-            match self
-                .replace_baseline_snapshot(&intent, offline.as_ref())
-                .await
-            {
-                Ok((vmx_bytes, disk)) => {
-                    let boot_task = boot_task_injection()?;
-                    let plan = PlannedProvision::assemble(
-                        intent,
-                        vmx_bytes,
-                        disk,
-                        boot_task,
-                        self.baseline.clone(),
-                        effective_builder,
-                        timeout,
-                    );
-                    match self.record_resolved_boot_disk(&mut state, &mut record, &plan) {
-                        Ok(()) => (plan, record),
-                        Err(error) => return self.abandon_provision(state, record, error),
-                    }
-                }
-                Err(error) => return self.abandon_provision(state, record, error),
-            }
-        } else {
+        let (plan, mut record) = {
+            // Replacement writes the restored base's current delta while the
+            // known-good base remains available. The staged replacement is
+            // published under the fixed name only after installation and a fresh
+            // worker readiness check have succeeded.
             let vmx_bytes = self.read_vmx_bytes()?;
             let disk = self
                 .plan_guest_disk(&vmx_bytes, &intent, offline.as_ref())
@@ -323,7 +298,7 @@ impl WindowsLab {
                 &mut state,
                 &intent,
                 Some(&disk.guest_disk.path),
-                false,
+                replaces_baseline,
                 Some(&vmx_bytes),
             )?;
             let boot_task = boot_task_injection()?;
@@ -333,6 +308,7 @@ impl WindowsLab {
                 disk,
                 boot_task,
                 self.baseline.clone(),
+                replaces_baseline,
                 effective_builder,
                 timeout,
             );
@@ -343,14 +319,14 @@ impl WindowsLab {
             actions.insert(
                 0,
                 format!(
-                    "replace the configured baseline snapshot '{}' before validating the guest disk",
+                    "stage and verify replacement '{}', then publish it as the fixed base snapshot",
                     plan.baseline
                 ),
             );
         }
         let evidence = match self.execute_provision(&plan, offline).await {
             Ok(evidence) => evidence,
-            Err(error) => return self.abandon_provision(state, record, error),
+            Err(error) => return self.abandon_provision(record, error),
         };
         record.status = RunStatus::Completed;
         record.iso_sha256 = Some(evidence.iso_sha256);

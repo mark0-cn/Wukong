@@ -200,8 +200,8 @@
     "text": "使用所属 lab_ref 启动安装并返回 operation_id。全程统一采用 1–600 秒时限、固定哈希介质及检查声明文件、服务和账户的客体回执。通过 lab_operation_status 查询；缺少回执保持未知。要求 worker 资源空闲且证据同步完成。"
   },
   "lab_prepare": {
-    "source": "Start preparation of the assigned Windows lab and return operation_id. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Available by default to catalog-permitted roles. Unsupported execution requirements are rejected at run admission.",
-    "text": "启动指定 Windows Lab 的准备并返回 operation_id。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。对工具目录允许的角色默认开启；不支持的执行要求在运行准入时拒绝。"
+    "source": "Start preparation of the assigned Windows lab and return operation_id. Every attempt restores fixed base wukong_base_vm; configured signed worker_media may upgrade, verify and republish that base before a reboot and experiment snapshot. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Available by default to catalog-permitted roles. Unsupported execution requirements are rejected at run admission.",
+    "text": "启动指定 Windows Lab 的准备并返回 operation_id。每次都会恢复固定基线 wukong_base_vm；配置的签名 worker_media 可先升级、验证并重新发布该基线，再重启并创建实验快照。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。对工具目录允许的角色默认开启；不支持的执行要求在运行准入时拒绝。"
   },
   "lab_restore": {
     "source": "Start a fenced baseline restore using the owned lab_ref and return operation_id. Requires idle worker resources and synchronized evidence. Unknown effects become lost only after confirmed restoration; snapshot pruning is reported separately. Query lab_operation_status.",

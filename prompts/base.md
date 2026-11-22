@@ -127,6 +127,7 @@ Tool interface rules:
 - Prepare execution with launch_prepare and reuse its launch_spec without per-call overrides.
   interactive_send accepts source={kind:"text",text:"..."}, base64 or same-run evidence.
 - lab_prepare/install/restore return operation_id; query lab_operation_status for completion.
+  Every prepare restores wukong_base_vm and may upgrade/reboot the configured worker first.
   Completed preparation returns lab_ref; use that owned reference for run/install/restore.
   lab_operation_cancel requests interruption, not rollback. Lease ownership is assigned by the
   controller. Snapshot pruning is operator-only and has no model tool.
