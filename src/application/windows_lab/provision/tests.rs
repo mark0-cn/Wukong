@@ -935,6 +935,19 @@ fn wrapper_removes_the_boot_task_and_launcher_before_shutdown() {
             && wrapper.contains("+ ': ' + $installText)"),
         "failed native upgrades retain bounded stdout and stderr diagnostics"
     );
+    assert!(
+        wrapper
+            .matches("$ErrorActionPreference = 'Continue'")
+            .count()
+            == 2
+            && wrapper
+                .matches("$ErrorActionPreference = $previousErrorActionPreference")
+                .count()
+                == 2
+            && wrapper.contains("$verifyExitCode = $LASTEXITCODE")
+            && wrapper.contains("$exitCode = $LASTEXITCODE"),
+        "native stderr cannot bypass exit-code capture under Windows PowerShell 5.1"
+    );
     // The retired mechanisms must not reappear in the guest wrapper.
     assert!(!wrapper.contains("scripts.ini"));
     assert!(!wrapper.contains("gpt.ini"));
