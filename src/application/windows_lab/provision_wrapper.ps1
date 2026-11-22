@@ -99,9 +99,19 @@ try {
         if ((Get-FileHash -LiteralPath (Join-Path $mediaRoot 'payload\manifest.json') -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$plan.manifest_sha256) {
             throw 'offline media payload hash mismatch'
         }
-        $verifyText = (& $setup verify-enrollment (Join-Path $mediaRoot 'payload') (Join-Path $mediaRoot 'enrollment') ([string]$plan.controller_public_key) ([string]$plan.controller_version) 2>&1 | Out-String)
-        if ($LASTEXITCODE -ne 0) {
-            throw ('offline media verification failed: ' + $verifyText.Trim())
+        # Windows PowerShell 5.1 turns merged native stderr into ErrorRecords.
+        # Keep those records non-terminating just long enough to capture the
+        # process output and its real exit code; all wrapper cmdlets remain Stop.
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $verifyText = (& $setup verify-enrollment (Join-Path $mediaRoot 'payload') (Join-Path $mediaRoot 'enrollment') ([string]$plan.controller_public_key) ([string]$plan.controller_version) 2>&1 | Out-String)
+            $verifyExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($verifyExitCode -ne 0) {
+            throw ('offline media verification failed with exit code ' + $verifyExitCode + ': ' + $verifyText.Trim())
         }
         $verified = $verifyText | ConvertFrom-Json
         if ($verified.verified -ne $true) {
@@ -116,8 +126,14 @@ try {
         if ([string]$verified.execution_boundary -ne 'disposable_vm') {
             throw 'offline media execution boundary is unsupported'
         }
-        $installText = (& $setup install-reviewed (Join-Path $mediaRoot 'setup.json') ([string]$plan.controller_public_key) ([string]$plan.enrollment_sha256) 2>&1 | Out-String).Trim()
-        $exitCode = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $installText = (& $setup install-reviewed (Join-Path $mediaRoot 'setup.json') ([string]$plan.controller_public_key) ([string]$plan.enrollment_sha256) 2>&1 | Out-String).Trim()
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         $receipt.exit_code = $exitCode
         if ($installText.Length -gt 65536) {
             throw 'worker installation output exceeded the controller budget'
