@@ -299,8 +299,6 @@ pub enum DependencyState {
 #[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct TaskContract {
-    /// Explicit advanced permissions; skills and tool selection never grant these.
-    pub tool_grants: Vec<ToolGrant>,
     pub objective: String,
     pub input_evidence_ids: Vec<String>,
     pub constraints: Vec<String>,
@@ -310,13 +308,6 @@ pub struct TaskContract {
     pub completion_conditions: Vec<String>,
     /// Independent acceptance required before root can successfully deliver these artifacts.
     pub artifact_acceptance: std::collections::BTreeMap<String, ArtifactAcceptanceProfile>,
-}
-
-#[derive(schemars::JsonSchema, Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolGrant {
-    RawDebugger,
-    WindowsLab,
 }
 
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -25,14 +25,6 @@ impl Coordinator {
                 contract.constraints.push(constraint.clone());
             }
         }
-        ensure!(
-            caller.role == Role::Root
-                || contract
-                    .tool_grants
-                    .iter()
-                    .all(|grant| caller.contract.tool_grants.contains(grant)),
-            "a child may only delegate its existing tool grants"
-        );
         CompletionRules::validate_contract(&contract)?;
         Self::validate_evidence(tx, &caller.run_id, &contract.input_evidence_ids)?;
         let receipt = Self::tx_send(

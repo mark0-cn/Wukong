@@ -2,29 +2,9 @@
 
 [English](agent-tools.md) · 简体中文
 
-[生成的工具目录](tool-catalog.zh-CN.md) 描述已注册工具。模型看到的工具取决于角色、明确的任务授权、已选分组和实际观测的后端支持。工具选择不能授予权限。`contract.tool_grants` 接受 `raw_debugger` 和 `windows_lab`；root 可以向任务授予这些权限，子任务只能继续委派自己已有的权限。Skills 不授予权限。Lab 操作还要求 VM 与任务指定环境一致。
+[生成的工具目录](tool-catalog.zh-CN.md) 描述已注册工具。模型看到的工具取决于角色、已选分组和实际观测的后端支持。工具选择和 Skills 不改变角色。原始调试器和 Windows Lab 操作对目录允许的角色默认开启。Lab 操作还要求 VM 与任务指定环境一致。
 
-`tool_catalog` 分页报告分组和可用性。`tool_select` 替换下一次模型请求的可选分组。核心工具和资源观察／清理工具始终保留。初始选择包含静态分析与类型化调试。模糊测试、符号执行和配置的 MCP 工具需选择 `fuzzing`、`symbolic` 或 `external`；原始调试器和 Lab 分组还需要对应任务授权。每次调用都会再次检查就绪状态。
-
-## 接口迁移
-
-旧名称和相互竞争的输入形式均被拒绝，不提供别名。
-
-| 移除的接口 | 当前接口 |
-|---|---|
-| `fuzz_status` | `job_status` |
-| `runtime_doctor` | `environment_doctor`；environment_id 默认使用任务指定环境 |
-| 原生 `message` / `wait` | `send_message_to_agent` / `wait_for_agents`；保留原生 `task` |
-| `notes_list`、`todos_list`、`threat_model_get` | `context_search` 后使用 `context_read` |
-| `think` | 用 `note_save` 保存简短共享结论 |
-| 模型 `lab_prune` | 只保留操作员 CLI |
-| `bundle_stage`、`runtime_prepare` | `launch_prepare`，source.kind 为 bundle 或 linux_runtime |
-| `target_evidence_id` | 所有静态工具统一使用 `target_ref={kind:"evidence",evidence_id:"..."}` |
-| 静态地址裸整数 | 绑定目标的 module_relative AddressRef |
-| `artifact_stage.artifact_id` | `evidence_id` |
-| 完成参数 `summary` | 结构化 result 中的 `result.answer` |
-| Lab vm/lab_id/generation 输入组合 | `lab_prepare` 操作完成结果中的所属不透明 `lab_ref` |
-| `interactive_send.data_base64` | 带类型的 `source`：text、base64 或 evidence |
+`tool_catalog` 分页报告分组和可用性。`tool_select` 替换下一次模型请求的可选分组。核心工具和资源观察／清理工具始终保留。初始选择包含静态分析与类型化调试。模糊测试、符号执行、原始调试器、Lab 和配置的 MCP 工具分别需选择 `fuzzing`、`symbolic`、`raw_debugger`、`windows_lab` 或 `external`；这只改变模型上下文。每次调用都会再次检查就绪状态。
 
 只有 verifier 可以调用 `analysis_verify`、`poc_verify` 和 `verification_record`。业务层在认证及提升发现阶段时也会检查 verifier 角色。
 
