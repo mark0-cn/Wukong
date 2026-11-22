@@ -377,9 +377,13 @@ impl ToolService {
                 let state = if error.is::<crate::application::windows_lab::LabError>() { CallState::Uncertain } else { self.effects().failure_state(policy, &agent, call_id, &error)? };
                 let kind = error.downcast_ref::<crate::adapters::worker::protocol::WorkerError>().map(|e| json!(e.kind));
                 let lab_error = error.downcast_ref::<crate::application::windows_lab::LabError>();
-                self.finish_raw(record, json!({"error":format!("{error:#}"),"kind":kind,"lab_error":lab_error,
+                let mut raw = json!({"error":format!("{error:#}"),"kind":kind,"lab_error":lab_error,
                     "effect_state":if state == CallState::Uncertain {"unknown"} else {"rejected"},
-                    "next_action":if state == CallState::Uncertain {"reconcile the existing request; do not change arguments or issue a replacement write"} else {"correct the indicated input; preserve returned references and completed results"}}), true, state)
+                    "next_action":if state == CallState::Uncertain {"reconcile the existing request; do not change arguments or issue a replacement write"} else {"correct the indicated input; preserve returned references and completed results"}});
+                if name == "environment_doctor" {
+                    raw = environment_doctor_failure(&self.store, &agent, &record.arguments, raw)?;
+                }
+                self.finish_raw(record, raw, true, state)
             }
             Err(_) => self.finish_raw(
                 record,
@@ -434,6 +438,61 @@ impl ToolService {
     ) -> Result<Value> {
         self.coordination_service().create_agent(agent, call, args)
     }
+}
+
+/// A fresh doctor probe is still executed. On failure, connect materially
+/// identical diagnostics to their earlier durable call instead of presenting
+/// each one as a new argument-correction problem.
+fn environment_doctor_failure(
+    store: &Store,
+    agent: &AgentMetadata,
+    args: &Value,
+    mut raw: Value,
+) -> Result<Value> {
+    let Some(environment_id) = args["environment_id"]
+        .as_str()
+        .or(agent.environment_id.as_deref())
+    else {
+        return Ok(raw);
+    };
+    raw["environment_id"] = json!(environment_id);
+    raw["next_action"] = json!(
+        "resolve VM/worker/SSH readiness or choose another configured environment; one transient read-only retry is allowed, but stop if the same failure repeats without an observed external state change"
+    );
+    let agents = store.records::<AgentMetadata>(&agent.run_id)?;
+    let error = raw["error"].as_str().unwrap_or_default();
+    let mut matches = store
+        .records::<ToolCallRecord>(&agent.run_id)?
+        .into_iter()
+        .filter(|record| {
+            if record.name != "environment_doctor"
+                || record.state != CallState::Failed
+                || record
+                    .result
+                    .as_ref()
+                    .and_then(|result| result["value"]["result"]["error"].as_str())
+                    != Some(error)
+            {
+                return false;
+            }
+            record.arguments["environment_id"].as_str().or_else(|| {
+                agents
+                    .iter()
+                    .find(|candidate| candidate.id == record.agent_id)
+                    .and_then(|candidate| candidate.environment_id.as_deref())
+            }) == Some(environment_id)
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by_key(|record| record.created_at);
+    if let Some(previous) = matches.last() {
+        raw["repeated_failure"] = json!({
+            "same_error_count": matches.len() + 1,
+            "previous_call_id": previous.id,
+            "previous_evidence_id": previous.evidence_id,
+            "instruction": "This is the same doctor failure for the same effective environment. Do not issue another unchanged probe; report the blocker and IDs. Probe again only after observing an external state change."
+        });
+    }
+    Ok(raw)
 }
 
 /// Replace the `{target}` placeholder in a job_start argv with the staged

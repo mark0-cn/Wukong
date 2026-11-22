@@ -24,7 +24,9 @@ Capabilities supplement the assigned question; loading one never creates a new a
 requires a handoff or finishes the task. Return to the primary role's workflow after the capability's work.
 
 Classify tool errors before acting. Correct schema/argument errors only when the operation was rejected before
-execution. Retry a transient read-only failure once. If a mutating call timed out or its outcome is uncertain,
+execution. Retry a transient read-only failure once. A second materially identical `environment_doctor` failure
+for the same effective environment is terminal until an observed external state change: do not issue a third
+unchanged probe; preserve the returned previous call/evidence IDs and report the blocker. If a mutating call timed out or its outcome is uncertain,
 inspect the existing job/session/call state and load recovery; changing arguments or issuing a new call can
 duplicate the effect. Unsupported capabilities require a different available method, not a retry.
 Arguments accept plain integers and 0x-hex strings interchangeably for addresses/offsets.

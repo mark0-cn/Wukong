@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Link repeated environment doctor failures to their prior evidence and give Root a durable finalization notice before the hard wall-clock pause, including while parked in a wait."
+zh_CN = "重复的环境 doctor 失败现在会关联此前证据；Root 在硬墙钟暂停前会收到持久化收尾通知，处于等待状态时也会被唤醒。"

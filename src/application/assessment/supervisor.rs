@@ -133,6 +133,7 @@ impl RunSupervisor {
         tokio::spawn(async move {
             let started = Instant::now();
             let mut renewed = Instant::now();
+            let mut finalization_requested = false;
             let mut timer = tokio::time::interval(Duration::from_secs(1));
             loop {
                 tokio::select! {
@@ -143,9 +144,22 @@ impl RunSupervisor {
                             renewed = Instant::now();
                         }
                         let run: RunRecord = runner.store.require("run", &lease.run_id)?;
-                        if !run.status.terminal() && run.status != Status::BudgetPaused
-                            && started.elapsed().as_secs() >= run.budget.max_wall_seconds {
-                            runner.coordinator.pause_budget(&run.id, "wall-clock budget reached")?;
+                        let elapsed = started.elapsed().as_secs();
+                        if !run.status.terminal() && run.status != Status::BudgetPaused {
+                            let reserve = (run.budget.max_wall_seconds / 4).clamp(1, 30);
+                            if !finalization_requested
+                                && elapsed >= run.budget.max_wall_seconds.saturating_sub(reserve)
+                            {
+                                runner.coordinator.request_finalization(
+                                    &run.id,
+                                    &format!("{}:{}", lease.owner, lease.epoch()),
+                                    run.budget.max_wall_seconds.saturating_sub(elapsed),
+                                )?;
+                                finalization_requested = true;
+                            }
+                            if elapsed >= run.budget.max_wall_seconds {
+                                runner.coordinator.pause_budget(&run.id, "wall-clock budget reached")?;
+                            }
                         }
                     }
                 }
@@ -260,6 +274,14 @@ for line in sys.stdin:
             }
             let result = tokio::time::timeout(Duration::from_secs(3), task).await???;
             assert_eq!(result.status, Status::BudgetPaused);
+            if wall_budget {
+                let notices = store
+                    .transaction(|tx| Store::tx_messages(tx, &run.id))?
+                    .into_iter()
+                    .filter(|message| message.content.contains("budget_finalization"))
+                    .count();
+                assert_eq!(notices, 1, "soft finalization must precede the hard pause");
+            }
             assert!(store.acquire_lease(&run.id, "next-controller", 20)?);
             server.abort();
         }

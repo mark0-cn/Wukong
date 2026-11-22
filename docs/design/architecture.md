@@ -191,7 +191,7 @@ The guards are static: they prove imports and symbol references, not runtime own
 
 `TaskGraph`, `DependencyRules`, `CompletionRules`, `MessageRules` are pure domain rules independent of storage/execution. Coordination loads facts, applies rules and commits task/mail changes in one transaction; queries/generation archives remain in transaction-session implementations.
 
-Agent states: queued, running, waiting, budget_paused, completed, stopped, crashed, failed. Completion/stop notify parents. Budget pauses retain checkpoints and resume scheduling later.
+Agent states: queued, running, waiting, budget_paused, completed, stopped, crashed, failed. Completion/stop notify parents. Budget pauses retain checkpoints and resume scheduling later. During each controller epoch, the supervisor sends Root one durable `budget_finalization` notice when the wall-clock reserve begins (one quarter of the wall budget, bounded to 1–30 seconds). The notice wakes a parked Root without clearing its dependency condition or completing descendants; it requests reconciliation and `finish_scan`, not new work. It does not waive completion gates or replace the hard wall pause, and a resumed controller epoch can issue a fresh notice.
 
 Within an active run, `follow_up_agent` (desktop **Assign follow-up**) adds work to a completed child, preserving history/cumulative usage and starting a new generation. Calls/notices are generation-scoped. Completed parents are awakened too; stopped/failed branches need new tasks. Explicit predecessor dependencies combine with parent-completion dependencies; ancestor dependencies/indirect cycles are rejected.
 
