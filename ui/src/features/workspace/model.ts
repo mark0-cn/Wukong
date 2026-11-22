@@ -1,58 +1,71 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorValue, subscribe } from '../../shared/api/bridge';
-import type { Envelope, Host, Workspace } from '../../shared/api/types';
+import type { Host, Workspace } from '../../shared/api/types';
+
+interface WorkspaceRead {
+  host: Host;
+  revision: string;
+  snapshot: Workspace | undefined;
+}
 
 export function useWorkspace() {
+  const queryClient = useQueryClient();
   const [run, setRun] = useState<string>();
   const [agent, setAgent] = useState<string>();
   const [limit, setLimit] = useState(500);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [host, setHost] = useState<Host>();
-  const [data, setData] = useState<Workspace>();
-  const [error, setError] = useState<ReturnType<typeof errorValue>>('');
-  const [loading, setLoading] = useState(true);
+  const [resetGeneration, setResetGeneration] = useState(0);
   const reload = useRef<() => void>(() => {});
-  const previousSelection = useRef('');
+  const lastHost = useRef<Host | undefined>(undefined);
   const refresh = useCallback(() => reload.current(), []);
   const reset = useCallback(() => {
-    setRun(undefined); setAgent(undefined); setLimit(500); setData(undefined);
-    setRefreshKey(value => value + 1);
+    setRun(undefined); setAgent(undefined); setLimit(500);
+    setResetGeneration(value => value + 1);
   }, []);
   const selectRun = useCallback((id: string) => {
     setRun(id); setAgent(undefined); setLimit(500);
   }, []);
   const selectAgent = useCallback((id?: string) => { setAgent(id); setLimit(500); }, []);
+  const queryKey = ['workspace', run ?? null, agent ?? null, limit, resetGeneration] as const;
+  const result = useQuery({
+    queryKey,
+    queryFn: async (): Promise<WorkspaceRead> => {
+      const previous = queryClient.getQueryData<WorkspaceRead>(queryKey);
+      const response = await api('workspace_read', { request: {
+        run: run ?? null, agent: agent ?? null, event_limit: limit, known_revision: previous?.revision ?? null,
+      } });
+      return {
+        host: response.host,
+        revision: response.workspace.revision,
+        snapshot: response.workspace.data ?? previous?.snapshot,
+      };
+    },
+    enabled: false,
+    retry: false,
+    gcTime: 0,
+    networkMode: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const responseHost = result.data?.host;
+  const snapshot = result.data?.snapshot;
+  useEffect(() => { if (responseHost) lastHost.current = responseHost; }, [responseHost]);
   useEffect(() => {
-    let alive = true, inFlight = false, requested = false, revision: string | undefined;
+    if (!run && snapshot?.selected) setRun(snapshot.selected);
+  }, [run, snapshot]);
+  const refetch = result.refetch;
+  useEffect(() => {
+    let alive = true, inFlight = false, requested = false;
     let unlisten: (() => void) | undefined;
     let subscribing = false;
-    const selection = `${run ?? ''}|${agent ?? ''}|${refreshKey}`;
-    if (previousSelection.current !== selection) setData(undefined);
-    previousSelection.current = selection;
-    setLoading(true); setError('');
     const load = async () => {
       if (!alive) return;
       if (inFlight) { requested = true; return; }
       inFlight = true;
-      try {
-        const response = await api('workspace_read', { request: {
-          run: run ?? null, agent: agent ?? null, event_limit: limit, known_revision: revision ?? null,
-        } });
-        if (!alive) return;
-        setHost(response.host);
-        if (response.workspace.data) {
-          setData(response.workspace.data);
-          if (!run && response.workspace.data.selected) setRun(response.workspace.data.selected);
-        }
-        revision = response.workspace.revision;
-        setError('');
-      } catch (error) { if (alive) setError(errorValue(error)); }
+      try { await refetch({ cancelRefetch: false }); }
       finally {
         inFlight = false;
-        if (alive) {
-          setLoading(false);
-          if (requested) { requested = false; void load(); }
-        }
+        if (alive && requested) { requested = false; void load(); }
       }
     };
     reload.current = () => { void load(); };
@@ -76,8 +89,10 @@ export function useWorkspace() {
       window.removeEventListener('focus', catchUp);
       document.removeEventListener('visibilitychange', visible);
     };
-  }, [run, agent, limit, refreshKey]);
-  return { run, agent, host, data, error, loading, refresh, reset, selectRun, selectAgent,
+  }, [run, agent, limit, resetGeneration, refetch]);
+  return { run, agent, host: responseHost ?? lastHost.current, data: snapshot,
+    error: result.error ? errorValue(result.error) : '',
+    loading: result.isFetching || (!result.data && !result.error), refresh, reset, selectRun, selectAgent,
     loadEarlier: () => setLimit(value => Math.min(10_000, value + 500)), historyLimit: limit };
 }
 export type WorkspaceState = ReturnType<typeof useWorkspace>;

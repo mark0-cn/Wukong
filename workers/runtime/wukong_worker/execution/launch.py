@@ -16,6 +16,9 @@ from wukong_worker.artifacts.common import sha256_file as digest
 from wukong_worker.execution.launch_spec import read_launch
 
 
+PUBLIC_LAUNCH_CACHE = Path("/tmp/wukong-launches")
+
+
 def load(root, params):
     document = read_launch(root, params["launch_spec"])
     spec, base, member = document.spec, document.base, document.member
@@ -63,17 +66,16 @@ def load(root, params):
 
 def patched_runtime(base, spec):
     """Public, root-owned immutable runtime. Stable paths keep trial hashes stable."""
-    import fcntl
+    from filelock import FileLock
 
-    parent = Path("/tmp/wukong-launches")
+    parent = PUBLIC_LAUNCH_CACHE
     parent.mkdir(mode=0o755, exist_ok=True)
     st = parent.lstat()
     if parent.is_symlink() or st.st_uid != os.geteuid() or st.st_mode & 0o022:
         raise ValueError("unsafe public launch cache")
     key = hashlib.sha256(json.dumps(spec["files"], sort_keys=True).encode()).hexdigest()
     destination = parent / key
-    with (parent / (key + ".lock")).open("a+b") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with FileLock(parent / (key + ".lock"), timeout=-1, mode=0o666, preserve_lock_file=True):
         if not destination.exists():
             temporary = Path(tempfile.mkdtemp(dir=parent))
             try:

@@ -58,6 +58,7 @@ jobs:
           python-version: '3.12'
       - name: Synchronize versions and validate
         run: |
+          python -m pip install --disable-pip-version-check -r scripts/ci/requirements.txt
           python -m scripts.release.cli bump --tag "$RELEASE_TAG"
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             echo "Tag already exists: $RELEASE_TAG" >&2

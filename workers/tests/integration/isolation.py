@@ -115,6 +115,12 @@ def main():
     doctor = client.call("doctor")
     assert doctor["metadata_protected_from_targets"] and doctor["unique_experiment_uids"], doctor
     execution_copies = execution_copy_parity(client, root)
+    allocator = json.loads((root / "uid-allocator.json").read_text())
+    assert allocator["next"] > 20000, allocator
+    assert (root / "uid-allocator.lock").stat().st_mode & 0o777 == 0o600
+    import pwd
+
+    pwd.getpwuid(allocator["next"] - 1)
     canary = root / "private-staging-canary.txt"
     canary.write_text("CONTROLLED-STAGING-CANARY-NOT-A-TOKEN")
     canary.chmod(0o600)
@@ -222,6 +228,11 @@ print(json.dumps({'uid':os.getuid(),'denied':denied,'cap_eff':next(x for x in pa
                 "private_metadata_staging_denied": True,
                 "cancellation": cancellation,
                 "execution_copies": execution_copies,
+                "uid_allocator": {
+                    "next": allocator["next"],
+                    "lock_mode": "0600",
+                    "last_uid_registered": True,
+                },
                 "attacker": first,
                 "protected_job": second,
                 "verification": verified,

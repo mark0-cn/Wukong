@@ -12,6 +12,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from markdown_it import MarkdownIt
+
 ALIASES = {
     "README.en.md": "README.md",
     **{
@@ -22,12 +24,20 @@ ALIASES = {
 RECORD = "docs/translations.json"
 
 
-def prose(text):
-    return re.sub(r"^(`{3,}|~{3,})[^\n]*\n.*?^\1\s*$", "", text, flags=re.M | re.S)
+def tokens(text):
+    return MarkdownIt("commonmark", {"html": True}).parse(text)
+
+
+def heading_tokens(parsed):
+    result = []
+    for index, token in enumerate(parsed[:-1]):
+        if token.type == "heading_open" and token.markup.startswith("#"):
+            result.append((token.markup, parsed[index + 1].content))
+    return result
 
 
 def headings(text):
-    return re.findall(r"^(#{1,6})\s+(.+?)\s*#*\s*$", prose(text), re.M)
+    return heading_tokens(tokens(text))
 
 
 def slug(text):
@@ -36,10 +46,21 @@ def slug(text):
     return text.replace(" ", "-")
 
 
+def html_tokens(parsed):
+    for token in parsed:
+        if token.type in {"html_block", "html_inline"}:
+            yield token.content
+        if token.children:
+            yield from html_tokens(token.children)
+
+
 def anchors(text):
-    result = set(re.findall(r'<a\s+(?:id|name)=[\'"]([^\'"]+)', prose(text)))
+    parsed = tokens(text)
+    result = set()
+    for content in html_tokens(parsed):
+        result.update(re.findall(r'<a\s+(?:id|name)=[\'"]([^\'"]+)', content))
     counts = {}
-    for _, title in headings(text):
+    for _, title in heading_tokens(parsed):
         key = slug(title)
         count = counts.get(key, 0)
         counts[key] = count + 1
@@ -48,10 +69,21 @@ def anchors(text):
 
 
 def links(text):
-    text = re.sub(r"`[^`\n]+`", "", prose(text))
-    return re.findall(r"\]\(([^\s)]+)(?:\s+[^)]*)?\)", text) + re.findall(
-        r'(?:href|src)=[\'"]([^\'"]+)', text
-    )
+    parsed = tokens(text)
+    markdown = []
+    for token in parsed:
+        if token.type == "inline":
+            for child in token.children or []:
+                if child.type == "link_open":
+                    markdown.append(child.attrGet("href"))
+                elif child.type == "image":
+                    markdown.append(child.attrGet("src"))
+    # Keep HTML destinations after Markdown destinations for diagnostic parity.
+    return markdown + [
+        link
+        for content in html_tokens(parsed)
+        for link in re.findall(r'(?:href|src)=[\'"]([^\'"]+)', content)
+    ]
 
 
 def chinese_path(path):
