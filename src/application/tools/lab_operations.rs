@@ -21,6 +21,11 @@ impl LabService {
         };
         self.authorize_vm(agent, &vm)?;
         let lab = self.open(&vm, agent)?;
+        let lab = if matches!(name, "lab_prepare" | "lab_restore") {
+            lab.with_worker(Arc::new(self.assessment_worker(agent, call)))
+        } else {
+            lab
+        };
         self.start_lab_operation(agent, call, name, args, lab).await
     }
 

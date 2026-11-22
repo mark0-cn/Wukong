@@ -357,13 +357,6 @@ impl WindowsLab {
                 )),
             "offline provisioning state is uncertain; re-provision the VM and reconcile it before preparing an experiment"
         );
-        let maintenance = if let Some(worker) = &self.worker
-            && self.host.running().await?
-        {
-            Some(worker.maintenance().await?)
-        } else {
-            None
-        };
         let generation = state.generation + 1;
         let lab_id = uuid::Uuid::new_v4().simple().to_string();
         let snapshot = format!("{}-{}", self.snapshot_prefix, lab_id);
@@ -391,6 +384,16 @@ impl WindowsLab {
         state.last_error = None;
         self.store.save(&state)?;
 
+        if let Err(failure) = self.ensure_running().await {
+            return match failure {
+                StepFailure::Timeout => self.mark_unknown(state, pending),
+                StepFailure::Failed(error) => self.mark_failed(state, pending, error, false),
+            };
+        }
+        let maintenance = match self.prepare_worker().await {
+            Ok(maintenance) => maintenance,
+            Err(error) => return self.mark_failed(state, pending, error, false),
+        };
         if let Err(failure) = self.ensure_baseline().await {
             return match failure {
                 StepFailure::Timeout => self.mark_unknown(state, pending),
@@ -562,6 +565,36 @@ impl WindowsLab {
         if let Some(maintenance) = maintenance {
             maintenance.finish().await?;
         }
+        let running = tokio::time::timeout(Duration::from_secs(5), self.host.running()).await;
+        let running = running
+            .map_err(|_| anyhow::anyhow!("VM status probe timed out"))
+            .and_then(|result| result);
+        let readiness = match (&self.worker, running.as_ref()) {
+            (Some(_), Ok(true)) => match self.worker_readiness(self.timeout).await {
+                Ok(observation) => serde_json::json!({
+                    "state": "ready",
+                    "observation": observation,
+                }),
+                Err(error) => serde_json::json!({
+                    "state": "unavailable",
+                    "error": format!("{error:#}"),
+                }),
+            },
+            (_, Ok(false)) => serde_json::json!({
+                "state": "not_running",
+                "error": "the restored VM is powered off",
+            }),
+            (None, Ok(true)) => serde_json::json!({"state": "not_configured"}),
+            (_, Err(error)) => serde_json::json!({
+                "state": "unknown",
+                "error": format!("{error:#}"),
+            }),
+        };
+        let next_action = if readiness["state"] == "ready" {
+            "prepare a new lease before further execution"
+        } else {
+            "keep the restored baseline and resolve the reported runtime state before another experiment"
+        };
         Ok(serde_json::json!({
             "vm_id": self.vm_id,
             "generation": next_generation,
@@ -569,6 +602,9 @@ impl WindowsLab {
             "baseline_snapshot": self.baseline,
             "pruned_snapshot": pruned_snapshot,
             "prune_error": prune_error,
+            "vm_running": running.as_ref().ok().copied(),
+            "worker_readiness": readiness,
+            "next_action": next_action,
         }))
     }
 
@@ -721,6 +757,54 @@ impl WindowsLab {
         }
         self.store.save(&state)?;
         Ok(serde_json::json!({"vm_id": self.vm_id, "state": state}))
+    }
+
+    async fn ensure_running(&self) -> std::result::Result<(), StepFailure> {
+        if self.step(self.host.running()).await? {
+            return Ok(());
+        }
+        self.step(self.host.start()).await
+    }
+
+    /// Poll the read-only doctor through guest boot. Only after it succeeds do
+    /// we acquire the single exclusive maintenance lease used around snapshots.
+    async fn worker_readiness(&self, timeout: Duration) -> Result<serde_json::Value> {
+        let worker = self
+            .worker
+            .as_ref()
+            .context("lab worker is not configured")?;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut last_error = None;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, worker.doctor()).await {
+                Ok(Ok(observation)) => return Ok(observation),
+                Ok(Err(error)) => last_error = Some(error),
+                Err(_) => break,
+            }
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(1).min(remaining)).await;
+        }
+        let error =
+            last_error.unwrap_or_else(|| anyhow::anyhow!("worker readiness probe timed out"));
+        Err(error).context(format!(
+            "worker did not become ready within {} seconds",
+            timeout.as_secs()
+        ))
+    }
+
+    async fn prepare_worker(&self) -> Result<Option<Box<dyn runner::LabMaintenance>>> {
+        let Some(worker) = &self.worker else {
+            return Ok(None);
+        };
+        self.worker_readiness(self.timeout).await?;
+        Ok(Some(worker.maintenance().await?))
     }
 
     async fn ensure_baseline(&self) -> std::result::Result<(), StepFailure> {
