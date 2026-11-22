@@ -2,7 +2,7 @@
 use super::super::provision::{
     BootTaskRemoval, DiskInspectionRequest, GUEST_SYSTEM_HIVE, GuestPaths, GuestRemoval,
     ServiceRemoval, boot_task_injection, plan_guest_cleanup, require_relative_path,
-    resolve_guest_disk, staged_base_snapshot,
+    resolve_guest_disk, restore_vmx_preserving_active_disk, staged_base_snapshot,
 };
 use super::super::{
     LabError, LabPhase, LabProvision, LabState, LabStore, OperationKind, PendingOperation,
@@ -432,7 +432,11 @@ impl WindowsLab {
         if spec.vmx_backup.is_file() {
             let original = super::super::provision::read_bounded(&spec.vmx_backup, 4 * 1024 * 1024)
                 .context("read the VMX backup")?;
-            write_synced(&self.vmx, &original)?;
+            let current = super::super::provision::read_bounded(&self.vmx, 4 * 1024 * 1024)
+                .context("read the post-reconciliation VMX")?;
+            let restored = restore_vmx_preserving_active_disk(&original, &current, &self.vmx)
+                .context("restore the VMX without losing VMware's active delta")?;
+            write_synced(&self.vmx, &restored)?;
             // Reconcile is not atomic: a transient sharing violation on the
             // backup or ISO can stop it after the VMX was restored. Retry the
             // removal briefly, and because every step is idempotent a second
