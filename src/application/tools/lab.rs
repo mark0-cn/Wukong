@@ -26,6 +26,15 @@ impl LabService {
         )
     }
 
+    pub(super) fn assessment_worker(&self, agent: &AgentMetadata, call: &str) -> AssessmentWorker {
+        AssessmentWorker {
+            execution: self.execution.clone(),
+            environments: self.environments.clone(),
+            agent: agent.clone(),
+            call: call.into(),
+        }
+    }
+
     fn evidence_bytes(&self, agent: &AgentMetadata, id: &str, limit: u64) -> Result<Vec<u8>> {
         let evidence: Evidence = require_in_run(&self.store, id, &agent.run_id)?;
         ensure!(evidence.size <= limit, "lab evidence exceeds size budget");
@@ -49,11 +58,20 @@ impl LabService {
         };
         let run: RunRecord = self.store.load(&agent.run_id)?;
         let target_sha256 = match input.target_evidence_id {
-            Some(id) => hex::encode(Sha256::digest(self.evidence_bytes(
-                agent,
-                &id,
-                crate::application::windows_lab::package::MAX_ARTIFACT_BYTES,
-            )?)),
+            Some(id) => {
+                let bytes = self.evidence_bytes(
+                    agent,
+                    &id,
+                    crate::application::windows_lab::package::MAX_ARTIFACT_BYTES,
+                )?;
+                let sha256 = hex::encode(Sha256::digest(&bytes));
+                ensure!(
+                    sha256 == run.target_sha256,
+                    "target evidence {id} has SHA256 {sha256}, but the assessment entry is {}; use bundle_evidence for the entry or omit target_evidence_id",
+                    run.target_sha256
+                );
+                sha256
+            }
             None => run.target_sha256,
         };
         ensure!(
@@ -140,11 +158,7 @@ impl LabService {
             .stdin_evidence_id
             .map(|id| self.evidence_bytes(agent, &id, 1024 * 1024))
             .transpose()?;
-        let worker = AssessmentWorker {
-            execution: self.execution.clone(),
-            agent: agent.clone(),
-            call: call.into(),
-        };
+        let worker = self.assessment_worker(agent, call);
         let lab = self
             .open(&reference.vm, agent)?
             .with_worker(Arc::new(worker));
@@ -217,8 +231,9 @@ impl LabService {
 
 /// Lab execution participates in the same durable job ledger, heartbeat,
 /// evidence import, cancellation and completion gates as ordinary jobs.
-struct AssessmentWorker {
+pub(super) struct AssessmentWorker {
     execution: ExecutionService,
+    environments: EnvironmentRegistry,
     agent: AgentMetadata,
     call: String,
 }
@@ -256,6 +271,14 @@ impl AssessmentWorker {
 }
 #[async_trait::async_trait]
 impl crate::application::windows_lab::runner::LabWorker for AssessmentWorker {
+    async fn doctor(&self) -> Result<Value> {
+        let environment = self
+            .agent
+            .environment_id
+            .as_deref()
+            .context("missing environment")?;
+        self.environments.doctor(environment).await
+    }
     async fn execute(
         &self,
         request: crate::application::windows_lab::runner::LabWorkerRequest,
@@ -420,6 +443,60 @@ mod reference_tests {
             }
             assert!(service.resolve_reference(&actor, &reference).is_err());
         }
+        tools.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn prepare_target_evidence_must_match_the_assessment_entry() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let target = temporary.path().join("target.exe");
+        fs::write(&target, b"original executable")?;
+        let config = AppConfig::default();
+        let store = Store::open(temporary.path().join("state"))?;
+        let run = Coordinator::new(store.clone()).create_run(
+            &target,
+            "target evidence test",
+            Budget::default(),
+            serde_json::to_value(&config)?,
+        )?;
+        let agent: AgentMetadata = store.load(&run.root_id)?;
+        let wrong = store.artifact(
+            &run.id,
+            &agent.id,
+            "inspect-call",
+            "binary_inspect.full",
+            br#"{"format":"pe"}"#,
+            "application/json",
+            json!({}),
+        )?;
+        let original = store.artifact(
+            &run.id,
+            &agent.id,
+            "bundle-call",
+            "bundle.member",
+            b"original executable",
+            "application/octet-stream",
+            json!({"path":"target.exe"}),
+        )?;
+        let tools = ToolService::new(config, store).await?;
+        let service = ToolContext::new(&tools, None).lab;
+        let spec = |evidence_id: &str| {
+            serde_json::from_value::<args::AgentExperimentSpec>(json!({
+                "target_evidence_id": evidence_id,
+                "launch": "exe",
+                "input_channel": "stdin",
+                "account": "user",
+                "dependencies": []
+            }))
+            .unwrap()
+        };
+        let error = service
+            .materialize_spec(&agent, spec(&wrong.id))
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("assessment entry"));
+        let accepted = service.materialize_spec(&agent, spec(&original.id))?;
+        assert_eq!(accepted.target_sha256, run.target_sha256);
         tools.close().await;
         Ok(())
     }

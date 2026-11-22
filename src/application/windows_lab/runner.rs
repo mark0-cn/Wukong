@@ -5,6 +5,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::Serialize;
+use serde_json::Value;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct LabWorkerRequest {
@@ -37,6 +38,9 @@ pub struct LabWorkerOutcome {
 #[async_trait]
 pub trait LabWorker: Send + Sync {
     async fn execute(&self, request: LabWorkerRequest) -> Result<LabWorkerOutcome>;
+    async fn doctor(&self) -> Result<Value> {
+        anyhow::bail!("worker readiness probe is not configured")
+    }
     async fn maintenance(&self) -> Result<Box<dyn LabMaintenance>> {
         Ok(Box::new(()))
     }

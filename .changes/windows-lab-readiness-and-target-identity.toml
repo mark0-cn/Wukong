@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Make Windows Lab preparation start stopped VMs and wait for worker readiness, require explicit target evidence to match the assessment entry hash, and report fresh VM/worker state after baseline restoration."
+zh_CN = "Windows Lab 准备现在会启动已停止的 VM 并等待 Worker 就绪；显式目标证据必须匹配评估入口哈希；基线恢复后会报告最新的 VM/Worker 状态。"

@@ -183,9 +183,11 @@ async fn prepare_creates_baseline_and_experiment_snapshot() {
         .unwrap();
     assert_eq!(lease.generation, 1);
     let calls = host.calls();
-    assert_eq!(calls[0], "snapshots");
-    assert_eq!(calls[1], "snapshot baseline");
-    assert_eq!(calls[2], format!("snapshot {}", lease.snapshot));
+    assert_eq!(calls[0], "running");
+    assert_eq!(calls[1], "start");
+    assert_eq!(calls[2], "snapshots");
+    assert_eq!(calls[3], "snapshot baseline");
+    assert_eq!(calls[4], format!("snapshot {}", lease.snapshot));
     let state = state(dir.path());
     assert_eq!(state.phase, LabPhase::Ready);
     assert_eq!(state.generation, 1);
@@ -252,6 +254,8 @@ async fn restore_starts_the_vm_only_when_needed() {
         .prepare("analyst", "start needed", spec())
         .await
         .unwrap();
+    // Model a powered-off baseline after the initial cold start.
+    host.set_running(false);
     lab.restore(&lease.lab_id, lease.generation).await.unwrap();
     assert!(host.calls().contains(&"start".into()));
 
@@ -505,6 +509,10 @@ impl FakeWorker {
 
 #[async_trait]
 impl LabWorker for FakeWorker {
+    async fn doctor(&self) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({"ready": true}))
+    }
+
     async fn execute(&self, request: LabWorkerRequest) -> Result<LabWorkerOutcome> {
         self.requests.lock().unwrap().push(request);
         match self.outcome.lock().unwrap().take().unwrap() {
@@ -512,6 +520,103 @@ impl LabWorker for FakeWorker {
             Err(message) => bail!("{message}"),
         }
     }
+}
+
+struct ReadinessWorker {
+    attempts: std::sync::atomic::AtomicUsize,
+    failures: std::sync::atomic::AtomicUsize,
+}
+
+impl ReadinessWorker {
+    fn new(failures: usize) -> Self {
+        Self {
+            attempts: 0.into(),
+            failures: failures.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl LabWorker for ReadinessWorker {
+    async fn execute(&self, _request: LabWorkerRequest) -> Result<LabWorkerOutcome> {
+        bail!("readiness fixture does not execute targets")
+    }
+
+    async fn doctor(&self) -> Result<serde_json::Value> {
+        let attempt = self
+            .attempts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if attempt < self.failures.load(std::sync::atomic::Ordering::SeqCst) {
+            bail!("worker is still booting");
+        }
+        Ok(serde_json::json!({"ready": true}))
+    }
+}
+
+#[tokio::test]
+async fn prepare_cold_starts_and_waits_for_worker_readiness() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let worker = Arc::new(ReadinessWorker::new(2));
+    let lease = lab(dir.path(), host.clone())
+        .with_worker(worker.clone())
+        .prepare("analyst", "cold start", spec())
+        .await
+        .unwrap();
+    assert_eq!(worker.attempts.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let calls = host.calls();
+    assert!(calls.windows(2).any(|call| call == ["start", "snapshots"]));
+    assert_eq!(state(dir.path()).phase, LabPhase::Ready);
+    assert_eq!(lease.generation, 1);
+}
+
+#[tokio::test]
+async fn prepare_does_not_publish_a_lease_when_worker_readiness_times_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let mut config = config(dir.path());
+    config.operation_timeout_seconds = 1;
+    let lab = WindowsLab::open(dir.path(), "labvm", &config, host.clone())
+        .unwrap()
+        .with_worker(Arc::new(ReadinessWorker::new(usize::MAX)));
+    let error = lab
+        .prepare("analyst", "cold start", spec())
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("worker did not become ready"));
+    assert_eq!(state(dir.path()).phase, LabPhase::Failed);
+    assert!(!host.calls().iter().any(|call| call.starts_with("snapshot")));
+}
+
+#[tokio::test]
+async fn restore_reports_a_fresh_worker_readiness_observation() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let worker = Arc::new(ReadinessWorker::new(0));
+    let mut config = config(dir.path());
+    config.operation_timeout_seconds = 1;
+    config.start_after_restore = true;
+    let lab = WindowsLab::open(dir.path(), "labvm", &config, host.clone())
+        .unwrap()
+        .with_worker(worker.clone());
+    let lease = lab
+        .prepare("analyst", "restore probe", spec())
+        .await
+        .unwrap();
+    host.set_running(false);
+    worker
+        .failures
+        .store(usize::MAX, std::sync::atomic::Ordering::SeqCst);
+    let restored = lab.restore(&lease.lab_id, lease.generation).await.unwrap();
+    assert_eq!(restored["vm_running"], true);
+    assert_eq!(restored["worker_readiness"]["state"], "unavailable");
+    assert!(
+        restored["worker_readiness"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("worker is still booting")
+    );
+    assert_eq!(state(dir.path()).phase, LabPhase::Idle);
 }
 
 #[tokio::test]

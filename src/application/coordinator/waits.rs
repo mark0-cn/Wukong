@@ -135,6 +135,54 @@ impl Coordinator {
     fn wait_view(agent: &AgentMetadata) -> Value {
         json!({"id":agent.id,"role":agent.role,"status":agent.status,"summary":agent.summary,"result":agent.task_result,"error":agent.error,"scope":agent.scope})
     }
+    /// Give Root a bounded finalization window before the hard wall pause.
+    /// The message is durable and deduplicated per controller epoch; waking a
+    /// parked Root must not clear its real dependency condition or complete
+    /// any descendant.
+    pub fn request_finalization(
+        &self,
+        run_id: &str,
+        controller: &str,
+        remaining_wall_seconds: u64,
+    ) -> Result<bool> {
+        self.store.write(|tx| {
+            let run: RunRecord = tx
+                .get_record::<RunRecord>(run_id)?
+                .context("run missing")?;
+            let root: AgentMetadata = tx
+                .get_record::<AgentMetadata>(&run.root_id)?
+                .context("root missing")?;
+            if run.status.terminal()
+                || run.status == Status::BudgetPaused
+                || root.status.terminal()
+            {
+                return Ok(false);
+            }
+            let content = json!({
+                "type": "budget_finalization",
+                "remaining_wall_seconds": remaining_wall_seconds,
+                "instruction": "The wall-clock reserve has started. Do not create tasks, start probes, or park another wait. Stop descendants whose work is moot, preserve evidence and unresolved effects, mark unresolved coverage inconclusive, and call finish_scan now with verified conclusions, gaps, and next actions. Completion gates still apply; the hard wall pause remains in force."
+            });
+            let key = format!("budget-finalization:{run_id}:{controller}");
+            let inserted = tx.message(
+                run_id,
+                "coordinator",
+                &run.root_id,
+                &content.to_string(),
+                Some(&key),
+            )?;
+            if inserted {
+                tx.event(
+                    run_id,
+                    Some(&run.root_id),
+                    "run.finalization_requested",
+                    json!({"controller":controller,"remaining_wall_seconds":remaining_wall_seconds}),
+                )?;
+            }
+            Ok(inserted)
+        })
+    }
+
     pub fn wake_waiters(&self, run_id: &str) -> Result<usize> {
         self.store.write(|tx| {
             let all=tx.records::<AgentMetadata>(run_id)?;let mut changed=0;

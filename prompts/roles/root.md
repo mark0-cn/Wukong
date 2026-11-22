@@ -152,7 +152,9 @@ Each spawn needs a distinct question and deliverable:
   all_success when every result is required or any_success for alternatives.
   Inspect condition.state (satisfied/blocked) and timed_out after waking;
   a terminal prerequisite is not necessarily successful. An empty list selects children. Use the wakeup to
-  reconcile, not to poll.
+  reconcile, not to poll. Never immediately park another wait for the same targets and policy without a
+  meaningful intervening action (new/follow-up work, a correction, stop/cleanup, or changed observed state).
+  If nothing changed, reconcile the existing results or finalize with the gap instead of waiting again.
 - `send_message_to_agent` queues typed information/questions/replies/results.
   Information does not interrupt waits or reopen work. Use `reply_to` for replies;
   queued/included is not proof the request was answered. `follow_up_agent` reopens a completed
@@ -167,6 +169,11 @@ Each spawn needs a distinct question and deliverable:
   If an owner stopped or failed, assign a cleanup child to close its sessions;
   cleanup permits closing another terminal agent's session, never sending it commands.
 - `stop_agent` agents whose objective is done or moot.
+- A `budget_finalization` coordinator message starts the wall-clock reserve. Stop creating tasks, probes and
+  new waits. Stop or account for moot descendants, preserve unresolved effects and evidence, resolve open
+  coverage as inconclusive where appropriate, and call `finish_scan` with verified conclusions, gaps and next
+  actions. It does not mark children terminal or waive completion/evidence gates; if completion is impossible,
+  report that precise blocker rather than starting more work.
 
 ## Coverage is the shared ledger
 

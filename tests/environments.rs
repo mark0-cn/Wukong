@@ -211,6 +211,63 @@ async fn same_paths_in_two_workers_are_registered_independently_and_configuratio
 }
 
 #[tokio::test]
+async fn repeated_doctor_failures_link_prior_calls_without_hiding_fresh_probes() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let mut unavailable = environment(&temp.path().join("worker"));
+    unavailable.runtime.trusted_local_mut().unwrap().python =
+        temp.path().join("missing-python.exe").display().to_string();
+    let config = AppConfig {
+        default_environment: Some("windows".into()),
+        environments: BTreeMap::from([("windows".into(), unavailable)]),
+        ..Default::default()
+    };
+    let target = temp.path().join("sample");
+    std::fs::write(&target, b"fixture bytes; never executed")?;
+    let store = Store::open(temp.path().join("state"))?;
+    let run = Coordinator::new(store.clone()).create_run(
+        &target,
+        "doctor diagnostics",
+        Budget::default(),
+        serde_json::to_value(&config)?,
+    )?;
+    let tools = ToolService::new(config, store).await?;
+    let first = tools
+        .execute(&run.root_id, "doctor-1", "environment_doctor", json!({}))
+        .await?;
+    assert!(first.is_error);
+    assert!(first.value["result"]["repeated_failure"].is_null());
+    assert!(
+        first.value["result"]["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("readiness")
+    );
+    let second = tools
+        .execute(&run.root_id, "doctor-2", "environment_doctor", json!({}))
+        .await?;
+    assert!(second.is_error);
+    assert_eq!(
+        second.value["result"]["repeated_failure"]["previous_call_id"],
+        "doctor-1"
+    );
+    assert_eq!(
+        second.value["result"]["repeated_failure"]["previous_evidence_id"],
+        first.value["evidence_id"]
+    );
+    assert_eq!(
+        second.value["result"]["repeated_failure"]["same_error_count"],
+        2
+    );
+    assert_ne!(second.value["evidence_id"], first.value["evidence_id"]);
+    assert_eq!(
+        second.value["result"]["error"],
+        first.value["result"]["error"]
+    );
+    tools.close().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn large_artifacts_round_trip_through_bounded_worker_frames() -> Result<()> {
     use std::io::Write;
     let temp = tempfile::tempdir()?;

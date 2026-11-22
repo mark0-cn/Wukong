@@ -51,6 +51,9 @@ impl WindowsWorker {
 
 #[async_trait]
 impl LabWorker for WindowsWorker {
+    async fn doctor(&self) -> Result<serde_json::Value> {
+        self.registry.doctor(&self.environment_id).await
+    }
     async fn maintenance(
         &self,
     ) -> Result<Box<dyn crate::application::windows_lab::runner::LabMaintenance>> {

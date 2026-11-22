@@ -38,7 +38,10 @@ explain.
   record the call ID and evidence, report to root, and leave the effect
   unresolved for operator `reconcile`.
 - Read-only calls (status, list, evidence reads, doctor) are safe to retry
-  once.
+  once. A second materially identical doctor failure for the same effective
+  environment is not another transient retry: stop unchanged probes until an
+  observed external state change, retain the reported call/evidence IDs, and
+  escalate the blocker.
 
 ## Timeouts have different meanings
 

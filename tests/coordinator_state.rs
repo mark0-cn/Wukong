@@ -827,6 +827,41 @@ fn pause_resume_preserves_an_unfinished_wait() {
 }
 
 #[test]
+fn finalization_notice_wakes_a_parked_root_without_fabricating_completion() {
+    let (_dir, store, c, run) = fixture();
+    let child = c
+        .create_child(&run.root_id, request("finalization wait"))
+        .unwrap()
+        .agent;
+    c.wait(&run.root_id, std::slice::from_ref(&child.id), 60)
+        .unwrap();
+    assert!(c.request_finalization(&run.id, "controller:7", 30).unwrap());
+    assert!(!c.request_finalization(&run.id, "controller:7", 29).unwrap());
+    assert_eq!(c.wake_waiters(&run.id).unwrap(), 1);
+    let root: AgentSnapshot = store.require("agent", &run.root_id).unwrap();
+    assert_eq!(root.status, Status::Queued);
+    assert_eq!(root.wait_for, vec![child.id.clone()]);
+    assert!(root.wait_until.is_some());
+    let child: AgentSnapshot = store.require("agent", &child.id).unwrap();
+    assert!(!child.status.terminal());
+    let inbox = store.inbox(&run.root_id).unwrap();
+    assert_eq!(inbox.len(), 1);
+    let notice: serde_json::Value = serde_json::from_str(&inbox[0].content).unwrap();
+    assert_eq!(notice["type"], "budget_finalization");
+    assert_eq!(notice["remaining_wall_seconds"], 30);
+    assert!(
+        store
+            .events(&run.id, 0, 100)
+            .unwrap()
+            .iter()
+            .filter(|event| event.kind == "run.finalization_requested")
+            .count()
+            == 1
+    );
+    assert!(c.request_finalization(&run.id, "controller:8", 20).unwrap());
+}
+
+#[test]
 fn first_start_and_pause_or_crash_recovery_have_distinct_events() {
     let (_dir, store, c, run) = fixture();
     c.resume(&run.id, None).unwrap();
