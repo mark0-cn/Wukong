@@ -33,12 +33,11 @@ def ensure_uid_entries(start=20000, count=512):
 
 
 def allocate_uid(root):
-    import fcntl
+    from filelock import FileLock
 
     lock = root / "uid-allocator.lock"
-    with lock.open("a+b") as stream:
+    with FileLock(lock, timeout=-1, mode=0o600, preserve_lock_file=True):
         os.chmod(lock, 0o600)
-        fcntl.flock(stream, fcntl.LOCK_EX)
         path = root / "uid-allocator.json"
         value = json.loads(path.read_text())["next"] if path.exists() else 20000
         if value >= 1000000000:

@@ -1,0 +1,3 @@
+# Documentation and release automation only; never part of worker runtime bundles.
+markdown-it-py==4.3.0
+mdurl==0.1.2

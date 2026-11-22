@@ -417,10 +417,15 @@
   width: 100%;
   resize: none;
   padding: 12px 15px 4px;
-  max-height: 180px;
+  max-height: 140px;
+  overflow-y: auto;
   font-size:var(--text-body);
   border-radius: 0px;
   min-height: 52px;
+}
+.composer.composer-expanded textarea {
+  height: 180px !important;
+  max-height: 180px;
 }
 .composer textarea:focus-visible {
   outline:none;

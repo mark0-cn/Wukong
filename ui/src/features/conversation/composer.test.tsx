@@ -33,3 +33,15 @@ it('requires an explicit follow-up for a completed agent', async () => {
   fireEvent.click(screen.getByLabelText('发送消息'));
   await waitFor(() => expect(send).toHaveBeenCalledWith({ text: 'continue investigation', followUp: true }, target));
 });
+
+it('ignores composing Ctrl+Enter and disables input without a recipient', () => {
+  const send = vi.fn().mockResolvedValue(undefined);
+  const draft = { text: 'keep composing', followUp: false };
+  const { rerender } = render(<Composer target={agents[1]} draft={draft} onDraft={vi.fn()} send={send} busy={false} />);
+  const composer = screen.getByLabelText('发送给 Agent 的消息');
+  fireEvent.keyDown(composer, { key: 'Enter', ctrlKey: true, isComposing: true });
+  expect(send).not.toHaveBeenCalled();
+  rerender(<Composer draft={draft} onDraft={vi.fn()} send={send} busy={false} />);
+  expect((composer as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByLabelText('发送消息') as HTMLButtonElement).disabled).toBe(true);
+});
