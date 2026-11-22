@@ -78,7 +78,7 @@ CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的�
 
 - Windows 控制器；其他平台会以明确错误失败关闭。WSL 命令以该发行版的 `root` 用户运行。
 - `[windows_lab.vms.<alias>.offline]`：`wsl_executable` 与 `mkisofs` 为绝对 Windows 路径，`wsl_distribution` 指定一个已注册 WSL 发行版，`guestfish`/`hivexsh` 为该发行版内的绝对 POSIX 路径，`timeout_seconds`（60–1800）限制单条工具命令。发行版必须提供 libguestfs `guestfish`、`hivexsh`、`wslpath`、`sha256sum`、`tee` 与 coreutils，并能通过 `wslpath` 访问 VM 的 VMDK。缺少该配置段会得到可操作的错误；控制器从不假设宿主工具布局。
-- 一台启用了任务计划程序服务、且可读取任务计划程序缓存的常规 Windows 10/11 客体。部署需要在关机磁盘上读写 `C:\Windows\System32\Tasks`、`C:\Windows\System32\config\SOFTWARE` 与 `C:\ProgramData\WukongLab`。它不使用 Windows 服务、客体管理员密码或管理通道。
+- 一台启用了任务计划程序服务、且可读取任务计划程序缓存的常规 Windows 10/11 客体。部署需要在关机磁盘上读写 `C:\Windows\System32\Tasks`、`C:\Windows\System32\config\SOFTWARE` 与 `C:\ProgramData\WukongLab`。适配器只在 NTFS 卷上存在精确的固定 SYSTEM 与 SOFTWARE 配置单元路径时才选择该卷，随后显式挂载对应设备；不依赖 libguestfs 操作系统检测或注册表路径的大小写不敏感发现。它不使用 Windows 服务、客体管理员密码或管理通道。
 - `--template` 模式不需要 Python 解释器或源码检出：Windows 上由控制器内置的 Rust finalizer 用控制器密钥目录密封模板、调用模板载荷内打包的 `ssh-keygen.exe` 生成控制器管理的 SSH 身份并装配介质。`python -m scripts.worker.media finalize` 模块仍可用于脚本工作流；`--media` 部署不使用 finalizer。
 - 控制器 `state_dir`（以及最终介质输出目录）应保持足够短：Windows `MAX_PATH` 同样约束暂存的离线介质，其载荷包含 131 个字符的相对路径。finalize 会在较短的临时工作区暂存，并在配置目录过深时以明确错误指出越界路径；应把该目录移到更短的绝对路径，而不是依赖长路径开关。
 - 已登记且关机的实验 VM，且不存在快照链。只允许存在 `wukong_base_vm`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。不存在快照时，`--replace-baseline` 是明确记录的空操作。首次安装要求启动盘是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；链接盘与外部盘会被拒绝。替换会先恢复固定基线，并有意检查其本地差异盘。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
