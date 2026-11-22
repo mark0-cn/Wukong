@@ -370,4 +370,4 @@ Public narration streams into one stable message per agent generation/model requ
 
 The first controller start is labeled as a new analysis; a later start after a pause or controller recovery is labeled as resumed. These labels follow persisted lifecycle events.
 
-For tool selection, task grants and breaking interface migrations, see [Agent tool interfaces](../reference/agent-tools.md).
+For tool selection and current interfaces, see [Agent tool interfaces](../reference/agent-tools.md).

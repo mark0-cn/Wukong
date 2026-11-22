@@ -9,7 +9,11 @@ explain.
 - A schema/argument rejection before dispatch has no execution effect: fix
   the rejected arguments and try once. Do not apply this rule to worker or
   transport errors, which may arrive after execution started.
-- `environment_doctor` reports actual worker capabilities and paths. A capability
+- `environment_doctor` reports actual worker capabilities and paths. Follow a
+  `windows_lab_recovery` instruction to prepare the mapped disposable VM before
+  declaring it blocked; Root delegates that operation to an analyst rather than
+  invoking Lab tools itself.
+  A capability
   error means the backend is fine but the operation is unsupported: adapt
   (the worker executes ELF only — PE/Mach-O targets are static-only), do not
   retry.
@@ -41,7 +45,7 @@ explain.
   once. A second materially identical doctor failure for the same effective
   environment is not another transient retry: stop unchanged probes until an
   observed external state change, retain the reported call/evidence IDs, and
-  escalate the blocker.
+  follow any Lab recovery path or escalate the blocker.
 
 ## Timeouts have different meanings
 

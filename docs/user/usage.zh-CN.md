@@ -391,4 +391,4 @@ mode 2 不推导 syscall 白名单。环境和映射变化需要重新观察。
 
 控制器首次启动时标记为新分析；暂停后的再次启动或控制器恢复则标记为恢复分析。这些文案依据已持久化的生命周期事件。
 
-工具选择、任务授权和破坏性接口迁移见 [Agent 工具接口](../reference/agent-tools.zh-CN.md)。
+工具选择和当前接口见 [Agent 工具接口](../reference/agent-tools.zh-CN.md)。

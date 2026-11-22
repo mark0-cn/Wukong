@@ -53,7 +53,7 @@ CLI 操作者可提供绝对现存路径或 HTTP(S) URL 以及 SHA-256。限制�
 
 `lab_list` 列出配置别名；`lab_status` 必须提供 `vm`，返回单 VM 状态。子 Agent 只能访问分配给自己的 VM/环境，并使用评估创建时记录的配置。其他 Agent 或代际不能复用租约。
 
-`lab_prepare`、`lab_install`、`lab_restore` 会及时返回 `operation_id`。用 `lab_operation_status` 查询结果和原始证据；准备结果包含不透明的 `lab_ref` 及租约。run/install/restore 只接收绑定当前评估、Agent 代际和 VM 租约的 `lab_ref`，模型无需重建租约字段。这些变更操作需要 `windows_lab` 任务授权。快照裁剪只保留为操作员 CLI 操作。`lab_operation_cancel` 请求中断自己拥有的操作，取消不证明回滚成功。控制器重启后，缺失实时归属的操作会显示为未知，不重放。活动/未知宿主影响会阻止所属 Agent 和评估完成。检查客体后，按需用 `wukong lab reconcile` 调和 VM 意图，再使用现有操作者命令 `wukong reconcile <operation_id> --result-file ... --evidence-id ...` 解决其持久化副作用回执。
+`lab_prepare`、`lab_install`、`lab_restore` 会及时返回 `operation_id`。用 `lab_operation_status` 查询结果和原始证据；准备结果包含不透明的 `lab_ref` 及租约。run/install/restore 只接收绑定当前评估、Agent 代际和 VM 租约的 `lab_ref`，模型无需重建租约字段。这些变更操作对目录允许的子角色默认开启，仍会检查分配的 VM/环境和资源归属。快照裁剪只保留为操作员 CLI 操作。`lab_operation_cancel` 请求中断自己拥有的操作，取消不证明回滚成功。控制器重启后，缺失实时归属的操作会显示为未知，不重放。活动/未知宿主影响会阻止所属 Agent 和评估完成。检查客体后，按需用 `wukong lab reconcile` 调和 VM 意图，再使用现有操作者命令 `wukong reconcile <operation_id> --result-file ... --evidence-id ...` 解决其持久化副作用回执。
 
 `lab_run` 返回普通评估任务账本中的 `run.job_id`。使用 `job_status`、`job_cancel`、`job_artifacts`；常规监督续期相同的评估/控制器租约。完成检查和证据导入遵循现有任务规则。Lab 回执记录准入身份，任务回执承载最终执行证据。后续恢复会先导入已稳定结束的任务观测。
 

@@ -328,10 +328,6 @@ impl LabService {
             agent.environment_id.is_some() && agent.environment_id == config.environment,
             "lab VM is not assigned to this task environment"
         );
-        ensure!(
-            agent.contract.tool_grants.contains(&ToolGrant::WindowsLab),
-            "Windows lab task grant required"
-        );
         Ok(())
     }
     pub(super) fn bind_reference(
@@ -389,7 +385,7 @@ impl LabService {
 mod reference_tests {
     use super::*;
     #[tokio::test]
-    async fn references_are_bound_to_run_agent_generation_and_grant() -> Result<()> {
+    async fn references_are_bound_to_run_agent_generation_and_environment() -> Result<()> {
         let temporary = tempfile::tempdir()?;
         let target = temporary.path().join("target");
         fs::write(&target, b"trusted fixture")?;
@@ -427,19 +423,18 @@ mod reference_tests {
         )?;
         let mut agent: AgentMetadata = store.load(&run.root_id)?;
         agent.environment_id = Some("windows".into());
-        agent.contract.tool_grants = vec![ToolGrant::WindowsLab];
         let tools = ToolService::new(config, store).await?;
         let service = ToolContext::new(&tools, None).lab;
         let reference = service.bind_reference(&agent, "fixture", "lease", 4)?;
         assert_eq!(service.resolve_reference(&agent, &reference)?.generation, 4);
-        for changed in 0..5 {
+        for changed in 0..4 {
             let mut actor = agent.clone();
             match changed {
                 0 => actor.run_id = "foreign-run".into(),
                 1 => actor.id = "foreign-agent".into(),
                 2 => actor.generation += 1,
                 3 => actor.environment_id = Some("other".into()),
-                _ => actor.contract.tool_grants.clear(),
+                _ => unreachable!(),
             }
             assert!(service.resolve_reference(&actor, &reference).is_err());
         }

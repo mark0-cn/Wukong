@@ -9,8 +9,10 @@ this method and outside the current Windows worker contract.
 ## Establish the environment first
 
 Only a registered Windows VM worker executes or debugs PE. Call
-`environment_doctor` before promising runtime work; without that backend stay
-static and say the execution question is unanswered.
+`environment_doctor` before promising runtime work. If it returns
+`windows_lab_recovery`, follow that preparation path instead of declaring the
+VM blocked. Without a usable worker or that recovery path, stay static and say
+the execution question is unanswered.
 
 On a qualified worker the available surface is `binary_inspect`,
 `binary_strings` and the Ghidra tools on the controller, plus `stage_target`,
