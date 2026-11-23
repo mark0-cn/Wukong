@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 from scripts._lib.checksums import sha256
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import DIGEST, VERSION
 from scripts.release.release_metadata import WORKER_MEDIA_PREFIX
@@ -17,7 +18,6 @@ from scripts.release.release_metadata import WORKER_MEDIA_PREFIX
 PUBLIC_KEY = ROOT / "src/interfaces/desktop/update-public.key"
 RELEASES = "https://github.com/mark0-cn/Wukong/releases"
 DATA_SCHEMA = 5
-RUNTIME_PROTOCOL = 3
 PLATFORMS = ("windows-x86_64", "linux-x86_64")
 MAX_ARTIFACT_SIZE = 1024 * 1024 * 1024
 ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")

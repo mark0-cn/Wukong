@@ -29,6 +29,7 @@ use windows_sys::Win32::System::Services::*;
 struct ContextState {
     installation: String,
     configuration: PathBuf,
+    telemetry: crate::telemetry::Telemetry,
 }
 static CONTEXT: OnceLock<ContextState> = OnceLock::new();
 static STATUS: AtomicUsize = AtomicUsize::new(0);
@@ -101,7 +102,11 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut *mut u16) {
     })();
     let _ = report(SERVICE_STOPPED, if result.is_ok() { 0 } else { 1066 });
 }
-pub fn dispatch(installation: &str, configuration: &Path) -> Result<()> {
+pub fn dispatch(
+    installation: &str,
+    configuration: &Path,
+    telemetry: crate::telemetry::Telemetry,
+) -> Result<()> {
     pipe_transport::service_name(installation)?;
     ensure!(
         configuration.is_absolute(),
@@ -111,6 +116,7 @@ pub fn dispatch(installation: &str, configuration: &Path) -> Result<()> {
         .set(ContextState {
             installation: installation.into(),
             configuration: configuration.to_owned(),
+            telemetry,
         })
         .map_err(|_| anyhow::anyhow!("SCM dispatcher already initialized"))?;
     let mut name = security::wide(OsStr::new(&pipe_transport::service_name(installation)?))?;
@@ -259,9 +265,10 @@ async fn serve_client(
     server: NamedPipeServer,
     sid: String,
     worker: Arc<Worker>,
+    telemetry: crate::telemetry::Telemetry,
     _permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<()> {
-    let rpc = crate::rpc::server::Server::new(worker)?;
+    let rpc = crate::rpc::server::Server::with_telemetry(worker, telemetry)?;
     let mut stream = BufReader::new(server);
     loop {
         let Some(frame) = tokio::time::timeout(
@@ -307,7 +314,7 @@ async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Rep
     )?)?;
     ensure!(
         binding
-            == json!({"schema":1,"protocol":3,"installation_id":deployment.installation_id,"package_sha256":manifest.sha256()}),
+            == json!({"schema":1,"protocol":4,"installation_id":deployment.installation_id,"package_sha256":manifest.sha256()}),
         "native worker binding differs from active signed payload"
     );
     let identity =
@@ -379,7 +386,13 @@ async fn run_stages(context: &ContextState, diagnostic: &mut super::startup::Rep
                 let permit=semaphore.clone().acquire_owned().await?;
                 let next=pipe_transport::server(&context.installation,&sid,false)?;
                 let accepted=std::mem::replace(&mut listener,next);
-                tasks.spawn(serve_client(accepted,sid.clone(),worker.clone(),permit));
+                tasks.spawn(serve_client(
+                    accepted,
+                    sid.clone(),
+                    worker.clone(),
+                    context.telemetry.clone(),
+                    permit,
+                ));
             },
             _=tokio::time::sleep(Duration::from_millis(250))=>{
                 resources.poll(worker.lease_expired())?;

@@ -168,7 +168,7 @@ pub fn media() -> MediaFixture {
         source_revision: "a".repeat(40),
         toolchain_lock_sha256: toolchain,
         toolchain_lock_path: "runtime/toolchain.lock.json".into(),
-        runtime_protocol: 3,
+        runtime_protocol: 4,
         minimum_controller_version: CONTROLLER_VERSION.into(),
         entrypoints,
         components,

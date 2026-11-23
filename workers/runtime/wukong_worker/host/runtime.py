@@ -23,11 +23,46 @@ from wukong_worker.resources.operations import OperationLedger
 from wukong_worker.resources.sessions import SessionManager
 from wukong_worker.artifacts.transfers import TransferService
 from wukong_worker.host.identity import WorkerIdentity
+from wukong_worker.telemetry import Telemetry, get_telemetry
+
+
+_OPERATION_SPANS = {
+    **dict.fromkeys(
+        (
+            "job.start",
+            "crash.replay",
+            "poc.verify",
+            "fuzz.start",
+            "angr.solve",
+            "input.minimize",
+            "py.run",
+        ),
+        "job.start",
+    ),
+    **dict.fromkeys(("job.cancel", "fuzz.stop"), "job.cancel"),
+    **dict.fromkeys(("interact.start", "debug.start"), "session.start"),
+    **dict.fromkeys(
+        (
+            "interact.write",
+            "interact.profile",
+            "debug.inspect",
+            "debug.control",
+            "debug.command",
+            "debug.profile",
+            "debug.events",
+            "debug.snapshot",
+        ),
+        "session.operation",
+    ),
+    **dict.fromkeys(("interact.close", "debug.close"), "session.close"),
+    "worker.shutdown": "worker.shutdown",
+}
 
 
 class Runtime:
-    def __init__(self, root: Path, trusted: bool) -> None:
+    def __init__(self, root: Path, trusted: bool, telemetry: Telemetry | None = None) -> None:
         self.root, self.trusted = root.resolve(), trusted
+        self.telemetry = telemetry if telemetry is not None else get_telemetry()
         self.stopping = False
         self._admission = threading.RLock()
         self._active_requests = 0
@@ -58,15 +93,18 @@ class Runtime:
         return doctor(self.root, self.trusted, self.isolated, self.registrations)
 
     def dispatch(self, method: str, params: dict[str, Any]) -> Any:
-        with self._admission:
-            if self.stopping:
-                raise ValueError("worker is shutting down")
-            self._active_requests += 1
-        try:
-            return self._dispatch(method, params)
-        finally:
+        with self.telemetry.span(
+            "worker.dispatch", method=method if method in self.handlers else None
+        ):
             with self._admission:
-                self._active_requests -= 1
+                if self.stopping:
+                    raise ValueError("worker is shutting down")
+                self._active_requests += 1
+            try:
+                return self._dispatch(method, params)
+            finally:
+                with self._admission:
+                    self._active_requests -= 1
 
     def _dispatch(self, method: str, params: dict[str, Any]) -> Any:
         if method not in {"ping", "doctor"} and "_binding" in params:
@@ -77,7 +115,11 @@ class Runtime:
         )
 
     def dispatch_inner(self, method: str, params: dict[str, Any]) -> Any:
-        return self.handlers[method](params)
+        operation = _OPERATION_SPANS.get(method)
+        if operation is None:
+            return self.handlers[method](params)
+        with self.telemetry.span(operation, method=method):
+            return self.handlers[method](params)
 
     def ping(self, params):
         return {

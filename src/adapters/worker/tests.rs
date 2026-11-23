@@ -20,7 +20,7 @@ for line in sys.stdin:
     request = json.loads(line)
     if request["method"] == "ping":
         boot = (root / "boot").read_text()
-        result = {"identity": {"protocol": 3, "installation_id": "fixture",
+        result = {"identity": {"protocol": 4, "installation_id": "fixture",
                                "boot_id": boot, "package_sha256": "a" * 64}}
     elif request["method"] == "doctor":
         result = {"ready": True}

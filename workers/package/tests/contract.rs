@@ -49,7 +49,7 @@ fn fixture() -> Manifest {
         source_revision: "a".repeat(40),
         toolchain_lock_sha256: hex::encode(Sha256::digest(b"fixture")),
         toolchain_lock_path: "toolchain.lock.json".into(),
-        runtime_protocol: 3,
+        runtime_protocol: 4,
         minimum_controller_version: "1.0.0".into(),
         entrypoints: EntryPoints {
             worker: "worker.exe".into(),
@@ -332,7 +332,7 @@ fn controller_sealing_checks_payloads_before_signing_and_never_overwrites() -> a
         fs::write(path, b"fixture")?;
     }
     let expected = Compatibility {
-        runtime_protocol: 3,
+        runtime_protocol: 4,
         controller_version: "1.1.0",
     };
     fs::write(root.join("worker.exe"), b"changed")?;
@@ -402,7 +402,7 @@ fn native_controller_seals_with_persistent_private_keys() -> anyhow::Result<()> 
         &package,
         &public,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: "1.0.0",
         },
     )?;
@@ -421,7 +421,7 @@ fn native_controller_seals_with_persistent_private_keys() -> anyhow::Result<()> 
         &package,
         &public,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: "1.0.0",
         },
     )?;
@@ -476,7 +476,7 @@ fn ed25519_pins_an_independent_key_and_rejects_tampering() -> anyhow::Result<()>
 fn incomplete_payloads_bad_licenses_collisions_and_protocols_fail_closed() -> anyhow::Result<()> {
     let original = fixture();
     original.check_compatibility(&Compatibility {
-        runtime_protocol: 3,
+        runtime_protocol: 4,
         controller_version: "1.1.0",
     })?;
     assert!(
@@ -490,7 +490,7 @@ fn incomplete_payloads_bad_licenses_collisions_and_protocols_fail_closed() -> an
     assert!(
         original
             .check_compatibility(&Compatibility {
-                runtime_protocol: 3,
+                runtime_protocol: 4,
                 controller_version: "0.9.0"
             })
             .is_err()
@@ -645,7 +645,7 @@ fn exact_signed_tree_detects_missing_added_changed_and_linked_content() -> anyho
         root.path(),
         &signer.public_key(),
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: "1.0.0",
         },
     )?;

@@ -251,8 +251,8 @@
           },
           "protocol": {
             "format": "uint32",
-            "maximum": 3,
-            "minimum": 3,
+            "maximum": 4,
+            "minimum": 4,
             "type": "integer"
           }
         },
@@ -357,8 +357,8 @@
       },
       "protocol": {
         "format": "uint32",
-        "maximum": 3,
-        "minimum": 3,
+        "maximum": 4,
+        "minimum": 4,
         "type": "integer"
       }
     },
@@ -1412,8 +1412,8 @@
               },
               "protocol": {
                 "format": "uint32",
-                "maximum": 3,
-                "minimum": 3,
+                "maximum": 4,
+                "minimum": 4,
                 "type": "integer"
               }
             },
@@ -1611,8 +1611,8 @@
           },
           "protocol": {
             "format": "uint32",
-            "maximum": 3,
-            "minimum": 3,
+            "maximum": 4,
+            "minimum": 4,
             "type": "integer"
           }
         },
@@ -2071,8 +2071,8 @@
               },
               "protocol": {
                 "format": "uint32",
-                "maximum": 3,
-                "minimum": 3,
+                "maximum": 4,
+                "minimum": 4,
                 "type": "integer"
               }
             },
@@ -2378,8 +2378,8 @@
               },
               "protocol": {
                 "format": "uint32",
-                "maximum": 3,
-                "minimum": 3,
+                "maximum": 4,
+                "minimum": 4,
                 "type": "integer"
               }
             },
@@ -2546,8 +2546,8 @@
               },
               "protocol": {
                 "format": "uint32",
-                "maximum": 3,
-                "minimum": 3,
+                "maximum": 4,
+                "minimum": 4,
                 "type": "integer"
               }
             },
@@ -2724,8 +2724,8 @@
               },
               "protocol": {
                 "format": "uint32",
-                "maximum": 3,
-                "minimum": 3,
+                "maximum": 4,
+                "minimum": 4,
                 "type": "integer"
               }
             },
@@ -4455,8 +4455,8 @@
               },
               "protocol": {
                 "format": "uint32",
-                "maximum": 3,
-                "minimum": 3,
+                "maximum": 4,
+                "minimum": 4,
                 "type": "integer"
               }
             },
@@ -4484,8 +4484,8 @@
           },
           "protocol": {
             "format": "uint32",
-            "maximum": 3,
-            "minimum": 3,
+            "maximum": 4,
+            "minimum": 4,
             "type": "integer"
           },
           "state_dir": {
@@ -5430,7 +5430,7 @@
       }
     }
   },
-  "protocol": 3,
+  "protocol": 4,
   "session": {
     "$defs": {
       "SessionState": {
@@ -5459,6 +5459,51 @@
       "state"
     ],
     "title": "SessionHandle",
+    "type": "object"
+  },
+  "telemetry_batch": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "logs": {
+        "description": "Base64-encoded OTLP ExportLogsServiceRequest protobuf.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "traces": {
+        "description": "Base64-encoded OTLP ExportTraceServiceRequest protobuf.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "TelemetryBatch",
+    "type": "object"
+  },
+  "trace_context": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "traceparent": {
+        "maxLength": 55,
+        "minLength": 55,
+        "type": "string"
+      },
+      "tracestate": {
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "traceparent"
+    ],
+    "title": "TraceContext",
     "type": "object"
   }
 }

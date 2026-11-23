@@ -109,12 +109,25 @@ struct LeaseKey {
 type LeaseCache =
     Arc<Mutex<BTreeMap<LeaseKey, crate::adapters::worker::protocol::EnvironmentLease>>>;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct EnvironmentRegistry {
     entries: Arc<BTreeMap<String, Entry>>,
     leases: LeaseCache,
     lab_paths: Arc<BTreeMap<String, std::path::PathBuf>>,
     lab_guards: Arc<Mutex<BTreeMap<String, crate::adapters::files::locks::FileLock>>>,
+    telemetry: crate::adapters::telemetry::TelemetryHandle,
+}
+
+impl Default for EnvironmentRegistry {
+    fn default() -> Self {
+        Self {
+            entries: Default::default(),
+            leases: Default::default(),
+            lab_paths: Default::default(),
+            lab_guards: Default::default(),
+            telemetry: crate::adapters::telemetry::TelemetryHandle::disabled(),
+        }
+    }
 }
 
 impl EnvironmentRegistry {
@@ -139,7 +152,16 @@ impl EnvironmentRegistry {
             leases: Default::default(),
             lab_paths: Default::default(),
             lab_guards: Default::default(),
+            telemetry: crate::adapters::telemetry::TelemetryHandle::disabled(),
         })
+    }
+
+    pub fn with_telemetry(
+        mut self,
+        telemetry: crate::adapters::telemetry::TelemetryHandle,
+    ) -> Self {
+        self.telemetry = telemetry;
+        self
     }
 
     pub fn with_lab_guards(mut self, labs: &crate::config::WindowsLabConfig) -> Result<Self> {
@@ -180,7 +202,11 @@ impl EnvironmentRegistry {
         let client = entry
             .client
             .get_or_try_init(|| async {
-                let client = RuntimeClient::connect(entry.config.runtime.clone()).await?;
+                let client = RuntimeClient::connect_with_telemetry(
+                    entry.config.runtime.clone(),
+                    self.telemetry.clone(),
+                )
+                .await?;
                 if let Some(expected) = &entry.config.installation_id {
                     ensure!(
                         &client.identity().installation_id == expected,
@@ -214,7 +240,9 @@ impl EnvironmentRegistry {
             .get_or_try_init(|| async {
                 let mut configuration = entry.config.runtime.clone();
                 configuration.request_timeout_secs = 10;
-                let client = RuntimeClient::connect(configuration).await?;
+                let client =
+                    RuntimeClient::connect_with_telemetry(configuration, self.telemetry.clone())
+                        .await?;
                 ensure!(
                     client.identity() == self.client(id).await?.identity(),
                     "lease channel connected to another worker"

@@ -2,6 +2,7 @@
 
 import argparse
 from scripts._lib.checksums import sha256
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 import json
 from pathlib import Path
 import subprocess
@@ -47,7 +48,7 @@ def generate(directory, validation, content_path):
         notes=update_summary(content),
         minimum_version="0.1.2",
         release_content_sha256=sha256(directory / "release-content.json"),
-        runtime_protocol=3,
+        runtime_protocol=RUNTIME_PROTOCOL,
         data_schema=5,
         image=reference,
         image_size=image["size_bytes"],
@@ -68,7 +69,7 @@ def generate(directory, validation, content_path):
         image=reference,
         image_id=image.get("image_id"),
         image_size_bytes=image["size_bytes"],
-        runtime_protocol=3,
+        runtime_protocol=RUNTIME_PROTOCOL,
         data_schema=5,
     )
     if media is not None:

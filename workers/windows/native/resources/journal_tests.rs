@@ -78,7 +78,7 @@ fn shared_durable_effect_scenarios_preserve_native_ownership_across_reopen() -> 
 fn owner() -> Owner {
     Owner {
         identity: Binding {
-            protocol: 3,
+            protocol: 4,
             installation_id: "a".repeat(32),
             boot_id: format!("windows:{}:40", "b".repeat(32)),
             package_sha256: "c".repeat(64),

@@ -229,7 +229,7 @@ mod tests {
     fn registry_has_unique_methods_and_never_enables_execution_before_qualification() {
         let mut names = std::collections::BTreeSet::new();
         let identity = WorkerIdentity {
-            protocol: 3,
+            protocol: 4,
             installation_id: "a".repeat(32),
             boot_id: "fixture".into(),
             package_sha256: "b".repeat(64),

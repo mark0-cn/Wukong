@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 from scripts._lib.checksums import sha256
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import version
 from scripts.worker.layout import prepare
@@ -199,7 +200,7 @@ def stage(cache, output, native):
         source_revision=native_metadata["source_revision"],
         toolchain_lock_sha256=sha256(output / "toolchain.lock.json"),
         toolchain_lock_path="toolchain.lock.json",
-        runtime_protocol=3,
+        runtime_protocol=RUNTIME_PROTOCOL,
         minimum_controller_version=version(),
         entrypoints=dict(
             worker="runtime/native/wukong-worker.exe",

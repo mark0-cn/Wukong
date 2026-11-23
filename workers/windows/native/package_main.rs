@@ -74,7 +74,7 @@ fn main() -> Result<()> {
                 &manifest,
                 &signer,
                 &Compatibility {
-                    runtime_protocol: 3,
+                    runtime_protocol: 4,
                     controller_version: args[5].to_str().context("invalid controller version")?,
                 },
             )?;
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
                 root_path,
                 &signer.public_key(),
                 &Compatibility {
-                    runtime_protocol: 3,
+                    runtime_protocol: 4,
                     controller_version: args[6].to_str().context("invalid controller version")?,
                 },
             )?;

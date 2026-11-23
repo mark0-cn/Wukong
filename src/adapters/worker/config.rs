@@ -12,6 +12,18 @@ pub enum RuntimeBackend {
     ManagedSsh,
 }
 
+impl RuntimeBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::TrustedLocal => "trusted_local",
+            Self::Docker => "docker",
+            Self::Ssh => "ssh",
+            Self::ManagedSsh => "managed_ssh",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
     #[serde(flatten)]
