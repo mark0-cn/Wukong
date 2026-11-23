@@ -84,6 +84,18 @@ class NativeAcceptanceConditions(unittest.TestCase):
                 )
             )
 
+    def test_worker_job_is_parallel_and_independently_cached(self):
+        workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        windows = re.search(r"  windows:\n(.*?)\n  windows-worker:", workflow, re.S).group(1)
+        worker = re.search(r"  windows-worker:\n(.*?)\n  linux:", workflow, re.S).group(1)
+        self.assertNotIn("Standalone Windows worker bootstrap", windows)
+        self.assertIn("needs: changes", worker)
+        self.assertIn("shared-key: windows-worker-checks-v1", worker)
+        self.assertIn("workers/windows -> target/windows-worker-native", worker)
+        self.assertIn("workers/package -> target/worker-package-checks", worker)
+        summary = re.search(r"  summary:\n(.*?)\n  release-request:", workflow, re.S).group(1)
+        self.assertIn("windows-worker", summary)
+
     def test_report_requires_a_finished_fixture_and_failures_remain_failures(self):
         for outcome in ["success", "failure", "skipped", "cancelled", ""]:
             self.assertEqual(

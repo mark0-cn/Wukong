@@ -71,7 +71,7 @@ Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检�
 
 ## 日常 CI
 
-`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；原生 Cargo 命令使用共享 MSVC 入口，并在恢复的 Rust 缓存之外冷构建 `aws-lc-sys`/`ring`/`libsqlite3-sys` 预检，失败时只保留这三个包的有界 build script 诊断。Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
+`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；选中 Rust 改动时，独立的并行 `windows-worker` job 构建并检查原生 Worker/离线媒体。原生 Cargo 命令使用共享 MSVC 入口，并在恢复的 Rust 缓存之外冷构建 `aws-lc-sys`/`ring`/`libsqlite3-sys` 预检，失败时只保留这三个包的有界 build script 诊断。Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
 
 Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
 

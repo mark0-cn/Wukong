@@ -93,6 +93,7 @@ def checks_passed(needs):
         return False
     selected = dict(
         windows=any(outputs[k] == "true" for k in ("rust", "frontend", "linux")),
+        **{"windows-worker": outputs["rust"] == "true"},
         linux=outputs["linux"] == "true",
         acceptance=any(outputs[k] == "true" for k in ("apt", "uninstall")),
         **{

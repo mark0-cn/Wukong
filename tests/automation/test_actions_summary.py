@@ -116,7 +116,7 @@ class SummaryTests(unittest.TestCase):
             "changes": {
                 "result": "success",
                 "outputs": dict(
-                    rust="false",
+                    rust="true",
                     frontend="true",
                     linux="false",
                     apt="false",
@@ -125,6 +125,10 @@ class SummaryTests(unittest.TestCase):
                 ),
             },
             "windows": {"result": "success", "outputs": {"rust_cache_hit": "true"}},
+            "windows-worker": {
+                "result": "success",
+                "outputs": {"rust_cache_hit": "false"},
+            },
             "linux": {"result": "skipped"},
             **{
                 name: {"result": "skipped"}
@@ -142,12 +146,25 @@ class SummaryTests(unittest.TestCase):
                         "completed_at": "2026-01-01T00:01:05Z",
                     }
                 ],
-            }
+            },
+            {
+                "name": "windows-worker",
+                "steps": [
+                    {
+                        "name": "Standalone Windows worker bootstrap",
+                        "conclusion": "success",
+                        "started_at": "2026-01-01T00:00:00Z",
+                        "completed_at": "2026-01-01T00:08:00Z",
+                    }
+                ],
+            },
         ]
         result = summary.render("ci", needs, self.context, self.directory, jobs=jobs)
         self.assertIn("通过 / Passed", result)
         self.assertIn("Rust cache: 精确命中", result)
+        self.assertIn("Worker Rust cache: 未精确命中", result)
         self.assertIn("Rust tests | success | 1m 5s", result)
+        self.assertIn("Standalone Windows worker bootstrap | success | 8m 0s", result)
         needs["changes"]["outputs"]["linux"] = "true"
         result = summary.render("ci", needs, self.context, self.directory)
         self.assertIn("Incomplete or failed", result)

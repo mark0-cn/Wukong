@@ -166,6 +166,34 @@ jobs:
           python -m scripts.dev.msvc_cargo -- test --locked --all-targets
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
+  windows-worker:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '1'
+      CARGO_PROFILE_TEST_DEBUG: '1'
+    outputs:
+      rust_cache_hit: ${{ steps.rust-cache.outputs.cache-hit }}
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        name: Rust cache
+        id: rust-cache
+        with:
+          shared-key: windows-worker-checks-v1
+          workspaces: |
+            workers/windows -> target/windows-worker-native
+            workers/package -> target/worker-package-checks
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
       - name: Standalone Windows worker bootstrap
         id: worker_native
         if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' }}
@@ -310,7 +338,7 @@ jobs:
 
   summary:
     if: always()
-    needs: [changes, windows, linux, acceptance, windows-client, linux-client, linux-desktop-client]
+    needs: [changes, windows, windows-worker, linux, acceptance, windows-client, linux-client, linux-desktop-client]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

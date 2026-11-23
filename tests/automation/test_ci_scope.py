@@ -52,6 +52,7 @@ class ScopeTests(unittest.TestCase):
                 name: {"result": "success"}
                 for name in (
                     "windows",
+                    "windows-worker",
                     "linux",
                     "windows-client",
                     "linux-client",
@@ -61,6 +62,9 @@ class ScopeTests(unittest.TestCase):
         }
         needs["acceptance"] = {"result": "skipped"}
         self.assertTrue(checks_passed(needs))
+        needs["windows-worker"]["result"] = "failure"
+        self.assertFalse(checks_passed(needs))
+        needs["windows-worker"]["result"] = "success"
         needs["linux-client"]["result"] = "skipped"
         self.assertFalse(checks_passed(needs))
         needs["changes"]["outputs"]["release_clients"] = "false"
@@ -135,6 +139,7 @@ class ScopeTests(unittest.TestCase):
                     name: {"result": "skipped"}
                     for name in (
                         "acceptance",
+                        "windows-worker",
                         "windows-client",
                         "linux-client",
                         "linux-desktop-client",
@@ -205,7 +210,10 @@ class ScopeTests(unittest.TestCase):
                     release_clients="false",
                 ),
             },
-            **{name: {"result": "success"} for name in ("windows", "linux", "acceptance")},
+            **{
+                name: {"result": "success"}
+                for name in ("windows", "windows-worker", "linux", "acceptance")
+            },
             **{
                 name: {"result": "skipped"}
                 for name in ("windows-client", "linux-client", "linux-desktop-client")

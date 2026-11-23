@@ -110,17 +110,17 @@ PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待�
 
 Windows 原生 worker 安装验收需要显式选择：手动运行 Checks 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
 
-原生编译及选中的安装验收使用显式的未取消条件，因此此前无关测试失败不会阻止获取这项独立证据。安装仍要求原生构建和检查步骤通过；取消、原生构建失败或未选择夹具时均不安装。只有夹具实际运行并得到成功或失败结果后才上传报告。此前的失败仍使 Windows 作业及最终 CI 门禁失败；没有步骤使用错误后继续通过设置。参见 GitHub 的[状态检查表达式规则](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
+选中 Rust 改动时，原生 Worker 编译和离线媒体检查在独立的 `windows-worker` job 中与主 Windows job 并行执行。选中的安装验收使用显式的未取消条件，因此此前无关测试失败不会阻止获取这项独立证据。安装仍要求原生构建和检查步骤通过；取消、原生构建失败或未选择夹具时均不安装。只有夹具实际运行并得到成功或失败结果后才上传报告。此前的失败仍使其所属 job 及最终 CI 门禁失败；没有步骤使用错误后继续通过设置。参见 GitHub 的[状态检查表达式规则](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
 
 PR 与 master 使用 `scripts/ci/ci_scope.py` 按完整改动范围选择检查：README、AGENTS、docs Markdown、有效的追加式 `.changes/<slug>.toml` 与翻译核对记录只做轻量检查，整项 Windows/Linux job 均跳过；changes 始终校验文档配对、链接和核对记录。`ui/` 增加 Windows 与 Linux 前端检查；runtime/tests/fixtures/evals 增加 Linux 与 Windows Python 测试。Rust、公共脚本、锁文件、工作流和未知路径执行完整组件检查；运行时 prompts 不属于普通文档。版本 PR、版本递增的 master 提交、手动 Checks 和发布调用执行完整组件及 APT/卸载验收。PR 使用 merge-base 范围，master 使用 push 的 before/after 全范围；重命名包含新旧路径，计算失败阻止 CI。Windows 发布脚本与安装器事务测试仅随 Rust/共享改动运行。
 
-`summary` 是最终门禁：changes 必须成功，Windows、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
+`summary` 是最终门禁：changes 必须成功，Windows、独立 Windows Worker、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
 
 Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
-CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工具链/参数变化仍需重新编译。
+CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。独立 Worker job 使用 `windows-worker-checks-v1`，只覆盖 Windows Worker/package workspace 及其 target 目录，两个 Windows job 不会竞争写入同一缓存。首次或工具链/参数变化仍需重新编译。
 `windows-client-v1` 和 `linux-client-v1` 在 master 版本预构建或显式预热时写入，tag 只恢复。
 这使不同版本 tag 都能读取 master 缓存，避免把大量编译缓存只保存在无法跨 tag 复用的作用域。
-摘要显示精确缓存命中状态及恢复、保存、fmt、Clippy、test 的独立耗时。
+摘要显示两套缓存的精确命中状态及恢复、保存、原生预检、Worker、fmt、Clippy、test 的独立耗时。
 非精确命中可能是回退缓存或无缓存，实际恢复键见 Rust cache 日志。
 Clippy 与测试保持在同一 Windows job 复用编译目录，不为并行而重复下载和编译依赖。
 Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使用有限调试信息，
