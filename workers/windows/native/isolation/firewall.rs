@@ -34,6 +34,19 @@ fn application_path(path: &Path) -> Result<String> {
         .to_owned())
 }
 
+fn remote_addresses(peer: IpAddr) -> String {
+    // Windows Firewall normalizes one IPv4 literal to address/subnet-mask on
+    // readback, even when the rule was created with the bare literal.
+    match peer {
+        IpAddr::V4(address) => format!("{address}/255.255.255.255"),
+        IpAddr::V6(address) => format!("{address}/128"),
+    }
+}
+
+fn remote_matches(actual: String, peer: IpAddr) -> bool {
+    actual == peer.to_string() || actual == remote_addresses(peer)
+}
+
 fn configure(installation: &str, sshd: &Path, port: u16, peer: IpAddr) -> Result<INetFwRule> {
     let name = BSTR::from(crate::rpc::pipe_transport::service_name(installation)?);
     let application = BSTR::from(application_path(sshd)?);
@@ -122,7 +135,6 @@ pub fn replace(
     let previous = application_path(previous_sshd)?;
     let next = application_path(next_sshd)?;
     let port = port.to_string();
-    let peer = peer.to_string();
     // SAFETY: `_com` keeps this thread's apartment initialized. `Item` selects
     // the exact installation-owned rule; every security-relevant binding is
     // checked against the old package before only its application path changes.
@@ -138,7 +150,7 @@ pub fn replace(
             rule.ApplicationName()? == previous
                 && rule.Protocol()? == 6
                 && rule.LocalPorts()? == port
-                && rule.RemoteAddresses()? == peer
+                && remote_matches(rule.RemoteAddresses()?.to_string(), peer)
                 && rule.Direction()? == NET_FW_RULE_DIR_IN
                 && rule.Action()? == NET_FW_ACTION_ALLOW
                 && rule.Profiles()? == NET_FW_PROFILE2_ALL.0
@@ -172,6 +184,10 @@ mod tests {
             assert_eq!(rule.LocalPorts()?.to_string(), "61248");
             assert_eq!(rule.Enabled()?, VARIANT_TRUE);
         }
+        let peer = "192.0.2.7".parse()?;
+        assert!(remote_matches("192.0.2.7".into(), peer));
+        assert!(remote_matches("192.0.2.7/255.255.255.255".into(), peer));
+        assert!(!remote_matches("192.0.2.8/255.255.255.255".into(), peer));
         let mixed = executable
             .parent()
             .context("missing fixture parent")?

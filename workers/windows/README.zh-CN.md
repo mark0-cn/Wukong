@@ -89,7 +89,7 @@ cargo test --locked --manifest-path workers/windows/Cargo.toml --all-targets
 
 任意 Windows 主机都可在不提权的情况下预检最终公开介质：`WukongWorkerSetup.exe verify-enrollment <payload> <enrollment> <controller-public-key-hex> <controller-version>`。安装使用提权的 `WukongWorkerSetup.exe install-reviewed setup.json <controller-key-hex> <sha256-of-enrollment.json>`，且只应在专用可丢弃 VM 上执行。
 
-当 `install-reviewed` 发现有效的现有部署时，只允许通过经过审查的离线 SYSTEM 开机路径升级。签名候选必须具有更高的语义包版本和登记代际，并保持安装、控制器信任方以及 SSH 对端/端口/客户端密钥绑定不变。安装器暂存并校验签名包，然后更新受保护的登记/绑定/部署记录、固定 SSH 中继、现有安装级防火墙规则和现有自有服务。父目录与被替换记录分别按各自显式 ACL 策略校验，绑定文件的较窄策略绝不会复用到代码根目录。它不会接管外部服务/规则，也不会向模型驱动的执行暴露升级 RPC。准入后的变更一旦中断，本次尝试即失败：必须恢复旧 VM 基线，不能在原位置继续部分原生升级。
+当 `install-reviewed` 发现有效的现有部署时，只允许通过经过审查的离线 SYSTEM 开机路径升级。签名候选必须具有更高的语义包版本和登记代际，并保持安装、控制器信任方以及 SSH 对端/端口/客户端密钥绑定不变。安装器暂存并校验签名包，然后更新受保护的登记/绑定/部署记录、固定 SSH 中继、现有安装级防火墙规则和现有自有服务。父目录与被替换记录分别按各自显式 ACL 策略校验，绑定文件的较窄策略绝不会复用到代码根目录。防火墙校验同时接受裸登记地址和 Windows Firewall 返回的等价单主机子网掩码形式，程序、端口、方向、动作、配置文件和启用状态仍逐项精确检查。它不会接管外部服务/规则，也不会向模型驱动的执行暴露升级 RPC。准入后的变更一旦中断，本次尝试即失败：必须恢复旧 VM 基线，不能在原位置继续部分原生升级。
 
 ### 安装回执与重新保存
 
