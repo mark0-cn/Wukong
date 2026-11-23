@@ -267,6 +267,7 @@ async fn repeated_doctor_failures_link_prior_calls_without_hiding_fresh_probes()
     Ok(())
 }
 
+#[cfg(windows)]
 #[tokio::test]
 async fn doctor_failure_exposes_default_windows_lab_recovery() -> Result<()> {
     let temp = tempfile::tempdir()?;
