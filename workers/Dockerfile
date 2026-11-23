@@ -35,7 +35,7 @@ ENV WUKONG_GHIDRA_HEADLESS=/opt/ghidra/support/analyzeHeadless
 
 # Ghidra 11.3+ no longer auto-detects java on PATH; the headless launcher
 # requires JAVA_HOME or it tries an interactive JDK prompt and fails.
-ARG TEMURIN_SHA256=68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb
+ARG TEMURIN_SHA256=760f91b22c3efc9bd1b64ff950598231be82928cc807e30691a0e7a2995a62c0
 RUN --mount=type=bind,source=workers/deps/temurin25.tar.gz,target=/deps/temurin25.tar.gz,ro \
     printf '%s  /deps/temurin25.tar.gz\n' "$TEMURIN_SHA256" | sha256sum --check - \
     && mkdir -p /opt/jdk-25 && tar -xzf /deps/temurin25.tar.gz -C /opt/jdk-25 --strip-components=1
