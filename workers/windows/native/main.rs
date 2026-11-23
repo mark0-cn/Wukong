@@ -103,7 +103,7 @@ fn main() -> Result<()> {
             Path::new(&args[2]),
             &key,
             &Compatibility {
-                runtime_protocol: 3,
+                runtime_protocol: 4,
                 controller_version: controller,
             },
         )?;
@@ -118,10 +118,14 @@ fn main() -> Result<()> {
     }
     #[cfg(windows)]
     if args.len() == 4 && args[1] == "service" {
-        return wukong_windows_worker::host::service::dispatch(
+        let (telemetry, mut telemetry_guard) = wukong_windows_worker::telemetry::Telemetry::new();
+        let result = wukong_windows_worker::host::service::dispatch(
             args[2].to_str().context("invalid installation ID")?,
             Path::new(&args[3]),
+            telemetry,
         );
+        telemetry_guard.shutdown();
+        return result;
     }
     #[cfg(windows)]
     if args.len() == 3 && args[1] == "relay" {
@@ -143,7 +147,7 @@ fn main() -> Result<()> {
         Path::new(&args[2]),
         &key,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: controller,
         },
     )?;

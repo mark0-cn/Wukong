@@ -120,7 +120,8 @@ class ExecutionBoundaries(unittest.TestCase):
                 "platform",
                 "resources",
             },
-            "rpc": {"artifacts", "core", "platform"},
+            "rpc": {"artifacts", "core", "platform", "telemetry"},
+            "telemetry": set(),
         }
 
         root = ROOT / "workers/runtime/wukong_worker"

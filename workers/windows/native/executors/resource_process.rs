@@ -401,7 +401,7 @@ mod tests {
             resource_id: "a".repeat(32),
             owner: Owner {
                 identity: wukong_worker_protocol::WorkerIdentity {
-                    protocol: 3,
+                    protocol: 4,
                     installation_id: "b".repeat(32),
                     boot_id: format!("windows:{}:1", "c".repeat(32)),
                     package_sha256: "d".repeat(64),

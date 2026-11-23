@@ -50,14 +50,26 @@ pub struct RuntimeClient {
     config: RuntimeConfig,
     identity: protocol::WorkerIdentity,
     lease: Option<protocol::EnvironmentLease>,
+    telemetry: crate::adapters::telemetry::TelemetryHandle,
 }
 
 impl RuntimeClient {
     pub async fn connect(config: RuntimeConfig) -> Result<Self> {
+        Self::connect_with_telemetry(
+            config,
+            crate::adapters::telemetry::TelemetryHandle::disabled(),
+        )
+        .await
+    }
+
+    pub async fn connect_with_telemetry(
+        config: RuntimeConfig,
+        telemetry: crate::adapters::telemetry::TelemetryHandle,
+    ) -> Result<Self> {
         if let TransportConfig::TrustedLocal(local) = &config.transport {
             crate::adapters::files::owned::create_owned_directory(&local.state_dir)?;
         }
-        let session = Session::connect(&config)
+        let session = Session::connect(&config, telemetry.clone())
             .await
             .context("start runtime bridge transport")?;
         let identity = session.identity.clone();
@@ -67,6 +79,7 @@ impl RuntimeClient {
             config,
             identity,
             lease: None,
+            telemetry,
         })
     }
 
@@ -92,6 +105,41 @@ impl RuntimeClient {
     /// failed request itself is never re-sent, so a timed-out side effect
     /// still follows the durable reconcile path instead of being replayed.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        use tracing::Instrument as _;
+        let started = std::time::Instant::now();
+        let span = tracing::info_span!(
+            "wukong.worker.rpc",
+            rpc.method = method,
+            worker.transport = self.config.backend().as_str(),
+            outcome = tracing::field::Empty,
+        );
+        let mut retries = 0u64;
+        let result = self
+            .call_inner(method, params, &mut retries)
+            .instrument(span.clone())
+            .await;
+        let outcome = if result.is_ok() { "ok" } else { "error" };
+        span.record("outcome", outcome);
+        tracing::info!(
+            target: "wukong_telemetry",
+            event = "worker_rpc_finished",
+            rpc.method = method,
+            worker.transport = self.config.backend().as_str(),
+            outcome,
+            retries,
+            duration_seconds = started.elapsed().as_secs_f64(),
+        );
+        self.telemetry.metrics().worker_rpc(
+            method,
+            self.config.backend().as_str(),
+            outcome,
+            retries,
+            started.elapsed().as_secs_f64(),
+        );
+        result
+    }
+
+    async fn call_inner(&self, method: &str, params: Value, retries: &mut u64) -> Result<Value> {
         let starts_resource = wukong_worker_protocol::Method::parse(method)?.resources()
             == wukong_worker_protocol::ResourceDemand::Execution;
         let deadline =
@@ -123,6 +171,7 @@ impl RuntimeClient {
             }
             // Only a worker's explicit pre-effect rejection may be retried.
             // Transport failures and uncertain outcomes retain normal recovery.
+            *retries = retries.saturating_add(1);
             tokio::time::sleep_until(
                 deadline.min(tokio::time::Instant::now() + Duration::from_millis(250)),
             )
@@ -142,7 +191,7 @@ impl RuntimeClient {
         }
         let mut session = self.session.lock().await;
         if session.poisoned {
-            *session = Session::connect(&self.config)
+            *session = Session::connect(&self.config, self.telemetry.clone())
                 .await
                 .context("runtime transport lost and reconnect failed")?;
         }
@@ -194,10 +243,14 @@ impl RuntimeClient {
 
 impl Session {
     /// Each fresh channel handshakes before any business request can be sent.
-    async fn connect(config: &RuntimeConfig) -> Result<Self> {
+    async fn connect(
+        config: &RuntimeConfig,
+        telemetry: crate::adapters::telemetry::TelemetryHandle,
+    ) -> Result<Self> {
         let mut channel = StdioChannel::spawn(
             launch::command(&config.transport)?,
             config.request_timeout_secs,
+            telemetry,
         )?;
         let reply = match request(&channel, "ping", json!({})).await {
             Ok(reply) => reply,

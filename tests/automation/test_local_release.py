@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts._lib.versioning import ROOT, version
 from scripts.release import local_release
 
@@ -206,7 +207,7 @@ class DescriptorTests(unittest.TestCase):
         payload = {
             "schema": 1,
             "version": version(),
-            "runtime_protocol": 3,
+            "runtime_protocol": RUNTIME_PROTOCOL,
             "data_schema": 5,
             "image": "wukong:local",
             "image_size": 1024,

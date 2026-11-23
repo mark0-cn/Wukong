@@ -165,7 +165,7 @@ mod tests {
             &source,
             &signer.public_key(),
             &Compatibility {
-                runtime_protocol: 3,
+                runtime_protocol: 4,
                 controller_version: "1.0.0",
             },
         )?;
@@ -199,7 +199,7 @@ mod tests {
             &source,
             &signer.public_key(),
             &Compatibility {
-                runtime_protocol: 3,
+                runtime_protocol: 4,
                 controller_version: "1.0.0",
             },
         )?;

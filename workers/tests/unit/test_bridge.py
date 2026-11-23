@@ -374,7 +374,7 @@ class RuntimeTests(unittest.TestCase):
             )
         )
         self.assertEqual(result["result"]["stdout"].strip(), "")
-        self.assertEqual(self.client.call("doctor")["protocol"], 3)
+        self.assertEqual(self.client.call("doctor")["protocol"], 4)
 
     def test_job_environment_carries_state_and_job_dirs(self):
         result = self.client.finish(

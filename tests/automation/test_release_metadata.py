@@ -8,6 +8,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from scripts._lib.checksums import sha256
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts.release import release_metadata
 from scripts.worker.media import ARCHIVE_ROOT
 
@@ -24,7 +25,7 @@ class ReleaseMetadataTests(unittest.TestCase):
             image="example/wukong@sha256:" + "b" * 64,
             image_id="sha256:" + "c" * 64,
             image_size_bytes=12345,
-            runtime_protocol=3,
+            runtime_protocol=RUNTIME_PROTOCOL,
             data_schema=5,
         )
 

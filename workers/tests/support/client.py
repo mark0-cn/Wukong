@@ -29,8 +29,9 @@ class Client:
         self.counter = 0
         self.closed = False
         self.exchange = None
+        self.last_telemetry = None
 
-    def call(self, method, *, rpc_timeout=None, **params):
+    def call(self, method, *, rpc_timeout=None, traceparent=None, **params):
         if self.closed:
             raise AssertionError("test relay is closed; reconnect explicitly")
         self.counter += 1
@@ -39,12 +40,15 @@ class Client:
 
         def exchange():
             try:
-                self.process.stdin.write(
-                    json.dumps(
-                        {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
-                    )
-                    + "\n"
-                )
+                envelope = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": method,
+                    "params": params,
+                }
+                if traceparent is not None:
+                    envelope["_wukong_telemetry"] = {"traceparent": traceparent}
+                self.process.stdin.write(json.dumps(envelope) + "\n")
                 self.process.stdin.flush()
                 raw = self.process.stdout.readline()
                 if not raw:
@@ -81,6 +85,7 @@ class Client:
                 f"test RPC {method} expected reply {request_id}, got {reply.get('id')}"
             )
         assert "error" not in reply, reply
+        self.last_telemetry = reply.get("_wukong_telemetry")
         return reply["result"]
 
     def put(self, path, data, executable=False):
