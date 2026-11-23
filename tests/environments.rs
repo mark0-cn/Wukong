@@ -106,6 +106,10 @@ async fn registration_is_lazy_and_missing_workers_do_not_block_other_environment
     assert!(registry.client("absent").await.is_err());
     let client = registry.client("available").await?;
     assert_eq!(client.doctor().await?["os"], Platform::current().as_str());
+    drop(client);
+    let refreshed = registry.refresh("available").await?;
+    assert_eq!(refreshed["observation"]["os"], Platform::current().as_str());
+    let client = registry.client("available").await?;
     client.call("worker.shutdown", json!({})).await?;
     registry.close().await;
     Ok(())

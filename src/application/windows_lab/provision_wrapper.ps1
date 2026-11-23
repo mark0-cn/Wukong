@@ -85,6 +85,12 @@ $plan = $null
 try {
     $plan = Get-Content -LiteralPath $planPath -Raw -ErrorAction Stop | ConvertFrom-Json
     $receipt.provision_id = [string]$plan.provision_id
+    # Offline lifecycle writes require a cold, fully closed NTFS volume after
+    # every later boot. Fast Startup/hibernation would make guestfish read-only.
+    & powercfg.exe /hibernate off | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw ('failed to disable guest hibernation and Fast Startup: exit code ' + $LASTEXITCODE)
+    }
     if ($existingReceipt) {
         $receipt.already_installed = $true
     } else {

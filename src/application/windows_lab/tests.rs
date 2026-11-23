@@ -106,6 +106,11 @@ impl VmHost for FakeHost {
         self.state.lock().unwrap().running = false;
         Ok(())
     }
+    async fn stop_clean(&self) -> Result<()> {
+        self.state.lock().unwrap().calls.push("stop_clean".into());
+        self.state.lock().unwrap().running = false;
+        Ok(())
+    }
     async fn delete_snapshot(&self, name: &str) -> Result<()> {
         self.state
             .lock()

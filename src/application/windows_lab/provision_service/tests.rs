@@ -206,6 +206,15 @@ impl VmHost for FakeHost {
         Ok(())
     }
 
+    async fn stop_clean(&self) -> Result<()> {
+        self.record("host:stop_clean");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("stop_clean".into());
+        state.running = false;
+        state.boot_started = false;
+        Ok(())
+    }
+
     async fn delete_snapshot(&self, name: &str) -> Result<()> {
         self.record(format!("host:delete {name}"));
         let mut state = self.state.lock().unwrap();
@@ -2079,8 +2088,8 @@ async fn prepare_upgrades_publishes_reboots_and_converges_on_the_new_base() {
         "both the old and published bases are restored before use: {calls:?}"
     );
     assert!(
-        calls.contains(&"stop".into()),
-        "upgrade reboot starts from a stopped guest"
+        calls.contains(&"stop_clean".into()),
+        "offline upgrade writes require a clean guest shutdown"
     );
 }
 

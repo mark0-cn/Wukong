@@ -245,7 +245,7 @@ impl WindowsLab {
             self.step(self.host.start()).await.map_err(step_error)?;
         }
         let observation = self
-            .worker_readiness(plan.timeout)
+            .worker_upgrade_readiness(plan.timeout)
             .await
             .context("upgraded worker did not become ready before base replacement")?;
         let identity = observation

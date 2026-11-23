@@ -247,6 +247,9 @@ mod tests {
         async fn stop(&self) -> Result<()> {
             Ok(())
         }
+        async fn stop_clean(&self) -> Result<()> {
+            Ok(())
+        }
         async fn delete_snapshot(&self, _: &str) -> Result<()> {
             Ok(())
         }

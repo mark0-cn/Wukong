@@ -243,7 +243,14 @@ mod platform {
     fn guestfish_session_script(root: &str, writable: bool, script: &str) -> Result<String> {
         ensure!(valid_guestfish_device(root), "invalid Windows root device");
         let mount = if writable { "mount" } else { "mount-ro" };
-        Ok(format!("run\n{mount} {root} /\n{script}"))
+        let mut session = format!("run\n{mount} {root} /\n{script}");
+        if writable {
+            // `sync` flushes data but does not clear NTFS-3G's in-use state.
+            // Unmount after the final checksum so a later snapshot/revert does
+            // not inherit a volume that can only be mounted read-only.
+            session.push_str("umount /\n");
+        }
+        Ok(session)
     }
 
     /// guestfish ends a scripted session at EOF and has no `close` command
@@ -1363,6 +1370,7 @@ mod platform {
             "mount-ro",
             "run",
             "sync",
+            "umount",
             "upload",
         ];
 
@@ -1406,7 +1414,7 @@ mod platform {
                 "run\nmount-ro /dev/sda3 /\nis-file /Windows/System32/config/SOFTWARE\n"
             );
             let write = guestfish_session_script("/dev/sda3", true, "sync\n").unwrap();
-            assert_eq!(write, "run\nmount /dev/sda3 /\nsync\n");
+            assert_eq!(write, "run\nmount /dev/sda3 /\nsync\numount /\n");
             assert!(guestfish_session_script("/dev/sda3 /", false, "sync\n").is_err());
         }
 
