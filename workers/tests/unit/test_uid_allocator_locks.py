@@ -3,6 +3,7 @@
 import json
 import multiprocessing
 from pathlib import Path
+import queue
 import sys
 import tempfile
 import time
@@ -12,46 +13,67 @@ from unittest import mock
 import wukong_worker.platform.isolation as isolation
 
 
-def _allocate(root, results):
-    try:
-        results.put(isolation.allocate_uid(root))
-    except BaseException as error:  # Transport child failures to the test process.
-        results.put((type(error).__name__, str(error)))
+def _allocate(root, results, entered=None, release=None):
+    def pause_registration():
+        entered.set()
+        if not release.wait(10):
+            raise AssertionError("test did not release registration")
+
+    registration = (
+        mock.patch.object(isolation, "ensure_uid_entries", return_value=None)
+        if entered is None
+        else mock.patch.object(isolation, "ensure_uid_entries", side_effect=pause_registration)
+    )
+    with registration, mock.patch("pwd.getpwuid", return_value=object()):
+        try:
+            results.put(isolation.allocate_uid(root))
+        except BaseException as error:  # Transport child failures to the test process.
+            results.put((type(error).__name__, str(error)))
 
 
 class UidAllocatorLockTests(unittest.TestCase):
     def setUp(self):
         if sys.platform != "linux":
-            self.skipTest("Linux UID, flock and fork semantics")
+            self.skipTest("Linux UID and flock semantics across spawned processes")
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.lock = self.root / "uid-allocator.lock"
         self.state = self.root / "uid-allocator.json"
 
-    def _registration(self, **kwargs):
-        registration = mock.patch.object(isolation, "ensure_uid_entries", **kwargs)
-        registration.start()
-        self.addCleanup(registration.stop)
-        passwd = mock.patch("pwd.getpwuid", return_value=object())
-        passwd.start()
-        self.addCleanup(passwd.stop)
-        return registration
+    @staticmethod
+    def _queued(results):
+        pending = []
+        while True:
+            try:
+                pending.append(results.get_nowait())
+            except queue.Empty:
+                return pending
+
+    @staticmethod
+    def _stop(process):
+        if process.is_alive():
+            process.terminate()
+        process.join(5)
+
+    def _start(self, process):
+        process.start()
+        self.addCleanup(self._stop, process)
 
     def _join(self, processes, results):
         for process in processes:
             process.join(10)
-            self.assertFalse(process.is_alive(), "allocator remained blocked")
+            if process.is_alive():
+                self.fail(self._queued(results))
             self.assertEqual(process.exitcode, 0)
         return [results.get(timeout=1) for _ in processes]
 
     def test_multiprocess_allocations_are_unique_and_never_lose_updates(self):
-        self._registration(return_value=None)
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         results = context.Queue()
         processes = [context.Process(target=_allocate, args=(self.root, results)) for _ in range(6)]
         for process in processes:
-            process.start()
+            self._start(process)
         allocated = self._join(processes, results)
         self.assertTrue(all(isinstance(value, int) for value in allocated), allocated)
         self.assertEqual(sorted(allocated), list(range(20000, 20006)))
@@ -61,24 +83,19 @@ class UidAllocatorLockTests(unittest.TestCase):
         self.assertFalse(self.state.with_suffix(".tmp").exists())
 
     def test_registration_remains_inside_the_blocking_critical_section(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         entered = context.Event()
         release = context.Event()
         results = context.Queue()
 
-        def pause_registration():
-            entered.set()
-            if not release.wait(10):
-                raise AssertionError("test did not release registration")
-
-        self._registration(side_effect=pause_registration)
-        first = context.Process(target=_allocate, args=(self.root, results))
-        second = context.Process(target=_allocate, args=(self.root, results))
-        first.start()
-        self.assertTrue(entered.wait(5))
+        first = context.Process(target=_allocate, args=(self.root, results, entered, release))
+        second = context.Process(target=_allocate, args=(self.root, results, entered, release))
+        self._start(first)
+        if not entered.wait(5):
+            self.fail(self._queued(results))
         self.assertEqual(json.loads(self.state.read_text()), {"next": 20001})
         lock_inode = self.lock.stat().st_ino
-        second.start()
+        self._start(second)
         time.sleep(0.2)
         blocked = second.is_alive()
         release.set()

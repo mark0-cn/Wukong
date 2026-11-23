@@ -4,6 +4,7 @@ import hashlib
 import json
 import multiprocessing
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
@@ -14,18 +15,30 @@ from unittest import mock
 import wukong_worker.execution.launch as launch
 
 
-def _call_patched_runtime(base, spec, results):
-    try:
-        target = launch.patched_runtime(base, spec)
-        results.put(("ok", str(target), hashlib.sha256(target.read_bytes()).hexdigest()))
-    except BaseException as error:  # Transport child failures to the test process.
-        results.put(("error", type(error).__name__, str(error)))
+def _call_patched_runtime(base, spec, parent, results, calls, entered, release):
+    def patchelf(command, **_kwargs):
+        with calls.get_lock():
+            calls.value += 1
+        entered.set()
+        if not release.wait(10):
+            raise AssertionError("test did not release the critical section")
+        return subprocess.CompletedProcess(command, 0)
+
+    with (
+        mock.patch.object(launch, "PUBLIC_LAUNCH_CACHE", parent),
+        mock.patch.object(launch.subprocess, "run", side_effect=patchelf),
+    ):
+        try:
+            target = launch.patched_runtime(base, spec)
+            results.put(("ok", str(target), hashlib.sha256(target.read_bytes()).hexdigest()))
+        except BaseException as error:  # Transport child failures to the test process.
+            results.put(("error", type(error).__name__, str(error)))
 
 
 class PatchedRuntimeLockTests(unittest.TestCase):
     def setUp(self):
         if sys.platform != "linux":
-            self.skipTest("Linux flock semantics and fork contention")
+            self.skipTest("Linux flock semantics across spawned processes")
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.addCleanup(self._make_tree_writable)
@@ -61,37 +74,48 @@ class PatchedRuntimeLockTests(unittest.TestCase):
             path.chmod(0o755 if path.is_dir() else 0o644)
         self.root.chmod(0o755)
 
+    @staticmethod
+    def _queued(results):
+        pending = []
+        while True:
+            try:
+                pending.append(results.get_nowait())
+            except queue.Empty:
+                return pending
+
+    @staticmethod
+    def _stop(process):
+        if process.is_alive():
+            process.terminate()
+        process.join(5)
+
+    def _start(self, process):
+        process.start()
+        self.addCleanup(self._stop, process)
+
     def _join(self, processes, results):
         for process in processes:
             process.join(10)
-            self.assertFalse(process.is_alive(), "child remained blocked")
+            if process.is_alive():
+                self.fail(self._queued(results))
             self.assertEqual(process.exitcode, 0)
         return [results.get(timeout=1) for _ in processes]
 
     def test_first_use_is_serialized_and_published_once(self):
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         calls = context.Value("i", 0)
         entered = context.Event()
         release = context.Event()
         results = context.Queue()
 
-        def patchelf(command, **_kwargs):
-            with calls.get_lock():
-                calls.value += 1
-            entered.set()
-            if not release.wait(10):
-                raise AssertionError("test did not release the critical section")
-            return subprocess.CompletedProcess(command, 0)
-
-        patchelf_patch = mock.patch.object(launch.subprocess, "run", side_effect=patchelf)
-        patchelf_patch.start()
-        self.addCleanup(patchelf_patch.stop)
-        first = context.Process(target=_call_patched_runtime, args=(self.base, self.spec, results))
-        second = context.Process(target=_call_patched_runtime, args=(self.base, self.spec, results))
-        first.start()
-        self.assertTrue(entered.wait(5))
+        arguments = (self.base, self.spec, self.parent, results, calls, entered, release)
+        first = context.Process(target=_call_patched_runtime, args=arguments)
+        second = context.Process(target=_call_patched_runtime, args=arguments)
+        self._start(first)
+        if not entered.wait(5):
+            self.fail(self._queued(results))
         lock_inode = self.lock.stat().st_ino
-        second.start()
+        self._start(second)
         time.sleep(0.2)
         observed = (second.is_alive(), calls.value, self.destination.exists())
         release.set()
