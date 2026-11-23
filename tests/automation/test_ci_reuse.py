@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from scripts.ci import ci_reuse
+from scripts.ci import ci_reuse, ci_scope
 from scripts.ci.ci_scope import checks_passed
 
 REPOSITORY = "owner/repo"
@@ -232,6 +232,62 @@ class ReuseTests(unittest.TestCase):
         actual = needs(reuse="false")
         actual["linux"]["result"] = "skipped"
         self.assertFalse(checks_passed(actual))
+
+    def test_scope_main_emits_verified_reuse_and_honors_force_full(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            event = root / "event.json"
+            event.write_text(
+                json.dumps(
+                    {
+                        "pull_request": {
+                            "number": 61,
+                            "base": {"sha": OLD_MERGE},
+                            "head": {"sha": HEAD, "ref": "topic"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = root / "output.txt"
+            environ = {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_EVENT_PATH": str(event),
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_REPOSITORY": REPOSITORY,
+                "GITHUB_RUN_ID": "999",
+                "GITHUB_REF": "refs/pull/61/merge",
+                "BUILD_RELEASE_CLIENTS": "false",
+                "WINDOWS_WORKER_ACCEPTANCE": "false",
+                "FORCE_FULL_CI": "false",
+            }
+            reuse = {
+                "reuse": True,
+                "reuse_source_run": "101",
+                "reuse_reason": "identical tested merge tree",
+            }
+            with (
+                patch.dict(ci_scope.os.environ, environ, clear=True),
+                patch("scripts.ci.ci_scope.changed_paths", return_value=["src/main.rs"]),
+                patch("scripts.ci.ci_reuse.discover", return_value=reuse) as discover,
+                patch(
+                    "scripts.ci.ci_scope.subprocess.check_output",
+                    side_effect=[CURRENT_MERGE + "\n", CURRENT_TREE + "\n"],
+                ),
+            ):
+                ci_scope.main()
+            self.assertIn("reuse=true\n", output.read_text(encoding="utf-8"))
+            self.assertEqual(discover.call_args.kwargs["current_tree"], CURRENT_TREE)
+            environ["FORCE_FULL_CI"] = "true"
+            output.write_text("", encoding="utf-8")
+            with (
+                patch.dict(ci_scope.os.environ, environ, clear=True),
+                patch("scripts.ci.ci_scope.changed_paths", return_value=["src/main.rs"]),
+                patch("scripts.ci.ci_reuse.discover") as discover,
+            ):
+                ci_scope.main()
+            discover.assert_not_called()
+            self.assertIn("reuse=false\n", output.read_text(encoding="utf-8"))
 
     def test_workflow_reuse_is_gated_and_attestation_is_optional(self):
         workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
