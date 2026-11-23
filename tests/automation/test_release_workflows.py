@@ -33,6 +33,24 @@ class PublishGateTests(unittest.TestCase):
             ),
         )
 
+    def test_tag_publication_requires_release_app_and_reviewed_environment(self):
+        workflow = Path(".github/workflows/release.yml").read_text()
+        metadata = re.search(r"  metadata:\n(.*?)\n  checks-fallback:", workflow, re.S).group(1)
+        self.assertIn("EXPECTED_ACTOR: ${{ vars.RELEASE_APP_SLUG }}", metadata)
+        self.assertIn('"$GITHUB_ACTOR" != "${EXPECTED_ACTOR}[bot]"', metadata)
+        publish = re.search(r"  publish:\n(.*?)\n  summary:", workflow, re.S).group(1)
+        self.assertIn("environment: release-publication", publish)
+        recovery = workflow[workflow.index("  recovery-publish:") :]
+        self.assertIn("environment: release-publication", recovery)
+
+    def test_image_waits_for_successful_checks(self):
+        workflow = Path(".github/workflows/release.yml").read_text()
+        block = re.search(r"  image:\n(.*?)\n  acceptance:", workflow, re.S).group(1)
+        self.assertIn("needs: [metadata, checks]", block)
+        self.assertIn("needs.metadata.result == 'success'", block)
+        self.assertIn("needs.checks.result == 'success'", block)
+        self.assertIn("always()", block)
+
     def test_tag_publishes_after_reuse_skips(self):
         self.assertTrue(self.allowed())
 

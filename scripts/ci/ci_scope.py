@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tomllib
-from scripts.release.note_entries import FRAGMENT
+from scripts.ci import ci_reuse
 
 
 APT_PATHS = (
@@ -61,19 +61,11 @@ def select_scope(paths, event_name, head_branch="", force_full=False):
     for path in paths:
         # Required commit-policy checks validate these data-only release notes.
         # Keep unknown files under .changes conservative, just like other paths.
-        if FRAGMENT.fullmatch(path):
-            continue
-        if path in (
-            "README.md",
-            "README.en.md",
-            "README.zh-CN.md",
-            "AGENTS.md",
-            "AGENTS.zh-CN.md",
-            "docs/translations.json",
-        ) or (path.startswith("docs/") and path.endswith(".md")):
+        if ci_reuse.lightweight_path(path):
             continue
         if path.startswith("ui/"):
             result["frontend"] = True
+            result["linux"] = True
         elif path.startswith(("workers/runtime/", "workers/tests/", "fixtures/", "evals/")):
             result["linux"] = True
         else:
@@ -90,17 +82,17 @@ def checks_passed(needs):
         outputs.get(name) not in ("true", "false") for name in (*SCOPE_FLAGS, "release_clients")
     ):
         return False
-    selected = dict(
-        windows=any(outputs[k] == "true" for k in ("rust", "frontend", "linux")),
-        linux=outputs["linux"] == "true",
-        acceptance=any(outputs[k] == "true" for k in ("apt", "uninstall")),
-        **{
-            name: outputs["release_clients"] == "true"
-            for name in ("windows-client", "linux-client", "linux-desktop-client")
-        },
-    )
+    reuse = outputs.get("reuse")
+    if reuse not in ("true", "false"):
+        return False
+    if reuse == "true" and (
+        not outputs.get("reuse_source_run", "").isdigit() or not outputs.get("reuse_reason")
+    ):
+        return False
+    selected = ci_reuse.selected_jobs(outputs)
     return all(
-        needs.get(name, {}).get("result") == ("success" if enabled else "skipped")
+        needs.get(name, {}).get("result")
+        == ("skipped" if reuse == "true" else "success" if enabled else "skipped")
         for name, enabled in selected.items()
     )
 
@@ -151,13 +143,43 @@ def main():
         previous,
         current,
     )
-    scope = select_scope(
-        paths,
-        event_name,
-        head_branch,
-        force_full=clients or os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true",
+    force_full = (
+        clients
+        or os.environ.get("WINDOWS_WORKER_ACCEPTANCE") == "true"
+        or os.environ.get("FORCE_FULL_CI") == "true"
     )
+    scope = select_scope(paths, event_name, head_branch, force_full=force_full)
     scope["release_clients"] = clients
+    scope.update(
+        reuse=False, reuse_source_run="", reuse_reason="Full checks without historical reuse"
+    )
+    if (
+        event_name == "pull_request"
+        and not force_full
+        and not head_branch.startswith("codex/release-")
+    ):
+        current_scope = {name: str(scope[name]).lower() for name in ci_reuse.SCOPE_KEYS}
+        try:
+            current_merge = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+            current_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], text=True
+            ).strip()
+            scope.update(
+                ci_reuse.discover(
+                    repository=os.environ["GITHUB_REPOSITORY"],
+                    pr_number=int(pr["number"]),
+                    head_branch=head_branch,
+                    current_run=os.environ["GITHUB_RUN_ID"],
+                    current_merge=current_merge,
+                    current_tree=current_tree,
+                    current_scope=current_scope,
+                )
+            )
+        except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+            scope["reuse_reason"] = "Reuse discovery unavailable; running selected checks"
+            print(
+                f"::warning::Historical CI reuse unavailable ({type(error).__name__}); running selected checks"
+            )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
         for key, value in scope.items():
             stream.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")

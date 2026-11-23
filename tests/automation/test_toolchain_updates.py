@@ -76,6 +76,30 @@ class ToolchainTests(unittest.TestCase):
         self.assertIn("c" * 40, row["candidate"]["url"])
         self.assertEqual(row["candidate"]["sha256"], hashlib.sha256(content).hexdigest())
 
+    def test_temurin_accepts_four_part_patch_release(self):
+        tag = "jdk-25.0.5.1+2"
+        asset = "OpenJDK25U-jdk_x64_linux_hotspot_25.0.5.1_2.tar.gz"
+        release = {
+            "tag_name": tag,
+            "assets": [
+                {
+                    "name": asset,
+                    "digest": "sha256:" + "b" * 64,
+                    "browser_download_url": f"https://github.com/adoptium/temurin25-binaries/releases/download/{tag}/{asset}",
+                }
+            ],
+        }
+        current = {
+            "version": "25.0.5+8",
+            "sha256": "a" * 64,
+            "file": "temurin25.tar.gz",
+            "url": "old",
+        }
+        row = updates.inspect("temurin", current, lambda path: release)
+        self.assertEqual(row["status"], "update_available")
+        self.assertEqual(row["latest"], "25.0.5.1+2")
+        self.assertEqual(row["candidate"]["version"], "25.0.5.1+2")
+
     def test_one_network_failure_does_not_erase_other_findings(self):
         manifest = {
             "schema_version": 1,

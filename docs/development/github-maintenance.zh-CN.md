@@ -41,7 +41,7 @@ GitHub 自动合并会等待合入条件满足；排队并不等于完成。如�
 | Internal / Client | `build-client.yml` | 仅供调用的客户端构建 |
 | Internal / Installer | `build-installer.yml` | 仅供调用的安装器打包/验收 |
 
-Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变量与 `DOCKERHUB_TOKEN`，只推送独立的 `wukong-workbench` 仓库，绝不推送正式 `wukong` 镜像或其 `latest` 标签。它不要求操作者白名单、environment 审核人或管理员权限：维护者传入客户端版本（必须等于检出的 `Cargo.toml` 版本）和可选 ref 即可运行，运行摘要记录操作者、源码提交、digest 和大小。唯一的手动 Docker Hub 配置是一次性创建 `wukong-workbench` 仓库；参见[本地发布构建](local-builds.zh-CN.md#ci-built-workbench-image)。
+Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变量与 `DOCKERHUB_TOKEN`，只推送独立的 `wukong-workbench` 仓库，绝不推送正式 `wukong` 镜像或其 `latest` 标签。维护者传入客户端版本（必须等于检出的 `Cargo.toml` 版本）和已包含在 `master` 中的可选 ref；未合入源码会被拒绝。`workbench-publication` Environment 要求指定维护者审批，但不设操作者白名单。推送前，工作流校验锁定输入、执行真实的兄弟容器验收；除明确确认标签不存在外，registry 检查错误均失败关闭。推送后核对远端 digest，并在摘要记录操作者、源码提交、digest 和大小。唯一的手动 Docker Hub 配置是一次性创建 `wukong-workbench` 仓库；参见[本地发布构建](local-builds.zh-CN.md#ci-built-workbench-image)。
 
 `Acceptance/all` 运行三个专项验收，不替代 `Checks` 的全量组件检查或 `Release/rehearse` 的容器/发布包验收。原生安装卸载只在可丢弃的托管 runner 执行。内部工作流仍可能显示在 Actions 列表，通过名称区分。普通 PR 只有 Checks 与 Policy 两个顶层运行；专项验收作为 Checks 子任务汇总。普通 master 提交不启动 Release。
 
@@ -50,15 +50,15 @@ Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变
 ## Dependabot
 
 默认分支的 `.github/dependabot.yml` 管理 Cargo、npm workspace、
-`workers/runtime/requirements.txt` 和固定到 commit 的 GitHub Actions。
-每周一北京时间 09:10–09:40 分批检查，版本更新最多同时打开 7 个 PR。
-rig 系列依赖一起更新，其余兼容更新按生态分组；安全更新另行分组。
-漏洞提醒和自动安全更新在仓库设置中启用，PR 仍需通过 CI 并人工合并。
+`workers/requirements.txt`、`workers/runtime/requirements.txt`、`scripts/ci/requirements.txt`
+和固定到 commit 的 GitHub Actions。每周一北京时间 09:10–09:40 分批检查，
+版本更新最多同时打开 11 个 PR。rig 系列依赖一起更新，其余兼容更新按生态分组；
+安全更新另行分组。漏洞提醒和自动安全更新在仓库设置中启用，PR 仍需通过 CI 并人工合并。
 
-Python Dockerfile 中内联的依赖、apt/gem、AFL 基础镜像和自定义工具锁文件
-不属于这份 Dependabot 配置的覆盖范围。Rust 编译器也不单独自动升级：
-`rust-toolchain.toml` 与 `Cargo.toml` 的 `rust-version` 必须一起修改。
-Tauri 的 Rust crates 与 npm 包升级需要检查双方兼容性。
+apt/gem、AFL 基础镜像和自定义工具锁文件不属于这份 Dependabot 配置的覆盖范围。
+审查镜像锁中有意保留的 angr/AFL 兼容约束，不能把每个 Python 更新建议都视为可以独立升级。
+Rust 编译器也不单独自动升级：`rust-toolchain.toml` 与 `Cargo.toml` 的 `rust-version`
+必须一起修改。Tauri 的 Rust crates 与 npm 包升级需要检查双方兼容性。
 
 Dependabot 的 PR 使用普通 CI，不提供 Docker Hub 或模型密钥。
 配置文件不能约束其他 PR 合并方式，也不能替代私有仓库套餐所限制的 Rulesets。
@@ -82,7 +82,7 @@ GEF 使用固定源码 commit，校验 Git blob 身份并计算 SHA256，标为�
 本阶段只生成升级提案，不自动改锁文件、开 PR、合并或发布。
 准备升级时审查 `candidates.json` 和上游变更，更新锁文件及 Dockerfile 中重复的
 SHA256/路径设置，执行下载校验，再构建镜像并完整验收。Temurin 保持 JDK 25；
-apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
+apt、gem 与 AFL 基础镜像另行维护。
 
 <a id="immutable-releases"></a>
 
@@ -106,21 +106,23 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 
 普通 CI 只在 `master` push 和面向 `master` 的 PR 触发，避免同一开发分支的 push/PR 重复执行。
 未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
-PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
+PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。推送修订前添加 `full-ci` 标签可禁止该修订复用历史测试结果，所选运行启动后移除标签。手动 Checks 始终完整运行。
 
 Windows 原生 worker 安装验收需要显式选择：手动运行 Checks 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
 
-原生编译及选中的安装验收使用显式的未取消条件，因此此前无关测试失败不会阻止获取这项独立证据。安装仍要求原生构建和检查步骤通过；取消、原生构建失败或未选择夹具时均不安装。只有夹具实际运行并得到成功或失败结果后才上传报告。此前的失败仍使 Windows 作业及最终 CI 门禁失败；没有步骤使用错误后继续通过设置。参见 GitHub 的[状态检查表达式规则](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
+选中 Rust 改动时，原生 Worker 编译和离线媒体检查在独立的 `windows-worker` job 中与主 Windows job 并行执行。选中的安装验收使用显式的未取消条件，因此此前无关测试失败不会阻止获取这项独立证据。安装仍要求原生构建和检查步骤通过；取消、原生构建失败或未选择夹具时均不安装。只有夹具实际运行并得到成功或失败结果后才上传报告。此前的失败仍使其所属 job 及最终 CI 门禁失败；没有步骤使用错误后继续通过设置。参见 GitHub 的[状态检查表达式规则](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions)。
 
-PR 与 master 使用 `scripts/ci/ci_scope.py` 按完整改动范围选择检查：README、AGENTS、docs Markdown、有效的追加式 `.changes/<slug>.toml` 与翻译核对记录只做轻量检查，整项 Windows/Linux job 均跳过；changes 始终校验文档配对、链接和核对记录。`ui/` 增加前端检查；runtime/tests/fixtures/evals 增加 Linux 与 Windows Python 测试。Rust、公共脚本、锁文件、工作流和未知路径执行完整组件检查；运行时 prompts 不属于普通文档。版本 PR、版本递增的 master 提交、手动 Checks 和发布调用执行完整组件及 APT/卸载验收。PR 使用 merge-base 范围，master 使用 push 的 before/after 全范围；重命名包含新旧路径，计算失败阻止 CI。Windows 发布脚本与安装器事务测试仅随 Rust/共享改动运行。
+PR 与 master 使用 `scripts/ci/ci_scope.py` 按完整改动范围选择检查：README、AGENTS、docs Markdown、有效的追加式 `.changes/<slug>.toml` 与翻译核对记录只做轻量检查，整项 Windows/Linux job 均跳过；changes 始终校验文档配对、链接和核对记录。`ui/` 增加 Windows 与 Linux 前端检查；runtime/tests/fixtures/evals 增加 Linux 与 Windows Python 测试。Rust、公共脚本、锁文件、工作流和未知路径执行完整组件检查；运行时 prompts 不属于普通文档。版本 PR、版本递增的 master 提交、手动 Checks 和发布调用执行完整组件及 APT/卸载验收。PR 使用 merge-base 范围，master 使用 push 的 before/after 全范围；重命名包含新旧路径，计算失败阻止 CI。Windows 发布脚本与安装器事务测试仅随 Rust/共享改动运行。
 
-`summary` 是最终门禁：changes 必须成功，Windows、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
+`summary` 是最终门禁：changes 必须成功，Windows、独立 Windows Worker、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务或具有独立验证历史证明的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
+
+同仓库普通 PR 只能复用同一 PR 最近七天内成功 Checks 的重型测试证据。`scripts/ci/ci_reuse.py` 将有界的 `ci-test-attestation-v1` artifact 绑定到仓库、运行、尝试、PR、head SHA、实际测试的 merge SHA/tree、范围和 job 结果，并通过 API 独立核对生成 job。复用要求范围完全一致，且实际 merge tree 相同，或增量只包含上述轻量文档/发布片段；绝不只凭祖先关系复用。当前 `summary` 与 `commit-policy` 始终重跑；选中 job 只有在摘要记录已验证来源运行和原因时才可跳过。复用运行不再签发新证据。API、artifact、身份、时效或 diff 校验失败均回退正常执行。master push、版本 PR、手动/发布调用、`full-ci` 和原生 Worker 安装验收运行不使用历史复用。证据写入/上传是可选能力，不改变当前运行结果。发布授权、客户端/安装器产物和 tag 身份仍仅接受完全相同的 SHA。
 
 Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
-CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。首次或工具链/参数变化仍需重新编译。
+CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。独立 Worker job 使用 `windows-worker-checks-v1`，只覆盖 Windows Worker/package workspace 及其 target 目录，两个 Windows job 不会竞争写入同一缓存。首次或工具链/参数变化仍需重新编译。
 `windows-client-v1` 和 `linux-client-v1` 在 master 版本预构建或显式预热时写入，tag 只恢复。
 这使不同版本 tag 都能读取 master 缓存，避免把大量编译缓存只保存在无法跨 tag 复用的作用域。
-摘要显示精确缓存命中状态及恢复、保存、fmt、Clippy、test 的独立耗时。
+摘要显示两套缓存的精确命中状态及恢复、保存、原生预检、Worker、fmt、Clippy、test 的独立耗时。
 非精确命中可能是回退缓存或无缓存，实际恢复键见 Rust cache 日志。
 Clippy 与测试保持在同一 Windows job 复用编译目录，不为并行而重复下载和编译依赖。
 Windows CI 通过 `CARGO_PROFILE_DEV_DEBUG=1`、`CARGO_PROFILE_TEST_DEBUG=1` 使用有限调试信息，

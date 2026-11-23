@@ -20,15 +20,15 @@
     "file": "ghidra.zip"
   },
   "temurin": {
-    "version": "25.0.5+8",
-    "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz",
-    "sha256": "68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb",
+    "version": "25.0.5.1+2",
+    "url": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5.1%2B2/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5.1_2.tar.gz",
+    "sha256": "760f91b22c3efc9bd1b64ff950598231be82928cc807e30691a0e7a2995a62c0",
     "file": "temurin25.tar.gz"
   },
   "gef": {
-    "version": "2024.06",
-    "url": "https://raw.githubusercontent.com/hugsy/gef/2024.06/gef.py",
-    "sha256": "12881b1d42fb490ca72896099daf5c128c7c7382be0779c8f8f7db3a9161ab6f",
+    "version": "2026.01",
+    "url": "https://raw.githubusercontent.com/hugsy/gef/18404074f469c70480aae071fbb77b75a2ed8507/gef.py",
+    "sha256": "04cdfe961f1e9151933d32cf6b548d9e6a76a1aef8b27c020c575b8d4264ed20",
     "file": "gef.py"
   }
 }
