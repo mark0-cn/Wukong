@@ -57,6 +57,9 @@ impl KernelHost {
     pub(crate) fn execution(&self) -> &ExecutionConfig {
         &self.config.execution
     }
+    pub(crate) fn telemetry(&self) -> &crate::adapters::telemetry::TelemetryHandle {
+        self.tools.telemetry()
+    }
     pub(crate) fn recovery_attempts(&self, step: &str) -> Result<u32> {
         crate::application::model_recovery::attempts(&self.store, step)
     }

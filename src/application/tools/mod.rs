@@ -39,6 +39,7 @@ pub struct ToolService {
     open_lab: lab::LabFactory,
     default_environment: Option<String>,
     sync_limits: evidence_sync::SyncLimits,
+    telemetry: crate::adapters::telemetry::TelemetryHandle,
 }
 
 mod analysis;
@@ -122,9 +123,11 @@ impl ToolService {
         store: Store,
         mcp: McpRegistry,
         open_lab: lab::LabFactory,
+        telemetry: crate::adapters::telemetry::TelemetryHandle,
     ) -> Result<Self> {
         let environments =
             crate::adapters::environments::EnvironmentRegistry::new(config.environments.clone())?
+                .with_telemetry(telemetry.clone())
                 .with_lab_guards(&config.windows_lab)?;
         let locks = Arc::new(Mutex::new(BTreeMap::new()));
         let static_environment = config.analysis.static_environment.clone();
@@ -144,7 +147,11 @@ impl ToolService {
             open_lab,
             default_environment: config.default_environment,
             sync_limits: Default::default(),
+            telemetry,
         })
+    }
+    pub(crate) fn telemetry(&self) -> &crate::adapters::telemetry::TelemetryHandle {
+        &self.telemetry
     }
     pub(crate) async fn bound_to(&self, agent: &AgentMetadata) -> Result<ToolContext> {
         let Some(environment_id) = &agent.environment_id else {

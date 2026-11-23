@@ -11,6 +11,7 @@ pub(super) struct ReplyProgress {
     last_flush: Option<Instant>,
     last_bytes: usize,
     logical_step: String,
+    started: Instant,
 }
 
 #[derive(Component)]
@@ -188,6 +189,7 @@ pub(super) fn prepare_models(
                         last_flush: None,
                         last_bytes: 0,
                         logical_step,
+                        started: Instant::now(),
                     },
                 ));
                 Ok(())
@@ -282,7 +284,35 @@ pub(super) fn account_replies(
     mut fatal: ResMut<Fatal>,
 ) {
     for (from, outcome, progress) in &calls {
-        if let Some(response) = outcome.completion() {
+        let Some(response) = outcome.completion() else {
+            if let Ok(agent_id) = ids.get(from.0).map(|id| &id.0)
+                && let Ok(agent) = application.runner.agent(agent_id)
+            {
+                let provider = application.runner.role_config(agent.role).provider;
+                let elapsed = progress.started.elapsed().as_secs_f64();
+                let telemetry = application.runner.telemetry();
+                telemetry.metrics().generation("error", elapsed);
+                telemetry.metrics().model_operation(
+                    provider.as_str(),
+                    "error",
+                    None,
+                    None,
+                    elapsed,
+                );
+                tracing::info!(
+                    target: "wukong_telemetry",
+                    event = "model_operation_finished",
+                    run_id = %agent.run_id,
+                    agent_id = %agent.id,
+                    generation = agent.generation,
+                    provider = provider.as_str(),
+                    outcome = "error",
+                    duration_seconds = elapsed,
+                );
+            }
+            continue;
+        };
+        {
             failed(
                 &mut fatal,
                 (|| -> Result<()> {
@@ -295,6 +325,30 @@ pub(super) fn account_replies(
                     application
                         .runner
                         .account_usage(&agent_id, response.usage)?;
+                    let agent = application.runner.agent(&agent_id)?;
+                    let provider = application.runner.role_config(agent.role).provider;
+                    let telemetry = application.runner.telemetry();
+                    let elapsed = progress.started.elapsed().as_secs_f64();
+                    telemetry.metrics().generation("ok", elapsed);
+                    telemetry.metrics().model_operation(
+                        provider.as_str(),
+                        "ok",
+                        response.usage.input_tokens,
+                        response.usage.output_tokens,
+                        elapsed,
+                    );
+                    tracing::info!(
+                        target: "wukong_telemetry",
+                        event = "model_operation_finished",
+                        run_id = %agent.run_id,
+                        agent_id = %agent.id,
+                        generation = agent.generation,
+                        provider = provider.as_str(),
+                        outcome = "ok",
+                        input_tokens = response.usage.input_tokens,
+                        output_tokens = response.usage.output_tokens,
+                        duration_seconds = elapsed,
+                    );
                     Ok(())
                 })(),
             );

@@ -72,7 +72,9 @@ impl RunSupervisor {
         let owner = lease.owner.clone();
         let kernel_cancel = supervisor.cancel.clone();
         let cleanup_tools = runner.tools.clone();
+        let parent_span = tracing::Span::current();
         let mut kernel = tokio::task::spawn_blocking(move || {
+            let _parent = parent_span.enter();
             crate::application::agent_runtime::drive(
                 runner.kernel_host(),
                 &run,
@@ -187,7 +189,7 @@ for line in sys.stdin:
  r=json.loads(line)
  if r['method']=='job.status':
   (root/'polling').write_text('ready');time.sleep(60)
- result={'identity':{'protocol':3,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
+ result={'identity':{'protocol':4,'installation_id':'fixture','boot_id':'fixture-boot','package_sha256':'0'*64}} if r['method']=='ping' else {'os':platform.system().lower()} if r['method']=='doctor' else {}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
 "#,
             )?;

@@ -7,7 +7,7 @@ async fn fixture() -> Result<(tempfile::TempDir, Store, ToolService, AgentMetada
         &bridge,
         r#"import sys,json,pathlib,hashlib,base64,platform
 root=pathlib.Path(sys.argv[sys.argv.index('--state')+1]);root.mkdir(exist_ok=True)
-identity={'protocol':3,'installation_id':'evidence-fixture','boot_id':'boot','package_sha256':'0'*64}
+identity={'protocol':4,'installation_id':'evidence-fixture','boot_id':'boot','package_sha256':'0'*64}
 files=[{'path':p,'sha256':hashlib.sha256(p.encode()).hexdigest(),'size':len(p)} for p in ['first','second']]
 for line in sys.stdin:
  r=json.loads(line);method=r['method'];params=r.get('params',{})

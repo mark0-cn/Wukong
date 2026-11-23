@@ -38,6 +38,7 @@ impl ToolContext {
             gateway.clone(),
             service.locks.clone(),
             service.sync_limits.clone(),
+            service.telemetry.clone(),
         );
         let analysis = AnalysisService {
             store: service.store.clone(),
