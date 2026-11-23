@@ -14,6 +14,7 @@
 - `application/windows_worker_setup/inventory` 投影只读部署诊断：`application/worker_media` 管理生成记录扫描，安装状态模块管理恢复记录与已导入回执，配置管理当前环境登记。桌面只消费投影报告，绝不自行读取这些记录或执行导入/校验流程。
 - `application/coordinator` 按 runs、tasks、messages、waits、completion 划分用例，继续通过同一 Store 事务提交。`adapters/binary` 保留公共地址/哈希接口，画像、字符串及 Ghidra 生命周期在独立子模块中维护。
 - `storage` 对业务修改提供 IMMEDIATE 事务，对查询提供独立只读 WAL 快照。`storage/conversations` 负责独立会话载荷及其修订号。当前状态 schema 为 5，不提供旧数据库迁移。
+- `adapters/telemetry` 负责进程生命周期内的 trace/metric/可选 log 激活、精选本地 JSONL、有界 Worker relay 和唯一总关闭期限。`adapters/observability` 负责有界只读 Store/Tempo/Loki/Prometheus 投影及经过校验的 Grafana 链接。桌面命令只接收查询意图和当前宿主 epoch，不接收后端凭据、任意 URL、查询语言、Store 句柄或本地路径。导出激活与查询构造保持分离，业务完成／恢复不得依赖 telemetry 投递。
 
 worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目录及生成的协议 schema，并安装独立 `workers/analysis` 包；入口文件不承担模块重导出。Windows 打包使用显式组件清单，不复制 Linux 运行时。
 
@@ -106,6 +107,21 @@ python workers/tests/run.py unit -p test_bridge.py
 运行 worker 测试前，在虚拟环境中安装 `workers/analysis` 和 `workers/runtime/requirements.txt` 并确保 `python` 命令可用。普通测试使用可信本地夹具和回环服务；被忽略的真实 Ghidra/Docker 验收需要按各测试说明配置环境。
 
 同级容器网络验收以仓库根目录为构建上下文，构建 `tests/acceptance/network.Dockerfile`，先安装分析包及相同的固定版本 Linux worker 依赖，再进入隔离网络。裸 Python 镜像不包含 worker 发布元数据所需的依赖。
+
+<a id="observability-validation"></a>
+
+## 可观察性验证
+
+修改 telemetry、原生查询、协议信封或本地栈后，运行受影响的 Rust／Python 测试及以下独立于文档的静态入口：
+
+```sh
+python -m unittest tests.automation.test_observability -v
+docker compose -f scripts/observability/compose.yaml config
+```
+
+固定镜像、回环健康检查命令、配置和保留卷的关闭方式见[可观察性指南](../user/observability.zh-CN.md#local-acceptance-stack)。真实验收必须配置控制器导出、执行身份明确的工作，并检查本地活动、trace 搜索／详情、可选精选日志、服务范围指标和 Grafana 链接。停止一个查询后端，验证各面板独立降级。分别在隔离的 Linux Python 与 Windows 原生 Worker 环境中执行，并比较 telemetry 可用和不可用时的业务 ID、结果、证据哈希、重试及恢复行为。
+
+配置解析和静态测试不能证明真实 Collector/Tempo/Loki/Prometheus/Grafana 行为、原生 GUI 行为、在线模型执行或 Worker 传播。记录实际包／目标身份和已执行步骤，不得把操作步骤写成已经通过的验收。Telemetry 丢失绝不能触发重放结果不确定的业务副作用。
 
 <a id="repeatable-performance-baseline"></a>
 

@@ -14,16 +14,16 @@
       "zh-CN": "b013f93ed0f491692066a7e91f887adf97d239912fb993c421ff07c7a90a1d5a"
     },
     "docs/README.md": {
-      "en": "22e6a41430f5fc21a5c9b0ced4666abf5192206673e2e29ca761ec9f7f83b306",
-      "zh-CN": "93b889c62e96d46fe75562f1a939200dc1ebf76fa13da777f1487a9b5838e497"
+      "en": "42f1ec4cf4395b5aeb29cb02ad2ca5cacd0e2085415e228367950440a5157d19",
+      "zh-CN": "7884d09b1c98b02e25a02d193ea09f2ee3e001b80d5346bc0595e707844bb2e0"
     },
     "docs/design/architecture.md": {
-      "en": "1e3fe3d619c11db42251c346c0ceadc413885d75ee113a5cc6f58748b9689d06",
-      "zh-CN": "1be98cffe4f705453f1a81ad593b030bc0f796ed2338fa6ce9d22df50946f4ce"
+      "en": "4a3eb2ab982ed15c5c2492bd22cdf065d7693520eafa7053bbb816beab0345f2",
+      "zh-CN": "1687f5f9900d2b6d91adca89232541f020974094616460453e79533b7e460bd3"
     },
     "docs/design/cross-platform-environments.md": {
-      "en": "9fe89dc7b77208272a744c67f69231169136437534220e6a9b1fcd854eb78430",
-      "zh-CN": "85bab2dd1dc469f92fc335f836df8e7d7623986fb7855240daf9006f6ba09a36"
+      "en": "99539678bcb8b99b20e87a4c638d125c20c271f07f159b9e214a7cd6c77b1912",
+      "zh-CN": "7776c814a555b664bed173b1e89d0981563d35da073c43c2100bedb699bda1cf"
     },
     "docs/design/implementation-contract.md": {
       "en": "81b54f5bb6c93c72829a4d96278635caee21df8b96cc7512c0a30351228e3ba6",
@@ -62,8 +62,8 @@
       "zh-CN": "fec3b5ffa7799de2a5c11f04e345a83f9e28f009d69f74804eb6b210a505e98e"
     },
     "docs/development/maintenance.md": {
-      "en": "c4f4e9e8c8d9559f9e419032b3f1b26a0ec04575ea29de3d595bcf15295391e4",
-      "zh-CN": "0840493388424b673f026dbcffbc34e6fb0edf73f26453f9ec5b883aafeb518b"
+      "en": "78a55964383d9c3f8fb378fe80f72e031fd365a7c6b7c1ffb2e1778afb7f1d70",
+      "zh-CN": "a75e0ea12f7a00008c333153616190d77feede6a66329c4dbda247bbd2efd154"
     },
     "docs/development/releases.md": {
       "en": "41d601ccae92efa4486a3ecda9be51d232ac60828bf97cdb8a982318d6e32da9",
@@ -125,6 +125,10 @@
       "en": "86aee34cae2199a005e6e552158cb4f42db3e2168662c6f8acd17713898931db",
       "zh-CN": "fc9a780fc71d1c0df7d92048951e1e66705ba1410f7c6547cb9c347ed1de73d8"
     },
+    "docs/user/observability.md": {
+      "en": "f28855147f7e1213a31aac4ab22a1f9fc0af37c633bc955b353a949c07bdabde",
+      "zh-CN": "4684a4697df9e43316d4e88aeb24ea26f9437283c64262050ac2b9f901cdbba7"
+    },
     "docs/user/online-install.md": {
       "en": "bc29afadfcbb3c42342291379f514b3ddc20ccff2d14a9052666604354d6f453",
       "zh-CN": "c0e705f102318fcc24d8f4a2e6aa1b469d19dd36f4fdbd0d5b751d17d558b488"
@@ -165,6 +169,10 @@
       "en": "686d28406cb61fd746b529ca35e795cef87a1c8bd262a074409403d64df21b7f",
       "zh-CN": "f4ec56be732b3bdd1b83bcbe84545809b07f386bba780583ef115541a10b022c"
     },
+    "scripts/observability/README.md": {
+      "en": "ed3ad3939a41fff805cf26a50efc3c3f2bd24444543311c09a4c5fdf7f29dd8a",
+      "zh-CN": "83cd8f4928a5ba8858aa5bdfb60474d3b624642abc3c4d5dc5ad4a60c17e79a8"
+    },
     "workers/analysis/README.md": {
       "en": "939d5ffbb844f80a72fa5fae169f8d1649fbd90ebe008e639ac67fd467788bec",
       "zh-CN": "1cc7183b4b3e44837effbdd0e59aa7c1b8cf9b331079f129c057abfc722083f4"
@@ -182,8 +190,8 @@
       "zh-CN": "63641478ce5aade65ba77b2738da43a1e09a1a815c18ef2b7ccdf3fbad20818f"
     },
     "workers/runtime/README.md": {
-      "en": "2ba09d5ada67c5c7cddc0c2b6b5bf7cf46f84c469dc9d8fc1fcdda245d4fb60f",
-      "zh-CN": "86bf3dbc0f0dcb8e376216a2bdd60c791819853e9eb168f32e756c548e00b885"
+      "en": "2fb782d4d9390674adb5098f6f31fffc538fd0228c8e3044d1bc2817f74f5af4",
+      "zh-CN": "f1785568f668f165a4f426368469d003b3c5907e88d946d10d1601b71955884c"
     },
     "workers/tests/README.md": {
       "en": "1ae31aa063dd845917b654f340ffcb392e76d52db028dff0dba269e79c6680a2",
