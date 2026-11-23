@@ -3,8 +3,8 @@
 pub mod runner;
 pub(crate) mod supervisor;
 use crate::{
-    application::assessment::runner::AssessmentRunner, application::coordinator::Coordinator,
-    config::AppConfig, domain::*, storage::Store,
+    adapters::telemetry::TelemetryHandle, application::assessment::runner::AssessmentRunner,
+    application::coordinator::Coordinator, config::AppConfig, domain::*, storage::Store,
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
@@ -13,14 +13,19 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 /// Construct a runner only after the use case selects and validates its config.
-pub(crate) type RunnerFactory =
-    fn(AppConfig, Store) -> futures::future::BoxFuture<'static, Result<AssessmentRunner>>;
+pub(crate) type RunnerFactory = fn(
+    AppConfig,
+    Store,
+    TelemetryHandle,
+)
+    -> futures::future::BoxFuture<'static, Result<AssessmentRunner>>;
 
 #[derive(Clone)]
 pub struct AssessmentService {
     config: AppConfig,
     store: Store,
     runner_factory: RunnerFactory,
+    telemetry: TelemetryHandle,
 }
 
 pub struct PreparedAssessment {
@@ -28,6 +33,7 @@ pub struct PreparedAssessment {
     runner: AssessmentRunner,
     run: RunRecord,
     budget: Option<Budget>,
+    telemetry: TelemetryHandle,
 }
 
 impl PreparedAssessment {
@@ -38,6 +44,19 @@ impl PreparedAssessment {
         self.runner.subscribe()
     }
     pub async fn drive(self, cancel: CancellationToken) -> Result<RunRecord> {
+        use tracing::Instrument as _;
+        let started = std::time::Instant::now();
+        let active = self.telemetry.metrics().run_started();
+        let span = tracing::info_span!(
+            "wukong.assessment",
+            run_id = %self.run.id,
+            outcome = tracing::field::Empty,
+        );
+        tracing::info!(
+            target: "wukong_telemetry",
+            event = "run_started",
+            run_id = %self.run.id,
+        );
         // The future can be dropped by an aborted task, and ToolService has no Drop of
         // its own, so teardown belongs to a guard rather than the happy path.
         struct CloseTools(std::sync::Arc<crate::application::tools::ToolService>);
@@ -50,9 +69,28 @@ impl PreparedAssessment {
             }
         }
         let _close = CloseTools(std::sync::Arc::clone(&self.runner.tools));
-        self.runner
+        let result = self
+            .runner
             .drive_with_budget(&self.run.id, cancel, self.budget)
-            .await
+            .instrument(span.clone())
+            .await;
+        let outcome = match &result {
+            Ok(run) => run.status.as_str(),
+            Err(_) => "error",
+        };
+        span.record("outcome", outcome);
+        tracing::info!(
+            target: "wukong_telemetry",
+            event = "run_finished",
+            run_id = %self.run.id,
+            outcome,
+            duration_seconds = started.elapsed().as_secs_f64(),
+        );
+        self.telemetry
+            .metrics()
+            .run_finished(outcome, started.elapsed().as_secs_f64());
+        drop(active);
+        result
     }
 }
 
@@ -61,11 +99,13 @@ impl AssessmentService {
         config: AppConfig,
         store: Store,
         runner_factory: RunnerFactory,
+        telemetry: TelemetryHandle,
     ) -> Self {
         Self {
             config,
             store,
             runner_factory,
+            telemetry,
         }
     }
 
@@ -83,7 +123,8 @@ impl AssessmentService {
         config.output_language.get_or_insert_with(|| {
             crate::i18n::Locale::for_task(task, crate::i18n::Locale::system())
         });
-        let runner = (self.runner_factory)(config, self.store.clone()).await?;
+        let runner =
+            (self.runner_factory)(config, self.store.clone(), self.telemetry.clone()).await?;
         let created = runner.coordinator.create_run(
             &target,
             task,
@@ -96,6 +137,7 @@ impl AssessmentService {
                 runner,
                 run,
                 budget: None,
+                telemetry: self.telemetry.clone(),
             }),
             Err(error) => {
                 runner.tools.close().await;
@@ -114,13 +156,15 @@ impl AssessmentService {
         saved.state_dir = self.store.root().to_owned();
         saved.budget = budget.clone().unwrap_or_else(|| run.budget.clone());
         saved.validate()?;
-        let runner = (self.runner_factory)(saved, self.store.clone()).await?;
+        let runner =
+            (self.runner_factory)(saved, self.store.clone(), self.telemetry.clone()).await?;
         // Applying a budget is a supervised write, after ownership is acquired.
         Ok(PreparedAssessment {
             _maintenance: maintenance,
             runner,
             run,
             budget,
+            telemetry: self.telemetry.clone(),
         })
     }
 
@@ -155,7 +199,8 @@ mod tests {
         config.output_language = Some(crate::i18n::Locale::EnUs);
         let target = dir.path().join("sample");
         std::fs::write(&target, b"fixture")?;
-        let service = AssessmentService::new(config.clone(), store.clone());
+        let service =
+            AssessmentService::new(config.clone(), store.clone(), TelemetryHandle::disabled());
         let prepared = service.start(&target, "fixture").await?;
         let run = prepared.run().clone();
         drop(prepared);
@@ -164,7 +209,7 @@ mod tests {
         let mut changed = config;
         changed.model.model = "different-default".into();
         changed.output_language = Some(crate::i18n::Locale::ZhCn);
-        let service = AssessmentService::new(changed, store.clone());
+        let service = AssessmentService::new(changed, store.clone(), TelemetryHandle::disabled());
         let mut budget = run.budget.clone();
         budget.max_total_tokens += 10;
         let resumed = service.resume(&run.id, Some(budget)).await?;

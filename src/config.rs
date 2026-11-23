@@ -288,6 +288,7 @@ pub struct AppConfig {
     pub mcp: Vec<McpServerConfig>,
     pub execution: ExecutionConfig,
     pub windows_lab: WindowsLabConfig,
+    pub observability: crate::adapters::telemetry::ObservabilityConfig,
 }
 impl Default for AppConfig {
     fn default() -> Self {
@@ -309,6 +310,7 @@ impl Default for AppConfig {
             mcp: vec![],
             execution: ExecutionConfig::default(),
             windows_lab: WindowsLabConfig::default(),
+            observability: crate::adapters::telemetry::ObservabilityConfig::default(),
         }
     }
 }
@@ -378,6 +380,7 @@ impl AppConfig {
     }
     pub fn validate(&self) -> Result<()> {
         self.model.validate()?;
+        self.observability.validate()?;
         self.validate_windows_lab()?;
         ensure!(
             self.execution.output_recovery_attempts <= 2,

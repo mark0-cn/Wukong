@@ -298,7 +298,7 @@ mod tests {
             &bridge,
             r#"import sys,json,pathlib,time,platform
 root=pathlib.Path(sys.argv[sys.argv.index('--state')+1]);root.mkdir(exist_ok=True)
-identity={'protocol':3,'installation_id':root.name,'boot_id':'boot','package_sha256':'0'*64}
+identity={'protocol':4,'installation_id':root.name,'boot_id':'boot','package_sha256':'0'*64}
 for line in sys.stdin:
  r=json.loads(line);method=r['method']
  if method=='ping': value={'identity':identity}

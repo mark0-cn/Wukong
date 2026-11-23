@@ -29,6 +29,17 @@ pub enum Provider {
     Ollama,
 }
 
+impl Provider {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::OpenAiResponses => "openai_responses",
+            Self::Anthropic => "anthropic",
+            Self::Ollama => "ollama",
+        }
+    }
+}
+
 /// Per-role model settings: the model name plus an optional per-request
 /// output budget. Provider, endpoint and credentials are inherited from the
 /// root settings.

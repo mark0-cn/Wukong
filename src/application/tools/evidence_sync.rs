@@ -46,6 +46,54 @@ impl EvidenceSyncService {
     }
 
     pub(super) async fn sync(&self, agent: &AgentMetadata, call: &str, id: &str) -> Result<Value> {
+        use tracing::Instrument as _;
+        let started = std::time::Instant::now();
+        let span = tracing::info_span!(
+            "wukong.evidence.sync",
+            run_id = %agent.run_id,
+            agent_id = %agent.id,
+            call_id = call,
+            job_id = id,
+            outcome = tracing::field::Empty,
+        );
+        let result = self
+            .sync_inner(agent, call, id)
+            .instrument(span.clone())
+            .await;
+        let state = result
+            .as_ref()
+            .ok()
+            .and_then(|value| value["evidence_sync"]["state"].as_str())
+            .unwrap_or("error");
+        let outcome = match state {
+            "ready" => "ok",
+            "pending" | "syncing" => "pending",
+            "retry" => "retry",
+            "failed" => "failed",
+            _ => "error",
+        };
+        span.record("outcome", outcome);
+        if outcome != "pending" {
+            let duration = started.elapsed().as_secs_f64();
+            tracing::info!(
+                target: "wukong_telemetry",
+                event = "evidence_sync_finished",
+                run_id = %agent.run_id,
+                agent_id = %agent.id,
+                call_id = call,
+                job_id = id,
+                outcome,
+                duration_seconds = duration,
+            );
+            self.jobs
+                .telemetry
+                .metrics()
+                .evidence_sync(outcome, duration);
+        }
+        result
+    }
+
+    async fn sync_inner(&self, agent: &AgentMetadata, call: &str, id: &str) -> Result<Value> {
         let lock = {
             let mut locks = self.jobs.locks.lock().await;
             locks

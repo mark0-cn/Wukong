@@ -121,7 +121,7 @@ pub enum Command {
     Gui { run_id: Option<String> },
 }
 
-pub async fn run(cli: Cli) -> Result<()> {
+pub async fn run(cli: Cli, telemetry: &crate::adapters::telemetry::TelemetryRuntime) -> Result<()> {
     let locale = cli.resolved_locale();
     let command = cli.command.unwrap_or(Command::Gui { run_id: None });
     if let Command::Cleanup { command } = command {
@@ -154,6 +154,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     if let Some(state) = &cli.state {
         config.state_dir = state.clone();
     }
+    telemetry.activate(&config);
     if let Command::Inspect { target, strings } = &command {
         let profile = binary::inspect(target)?;
         let result = if *strings {
@@ -182,7 +183,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
     let store = Store::open(&config.state_dir)?;
-    let service = AssessmentService::new(config.clone(), store.clone());
+    let service = AssessmentService::new(config.clone(), store.clone(), telemetry.handle());
     match command {
         Command::Cleanup { .. }
         | Command::Init { .. }
@@ -284,7 +285,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Gui { run_id } => {
             #[cfg(feature = "desktop")]
-            crate::interfaces::desktop::host::run(config, store, run_id, path, cli.state)?;
+            crate::interfaces::desktop::host::run(
+                config,
+                store,
+                run_id,
+                path,
+                cli.state,
+                telemetry.handle(),
+            )?;
             #[cfg(not(feature = "desktop"))]
             {
                 let _ = (config, store, run_id, path);
