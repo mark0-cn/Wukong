@@ -3,8 +3,9 @@
 # Install with --require-hashes --no-deps: the angr 9.2.78 compatibility set
 # deliberately mixes component versions and cannot be resolved from metadata.
 # AFL++ owns pip and editable unicornafl; keep unicorn at its required 2.1.4.
-ailment==9.2.78 \
-    --hash=sha256:1981e1c665249635d2d4c1d35b954d0bb3a56454e68214bf8408fd7ca5eaa1e2
+ailment==9.2.158 \
+    --hash=sha256:718e7e297b19e55c1c6a5b3f7de2c8e744629ea1ce7eeb89e5c1facef564d69f \
+    --hash=sha256:88f3fd93c1d109f3b103ae6a39bb653d933bd55155f3e960beebfd15f5297d68
 angr==9.2.78 \
     --hash=sha256:dd037cacb265dbc34fc951e392ceee1d3b92298fc7c7d56cf7d7dc1d2d0b6ede
 archinfo==9.2.102 \
@@ -19,8 +20,18 @@ bitstring==3.1.9 \
     --hash=sha256:0de167daa6a00c9386255a7cac931b45e6e24e0ad7ea64f1f92a64ac23ad4578
 cachetools==8.0.2 \
     --hash=sha256:502bf3c17c6e35d78ccdaa70da8c7001b28634541f5cde0dee33c93bb252277d
-capstone==5.0.6 \
-    --hash=sha256:0358855773100bb91ae6681fabce7299df83156945ba943f6211061a592c54a6
+capstone==5.0.9 \
+    --hash=sha256:0429af292ddc604d3c9344696807e281d5e728db029f00e6a4ea9e3bff1aac9e \
+    --hash=sha256:0cc3b1ec319ab0530efc6b181491b77dd3373c81b6dbcf2f05a80e3d8dd61d5e \
+    --hash=sha256:1f5871b57e987d5bf23b531fbe868211b74ad750fa9b830a3d3cdc4956bc0ae3 \
+    --hash=sha256:273fd8d747d2e35c88f91450be51a603ecfaafb00d96d9f315dcb8689c86193e \
+    --hash=sha256:41772ad0c71aa5d3e97d541e802593c2e71fb94ac7e20d4202f97ce2a3eb8ed5 \
+    --hash=sha256:58a874d9a6cb15122135b1385a782e5b54c8a4d9396161b6498465046d2e0442 \
+    --hash=sha256:69064219c814ad64af35469a7c4ddd19b730cacb96a1a796435ccde0e1567d05 \
+    --hash=sha256:732cedbbb56d42e723f14d7af6387f1454194a820b4b96b56d1e53f865ef85d0 \
+    --hash=sha256:8c4a1d7134d7d5290e5d77066500385f2c7a4bf66835ccbfde5180042d508b3c \
+    --hash=sha256:cfec34e6e01472fe60850c87c5bea9918c274fa2a605b510e6489bf87c0c9960 \
+    --hash=sha256:fc269c5082e17d7f9f265cd6980e2fdc6ab572df913951d76db0357e06b8001d
 certifi==2026.11.20 \
     --hash=sha256:7422df25243767b9877031a2248cb14d09ddac9beee846f4cef3d5c9191d488f
 cffi==2.1.1 \
@@ -29,8 +40,9 @@ chardet==7.7.0 \
     --hash=sha256:feb66c96264e3e6a9ff0c7318ce0028800b6c18ad07c8000d2404a108d1ef767
 charset-normalizer==3.5.3 \
     --hash=sha256:e5e4785d8a0adeadfbdf75f4efc357911842674651cbafd7e97f69b11ec3cbc6
-claripy==9.2.101 \
-    --hash=sha256:630f4819588e69f4678ff49252437f7f7ed7c48ef16dccead81351a5ac30cb5d
+claripy==9.3.7 \
+    --hash=sha256:3c5b8575a2ba634afe9574f3e2bffc03e50c9fdf808e4216da04e3ede4299280 \
+    --hash=sha256:75c3e2ba16cdcbd5d664b8e8802460595cd06c49d56f30e8b53de8c3eb99f7bf
 cle==9.2.78 \
     --hash=sha256:6812df5b6700f101cac391057166b4050d458d20b7fe9375ab32264684c034e3
 colored-traceback==0.4.2 \
@@ -79,8 +91,9 @@ markupsafe==3.0.4 \
     --hash=sha256:8e124f974786f831d6043728e38296969d3579db8896fe004682f5758e613581
 mdurl==0.1.2 \
     --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
-mpmath==1.3.0 \
-    --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c
+mpmath==1.4.1 \
+    --hash=sha256:dc4f0ea2304480d4a9a48a94c1020571558ade522b44a6912efac63a586e140f \
+    --hash=sha256:efd6d1b75f09d69524a67609949812668b28e81ecbfe0ab449ced8c13e92642e
 mulpyplexer==0.9 \
     --hash=sha256:144e9e9bf66d3988f60542c9d3d4c94857438f7908f60e53f4c1cb1622fbbd30
 nampa==0.1.1 \
@@ -147,8 +160,9 @@ rpds-py==2026.9.1 \
     --hash=sha256:addeda51556dac7c1a2f14cda62db8b621cd12afba3091d03a96c72932387eab
 rpyc==6.0.2 \
     --hash=sha256:8072308ad30725bc281c42c011fc8c922be15f3eeda6eafb2917cafe1b6f00ec
-setuptools==84.0.0 \
-    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670
+setuptools==84.2.1 \
+    --hash=sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc \
+    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
 smmap==5.0.3 \
