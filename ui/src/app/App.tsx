@@ -1,10 +1,10 @@
 import { t, message, useLocale } from '../shared/i18n';
 import brandIcon from '../../../icons/icon.svg';
-import { useCallback, useRef, useState } from 'react';
-import { Activity, ArrowRight, Bot, CircleAlert, Download, FileSearch, Focus, GitBranch, MessageSquare, PanelLeft, Pause, Play, RefreshCw, X } from 'lucide-react';
+import { useCallback, useRef, useState, type ReactNode } from 'react';
+import { Activity, ArrowRight, Bot, CircleAlert, Download, FileSearch, Focus, Gauge, GitBranch, MessageSquare, PanelLeft, Pause, Play, RefreshCw, X } from 'lucide-react';
 import { api, errorText, errorValue } from '../shared/api/bridge';
 import { useWorkspace } from '../features/workspace/model';
-import type { Agent, Budget, Run } from '../shared/api/types';
+import type { Agent, Budget, Run, Workspace } from '../shared/api/types';
 import { Agents } from '../features/agents/Agents';
 import { Composer, Conversation, type Draft } from '../features/conversation/Conversation';
 import { Findings } from '../features/evidence/Findings';
@@ -24,6 +24,9 @@ import { defaultTask, NewTask, ResumeTask } from '../features/workspace/TaskDial
 import { useDesktopLifecycle } from './useDesktopLifecycle';
 import { useUpdateController } from '../features/maintenance/useUpdateController';
 import { useStartupUpdates } from '../features/maintenance/useStartupUpdates';
+import { Observability } from '../features/observability/Observability';
+
+export type WorkspaceTab = 'conversation' | 'findings' | 'overview' | 'observability';
 
 type Confirmation = { kind: 'close'; busy: boolean } | { kind: 'stop'; agent: Agent; run: string; epoch: number };
 export default function App() {
@@ -31,7 +34,7 @@ export default function App() {
   const workspace = useWorkspace();
   const { data, host } = workspace;
   const updateController = useUpdateController(host?.epoch, workspace.reset);
-  const [tab, setTab] = useState<'conversation' | 'findings' | 'overview'>('conversation');
+  const [tab, setTab] = useState<WorkspaceTab>('conversation');
   const wideWorkspace = useWideWorkspace();
   const [showAgents, setShowAgents] = useViewPreference<boolean | null>('agents-visible', null, optionalBooleanPreference);
   const agentsVisible = showAgents ?? wideWorkspace;
@@ -96,31 +99,24 @@ export default function App() {
         </div></header>
       {(error || workspace.error) && <div className="error-banner" role="alert"><CircleAlert size={16} /><span>{errorText(error || workspace.error)}</span><button className="icon-button" aria-label={t('workspace-retry-connection')} onClick={() => { setError(''); workspace.refresh(); }}><RefreshCw size={14} /></button></div>}
       {host?.notice && dismissed !== host.notice.id && <div className={`notice ${host.notice.error ? 'notice-error' : ''}`} role="status"><span>{message(host.notice.message)}</span><button className="icon-button" aria-label={t('workspace-dismiss-notification')} onClick={() => setDismissed(host.notice!.id)}><X size={13} /></button></div>}
-      {selectedRun && <><nav className="workspace-tabs" aria-label={t('workspace-workspace-views')}>
-        <button className={tab === 'conversation' ? 'active' : ''} onClick={() => setTab('conversation')}><MessageSquare size={15} />{t('workspace-analysis-progress')}</button>
-        <button className={tab === 'findings' ? 'active' : ''} onClick={() => setTab('findings')}><FileSearch size={15} />{t('workspace-findings-and-evidence')}<span>{data?.findings.length ?? 0}</span></button>
-        <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}><Activity size={15} />{t('workspace-task-overview')}</button>
-        <div className="tab-spacer" /><button className={`agents-toggle ${agentsVisible && !focused ? 'enabled' : ''}`} aria-label={t('workspace-toggle-collaboration-panel')} aria-pressed={agentsVisible && !focused} onClick={() => { if (focused) { setFocused(false); setShowAgents(true); } else setShowAgents(value => !(value ?? wideWorkspace)); }}><GitBranch size={15} />{t('workspace-collaboration')}</button>
-      </nav>
+      {selectedRun && <><WorkspaceTabs tab={tab} onTab={setTab} findingsCount={data?.findings.length ?? 0}
+        agentsVisible={agentsVisible && !focused} showAgentToggle={tab !== 'observability'}
+        onToggleAgents={() => { if (focused) { setFocused(false); setShowAgents(true); } else setShowAgents(value => !(value ?? wideWorkspace)); }} />
         {data && <WorkspaceStatus run={selectedRun} data={data} />}
       </>}
       <div className="workspace-content">{data && host && selectedRun ? <>
-        <WorkspaceSplit id="agent-inspection" label={t('workspace-resize-collaboration-panel')} visible={agentsVisible && !focused}
-          side={<Agents key={`${host.state_dir}:${selectedRun.id}`} scopeKey={`${host.state_dir}:${selectedRun.id}`} agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onClose={() => setShowAgents(false)} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}>
-        <div className="primary-panel">{tab === 'conversation' ? <Conversation key={`${host.epoch}:${data.selected}:${workspace.agent ?? 'all'}`} data={data} host={host} agent={selectedAgent} onAgent={selectAgent} loadEarlier={workspace.loadEarlier} limit={workspace.historyLimit}
-          composer={<Composer key={draftKey} target={recipient} draft={draft} busy={pending || closing} onDraft={value => setDrafts(previous => ({ ...previous, [draftKey]: value }))}
-            send={async (draft, agent) => {
-              await api('send_message', { epoch: host.epoch, run: selectedRun.id, agent: agent.id, generation: agent.generation, text: draft.text, followUp: draft.followUp });
-              setDrafts(previous => previous[draftKey]?.text === draft.text && previous[draftKey]?.followUp === draft.followUp ? { ...previous, [draftKey]: { ...draft, text: '' } } : previous);
-              workspace.refresh();
-            }} />} /> : tab === 'findings' ? <Findings key={`${host.epoch}:${data.selected}`} findings={data.findings} epoch={host.epoch} run={selectedRun.id} onAgent={selectAgent} /> :
-              <div className="overview-scroll"><section className="overview-summary"><span className="eyebrow">ANALYSIS WORKSPACE</span><h2>{fileName(selectedRun.target_path)}</h2><p className="muted path">{selectedRun.target_path}</p><Markdown text={selectedRun.task} />
-                <div className="metrics"><div><span>Tokens</span><strong>{compact(selectedRun.total_tokens)}</strong></div><div><span>{t('workspace-total-cost')}</span><strong>${selectedRun.cost_usd.toFixed(4)}</strong></div><div><span>{t('workspace-collaborating-agents')}</span><strong>{data.agents.length}</strong></div><div><span>{t('workspace-findings')}</span><strong>{data.findings.length}</strong></div></div>
-                {selectedRun.summary && <><h3>{t('workspace-task-summary')}</h3><Markdown text={selectedRun.summary} /></>}
-              </section><section className="overview-agents"><h3>{t('workspace-collaboration')}</h3>{data.agents.map(agent => <button key={agent.id} onClick={() => selectAgent(agent.id)}><Bot size={18} /><div><strong>{agent.name}</strong><p>{agent.task}</p></div><Status value={agent.status} /><ArrowRight size={14} /></button>)}</section>
-              {data.notes.length > 0 && <section className="shared-notes"><h3>{t('workspace-shared-analysis-notes')}</h3>{data.notes.map(note => <details key={note.id}><summary>{note.title}</summary><Markdown text={note.body} /></details>)}</section>}</div>}
-        </div>
-        </WorkspaceSplit>
+        <SelectedRunContent tab={tab} showAgents={tab !== 'observability' && agentsVisible && !focused}
+          agents={<Agents key={`${host.state_dir}:${selectedRun.id}`} scopeKey={`${host.state_dir}:${selectedRun.id}`} agents={data.agents} selected={workspace.agent} onSelect={selectAgent} canStop={!pending && !closing} onClose={() => setShowAgents(false)} onStop={agent => setConfirmation({ kind: 'stop', agent, run: selectedRun.id, epoch: host.epoch })} />}
+          conversation={<Conversation key={`${host.epoch}:${data.selected}:${workspace.agent ?? 'all'}`} data={data} host={host} agent={selectedAgent} onAgent={selectAgent} loadEarlier={workspace.loadEarlier} limit={workspace.historyLimit}
+            composer={<Composer key={draftKey} target={recipient} draft={draft} busy={pending || closing} onDraft={value => setDrafts(previous => ({ ...previous, [draftKey]: value }))}
+              send={async (draft, agent) => {
+                await api('send_message', { epoch: host.epoch, run: selectedRun.id, agent: agent.id, generation: agent.generation, text: draft.text, followUp: draft.followUp });
+                setDrafts(previous => previous[draftKey]?.text === draft.text && previous[draftKey]?.followUp === draft.followUp ? { ...previous, [draftKey]: { ...draft, text: '' } } : previous);
+                workspace.refresh();
+              }} />} />}
+          findings={<Findings key={`${host.epoch}:${data.selected}`} findings={data.findings} epoch={host.epoch} run={selectedRun.id} onAgent={selectAgent} />}
+          overview={<Overview data={data} run={selectedRun} onAgent={selectAgent} />}
+          observability={<Observability key={`${host.epoch}:${selectedRun.id}`} epoch={host.epoch} run={selectedRun.id} runStatus={selectedRun.status} />} />
       </> : <div className="welcome"><div className="welcome-icon"><img src={brandIcon} alt="Wukong" width={64} height={64} /></div><span className="eyebrow">WUKONG</span><h2>{workspace.loading ? t('workspace-loading-workspace') : t('workspace-see-your-analysis-take-shape')}</h2><p>{t('workspace-welcome-description')}</p><button className="primary" disabled={!host} onClick={() => setNewTask(true)}>{t('workspace-new-analysis')}<ArrowRight size={15} /></button><div className="welcome-features"><span><MessageSquare size={15} />{t('workspace-live-progress')}</span><span><GitBranch size={15} />{t('workspace-agent-collaboration')}</span><span><FileSearch size={15} />{t('workspace-traceable-evidence')}</span></div></div>}</div>
       <WorkspaceFooter host={host} run={selectedRun} error={Boolean(workspace.error)} agentCount={data?.agents.length ?? 0} />
     </main>
@@ -136,4 +132,35 @@ export default function App() {
       }}>{confirmation.kind === 'close' ? closing ? t('workspace-saving') : t('workspace-save-progress-and-exit') : t('workspace-stop-this-agent')}</button></div>
     </Modal>}
   </div>;
+}
+
+export function WorkspaceTabs({ tab, onTab, findingsCount, agentsVisible, showAgentToggle, onToggleAgents }: {
+  tab: WorkspaceTab; onTab: (tab: WorkspaceTab) => void; findingsCount: number;
+  agentsVisible: boolean; showAgentToggle: boolean; onToggleAgents: () => void;
+}) {
+  return <nav className="workspace-tabs" aria-label={t('workspace-workspace-views')}>
+    <button className={tab === 'conversation' ? 'active' : ''} onClick={() => onTab('conversation')}><MessageSquare size={15} />{t('workspace-analysis-progress')}</button>
+    <button className={tab === 'findings' ? 'active' : ''} onClick={() => onTab('findings')}><FileSearch size={15} />{t('workspace-findings-and-evidence')}<span>{findingsCount}</span></button>
+    <button className={tab === 'overview' ? 'active' : ''} onClick={() => onTab('overview')}><Activity size={15} />{t('workspace-task-overview')}</button>
+    <button className={tab === 'observability' ? 'active' : ''} onClick={() => onTab('observability')}><Gauge size={15} />{t('observability-title')}</button>
+    <div className="tab-spacer" />{showAgentToggle && <button className={`agents-toggle ${agentsVisible ? 'enabled' : ''}`} aria-label={t('workspace-toggle-collaboration-panel')} aria-pressed={agentsVisible} onClick={onToggleAgents}><GitBranch size={15} />{t('workspace-collaboration')}</button>}
+  </nav>;
+}
+
+export function SelectedRunContent({ tab, showAgents, agents, conversation, findings, overview, observability }: {
+  tab: WorkspaceTab; showAgents: boolean; agents: ReactNode; conversation: ReactNode; findings: ReactNode; overview: ReactNode; observability: ReactNode;
+}) {
+  const content = tab === 'conversation' ? conversation : tab === 'findings' ? findings : tab === 'overview' ? overview : observability;
+  if (tab === 'observability') return <div className="primary-panel">{content}</div>;
+  return <WorkspaceSplit id="agent-inspection" label={t('workspace-resize-collaboration-panel')} visible={showAgents} side={agents}>
+    <div className="primary-panel">{content}</div>
+  </WorkspaceSplit>;
+}
+
+export function Overview({ data, run, onAgent }: { data: Workspace; run: Run; onAgent: (id: string) => void }) {
+  return <div className="overview-scroll"><section className="overview-summary"><span className="eyebrow">ANALYSIS WORKSPACE</span><h2>{fileName(run.target_path)}</h2><p className="muted path">{run.target_path}</p><Markdown text={run.task} />
+    <div className="metrics"><div><span>Tokens</span><strong>{compact(run.total_tokens)}</strong></div><div><span>{t('workspace-total-cost')}</span><strong>${run.cost_usd.toFixed(4)}</strong></div><div><span>{t('workspace-collaborating-agents')}</span><strong>{data.agents.length}</strong></div><div><span>{t('workspace-findings')}</span><strong>{data.findings.length}</strong></div></div>
+    {run.summary && <><h3>{t('workspace-task-summary')}</h3><Markdown text={run.summary} /></>}
+  </section><section className="overview-agents"><h3>{t('workspace-collaboration')}</h3>{data.agents.map(agent => <button key={agent.id} onClick={() => onAgent(agent.id)}><Bot size={18} /><div><strong>{agent.name}</strong><p>{agent.task}</p></div><Status value={agent.status} /><ArrowRight size={14} /></button>)}</section>
+    {data.notes.length > 0 && <section className="shared-notes"><h3>{t('workspace-shared-analysis-notes')}</h3>{data.notes.map(note => <details key={note.id}><summary>{note.title}</summary><Markdown text={note.body} /></details>)}</section>}</div>;
 }

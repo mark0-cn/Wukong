@@ -1,0 +1,170 @@
+.observability-workspace {
+  --observability-series-1:#3987e5;
+  --observability-series-2:#d95926;
+  --observability-series-3:#199e70;
+  --observability-series-4:#c98500;
+  --observability-series-5:#d55181;
+  --observability-series-6:#0ca30c;
+  --observability-series-7:#9085e9;
+  --observability-series-8:#e66767;
+  height:100%;
+  min-height:0;
+  overflow:auto;
+  padding:20px 24px 32px;
+  background:var(--bg);
+  color:var(--text);
+}
+.observability-header,.observability-view-heading,.observability-section-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+.observability-header { align-items:center; margin-bottom:14px; }
+.observability-header h2 { font-size:var(--text-heading); font-weight:600; }
+.observability-header p,.observability-view-heading p { margin:4px 0 0; color:var(--muted); font-size:var(--text-ui); max-width:70ch; }
+.observability-header-actions { display:flex; align-items:flex-end; gap:8px; }
+.observability-header-actions label,.observability-filter label,.observability-trace-detail-heading label { display:grid; gap:5px; color:var(--muted); font-size:var(--text-caption); }
+.observability-header-actions select,.observability-filter input,.observability-filter select,.observability-trace-detail-heading select { font-size:var(--text-ui); padding:7px 9px; }
+.observability-backends { display:flex; flex-wrap:wrap; gap:6px; padding:9px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.observability-backend { position:relative; }
+.observability-backend summary { display:flex; align-items:center; gap:6px; list-style:none; border:1px solid var(--border); border-radius:5px; padding:4px 7px; font-size:var(--text-caption); color:var(--muted); }
+.observability-backend summary::-webkit-details-marker { display:none; }
+.observability-backend summary>span:last-child { color:var(--muted); }
+.observability-backend.configured summary>span:last-child { color:var(--success); }
+.observability-presence { width:6px; height:6px; border-radius:50%; background:var(--border-strong); }
+.observability-backend.configured .observability-presence { background:var(--success); }
+.observability-backend>div { position:absolute; z-index:5; top:calc(100% + 5px); left:0; min-width:260px; padding:10px; border:1px solid var(--border-strong); border-radius:6px; background:var(--surface); box-shadow:0 8px 24px var(--shadow); }
+.observability-backend dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:5px 12px; }
+.observability-backend dt { color:var(--muted); }
+.observability-backend dd { margin:0; overflow-wrap:anywhere; }
+.observability-backend-error { display:inline-flex; align-items:center; gap:5px; color:var(--error); }
+.observability-exporter { flex-basis:100%; padding:8px 0 3px; font-size:var(--text-caption); }
+.observability-exporter-flags { display:flex; flex-wrap:wrap; gap:5px 12px; margin-top:5px; color:var(--muted); }
+.observability-exporter-flags span[data-enabled=true] { color:var(--success); }
+.observability-relay-health { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:6px; }
+.observability-relay-health small { display:block; color:var(--error); overflow-wrap:anywhere; }
+.observability-navigation { display:flex; gap:3px; margin:14px 0 16px; border-bottom:1px solid var(--border); overflow-x:auto; }
+.observability-navigation button { border:0; border-bottom:2px solid transparent; border-radius:0; padding:8px 12px; background:transparent; color:var(--muted); }
+.observability-navigation button.active { border-bottom-color:var(--accent); color:var(--text); }
+.observability-global-error { padding:9px 12px; margin-bottom:12px; background:var(--error-bg); border:1px solid var(--error-border); color:var(--error); border-radius:6px; }
+.observability-global-error span { display:block; margin-top:3px; color:var(--text); }
+.observability-data.refreshing { opacity:.68; }
+.observability-data { transition:opacity .12s; }
+.observability-empty { padding:24px 0; }
+.observability-local { display:grid; gap:16px; }
+.observability-section,.observability-signal-view { min-width:0; }
+.observability-section { padding-bottom:16px; border-bottom:1px solid var(--border); }
+.observability-section h3,.observability-signal-view h3 { font-size:var(--text-ui); font-weight:600; }
+.observability-section-heading { align-items:center; margin-bottom:10px; }
+.observability-section-heading h3 { margin-right:auto; }
+.observability-kpis { display:grid; grid-template-columns:repeat(6,minmax(90px,1fr)); border:1px solid var(--border); border-radius:7px; overflow:hidden; }
+.observability-kpis>div { display:grid; gap:4px; padding:12px; background:var(--surface); border-right:1px solid var(--border); }
+.observability-kpis>div:last-child { border-right:0; }
+.observability-kpis span,.observability-count-grid span { color:var(--muted); font-size:var(--text-caption); }
+.observability-kpis strong { font-size:var(--text-heading-sm); font-weight:500; }
+.observability-run-identity { font-size:var(--text-caption); overflow-wrap:anywhere; }
+.observability-count-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px 18px; }
+.observability-count-grid>div { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--border); }
+.observability-count-grid strong { font-variant-numeric:tabular-nums; }
+.observability-table-scroll { max-width:100%; overflow:auto; margin:10px 0; }
+.observability-table { width:100%; border-collapse:collapse; font-size:var(--text-ui); text-align:left; }
+.observability-table th { color:var(--muted); font-weight:500; background:var(--surface); }
+.observability-table th,.observability-table td { padding:7px 9px; border-bottom:1px solid var(--border); vertical-align:top; }
+.observability-table td:last-child,.observability-table th:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+.observability-table td small { display:block; color:var(--muted); overflow-wrap:anywhere; }
+.observability-virtual-list { height:360px; overflow:auto; border:1px solid var(--border); border-radius:6px; background:var(--field); contain:strict; }
+.observability-virtual-list:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.observability-event,.observability-log-entry { padding:9px 12px; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+.observability-event header,.observability-log-entry header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:5px; font-size:var(--text-caption); color:var(--muted); }
+.observability-event header time,.observability-log-entry header time { margin-left:auto; }
+.observability-event pre,.observability-log-entry pre { max-height:180px; overflow:auto; white-space:pre-wrap; color:var(--text); }
+.observability-seq { color:var(--accent); font-family:var(--font-code); }
+.observability-notices { display:flex; align-items:center; flex-wrap:wrap; gap:7px; margin:8px 0; }
+.observability-notices p { margin:0; flex-basis:100%; }
+.observability-flag { display:inline-flex; align-items:center; width:fit-content; padding:2px 6px; border:1px solid var(--warning-border); border-radius:4px; color:var(--warning); background:var(--warning-bg); font-size:var(--text-caption); }
+.observability-flag.stale::before { content:'●'; margin-right:5px; }
+.observability-flag.partial::before { content:'◐'; margin-right:5px; }
+.observability-flag.truncated::before { content:'…'; margin-right:5px; }
+.observability-unconfigured-message { color:var(--muted); }
+.observability-view-heading { align-items:center; margin-bottom:12px; }
+.observability-filter { display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.observability-filter label { min-width:min(300px,100%); }
+.observability-log-list { height:460px; margin:10px 0; }
+.observability-level { font-weight:600; color:var(--info); }
+.observability-level.level-error,.observability-level.level-fatal { color:var(--error); }
+.observability-level.level-warn { color:var(--warning); }
+.observability-log-entry code { overflow-wrap:anywhere; }
+.observability-properties { margin:6px 0; }
+.observability-properties>div { display:grid; grid-template-columns:minmax(110px,.35fr) minmax(0,1fr); gap:12px; padding:6px 0; border-bottom:1px solid var(--border); }
+.observability-properties dt { color:var(--muted); overflow-wrap:anywhere; }
+.observability-properties dd { margin:0; min-width:0; }
+.observability-properties pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.observability-trace-layout { display:grid; grid-template-columns:minmax(220px,.7fr) minmax(0,2fr); gap:16px; }
+.observability-trace-list { display:flex; flex-direction:column; gap:5px; min-width:0; max-height:650px; overflow:auto; }
+.observability-trace-list>button,.observability-trace-list>div>button { display:grid; justify-items:start; text-align:left; white-space:normal; padding:9px; min-width:0; width:100%; }
+.observability-trace-list>div>button.selected { border-color:var(--accent-border); background:var(--accent-surface); }
+.observability-trace-list>div>button code { max-width:100%; overflow:hidden; text-overflow:ellipsis; color:var(--muted); }
+.observability-trace-list>div>button span,.observability-trace-list>div>button small { color:var(--muted); margin-top:3px; }
+.observability-trace-detail { min-width:0; }
+.observability-trace-detail-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:10px; }
+.observability-trace-detail-heading code { display:block; color:var(--muted); max-width:360px; overflow:hidden; text-overflow:ellipsis; }
+.observability-timeline { border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--surface); }
+.observability-timeline .vis-timeline { border:0; font-family:var(--font-ui); color:var(--text); }
+.observability-timeline .vis-panel.vis-bottom,.observability-timeline .vis-panel.vis-center,.observability-timeline .vis-panel.vis-left,.observability-timeline .vis-panel.vis-right,.observability-timeline .vis-panel.vis-top { border-color:var(--border); }
+.observability-timeline .vis-time-axis .vis-text { color:var(--muted); }
+.observability-timeline .vis-grid.vis-minor,.observability-timeline .vis-grid.vis-major { border-color:var(--border); }
+.observability-timeline .vis-labelset .vis-label { color:var(--text); border-color:var(--border); }
+.observability-timeline .vis-item { color:var(--text); background:var(--info-bg); border-color:var(--info); border-radius:4px; font-size:var(--text-caption); }
+.observability-timeline .vis-item.span-error { background:var(--error-bg); border-color:var(--error); }
+.observability-timeline .vis-item.vis-selected { background:var(--accent-surface); border-color:var(--accent); box-shadow:none; }
+.observability-timeline-group,.observability-timeline-item { display:block; }
+.observability-span-details { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
+.observability-span-details h4 { font-size:var(--text-ui); }
+.observability-span-facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 16px; }
+.observability-span-facts>div { min-width:0; }
+.observability-span-facts dt { color:var(--muted); font-size:var(--text-caption); }
+.observability-span-facts dd { margin:2px 0 0; overflow-wrap:anywhere; }
+.observability-property-columns { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+.observability-query-meta { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin:8px 0; color:var(--muted); font-size:var(--text-caption); }
+.observability-query-meta code { max-width:100%; overflow-wrap:anywhere; }
+.observability-chart { width:100%; height:380px; margin:10px 0; border:1px solid var(--border); border-radius:6px; background:var(--surface); }
+.observability-chart:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.observability-data-table { margin-top:10px; }
+.observability-data-table summary { color:var(--muted); }
+.observability-settings-backend { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; gap:0 18px; border:1px solid var(--border); border-radius:6px; padding:12px 14px 0; min-width:0; }
+.observability-settings-backend legend { padding:0 5px; font-weight:600; }
+.observability-settings-status { display:grid; gap:5px; }
+.observability-settings-status>div { display:grid; grid-template-columns:110px 100px minmax(160px,1fr) minmax(160px,1fr); gap:10px; padding:7px 0; border-bottom:1px solid var(--border); font-size:var(--text-ui); }
+.observability-settings-status span { color:var(--muted); overflow-wrap:anywhere; }
+
+@media (prefers-color-scheme:light) {
+  .observability-workspace {
+    color-scheme:light;
+    --bg:#f5f6f8; --surface:#ffffff; --field:#f0f2f5; --hover:#e9edf2;
+    --border:#d7dce3; --border-strong:#aab3bf; --text:#20242b; --muted:#5b6470;
+    --accent:#80652f; --accent-hover:#6e5525; --accent-ink:#ffffff; --accent-surface:#f1e9d9; --accent-border:#b9a273;
+    --error:#a12d38; --error-bg:#fbecef; --error-border:#df9ba4; --success:#236846; --info:#255f9c; --info-bg:#e8f0fa; --info-border:#93afd0;
+    --warning:#7c5714; --warning-bg:#faf1dc; --warning-border:#c6a565; --shadow:#22304422;
+    --observability-series-1:#2a78d6; --observability-series-2:#eb6834; --observability-series-3:#1baf7a; --observability-series-4:#eda100;
+    --observability-series-5:#e87ba4; --observability-series-6:#008300; --observability-series-7:#6250d6; --observability-series-8:#e34948;
+  }
+}
+@container (max-width:800px) {
+  .observability-kpis { grid-template-columns:repeat(3,minmax(90px,1fr)); }
+  .observability-kpis>div { border-bottom:1px solid var(--border); }
+  .observability-trace-layout { grid-template-columns:1fr; }
+  .observability-trace-list { max-height:240px; }
+  .observability-property-columns { grid-template-columns:1fr; }
+}
+@container (max-width:560px) {
+  .observability-workspace { padding:14px 14px 24px; }
+  .observability-header,.observability-view-heading { align-items:flex-start; flex-direction:column; }
+  .observability-header-actions { width:100%; justify-content:space-between; }
+  .observability-kpis { grid-template-columns:repeat(2,minmax(90px,1fr)); }
+  .observability-span-facts { grid-template-columns:1fr; }
+  .observability-trace-detail-heading { align-items:flex-start; flex-direction:column; }
+  .observability-properties>div { grid-template-columns:1fr; gap:3px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .observability-data { transition:none; }
+}
+@media (forced-colors:active) {
+  .observability-flag,.observability-backend summary,.observability-kpis { border:1px solid CanvasText; }
+  .observability-chart { forced-color-adjust:none; }
+}

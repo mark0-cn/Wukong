@@ -86,6 +86,7 @@ pub struct Service {
     changes: watch::Sender<u64>,
     operations: Arc<AtomicUsize>,
     closing: AtomicBool,
+    telemetry: crate::adapters::telemetry::TelemetryHandle,
 }
 pub(crate) struct Operation(Arc<AtomicUsize>);
 impl Drop for Operation {
@@ -171,6 +172,7 @@ impl Service {
         selected: Option<String>,
         path: Option<PathBuf>,
         state_override: Option<PathBuf>,
+        telemetry: crate::adapters::telemetry::TelemetryHandle,
     ) -> Arc<Self> {
         Arc::new(Self {
             state: Mutex::new(ContextState {
@@ -186,6 +188,7 @@ impl Service {
             changes: watch::channel(0).0,
             operations: Arc::new(AtomicUsize::new(0)),
             closing: AtomicBool::new(false),
+            telemetry,
         })
     }
     pub fn subscribe(&self) -> watch::Receiver<u64> {
@@ -211,6 +214,21 @@ impl Service {
             UiMessage::new("system-the-workspace-is-closing")
         );
         Ok(state.clone())
+    }
+    pub(crate) fn observability_context(
+        &self,
+        epoch: u64,
+    ) -> Result<(
+        crate::adapters::telemetry::QueryConfig,
+        Store,
+        crate::adapters::telemetry::TelemetryStatus,
+    )> {
+        let context = self.context(epoch)?;
+        Ok((
+            context.config.observability.query,
+            context.store,
+            self.telemetry.status(),
+        ))
     }
     pub fn status(&self) -> HostStatus {
         let state = self.state_lock();
@@ -293,7 +311,7 @@ impl Service {
         if let Some(language) = output_language {
             config.output_language = Some(language);
         }
-        let service = AssessmentService::new(config, context.store);
+        let service = AssessmentService::new(config, context.store, self.telemetry.clone());
         let prepared = if let Some((run, budget)) = resume {
             service.resume(&run, Some(budget)).await
         } else {
@@ -365,7 +383,7 @@ impl Service {
     }
     pub fn pause(&self, epoch: u64, run: &str) -> Result<()> {
         let (context, _operation) = self.operation(epoch)?;
-        AssessmentService::new(context.config, context.store)
+        AssessmentService::new(context.config, context.store, self.telemetry.clone())
             .pause(run, "operator paused from desktop")?;
         if let Some(active) = self.active_lock().as_ref()
             && active.info.run_id.as_deref() == Some(run)
@@ -385,7 +403,7 @@ impl Service {
             record.run_id == run,
             UiMessage::new("system-the-agent-does-not-belong-to-this-task")
         );
-        AssessmentService::new(context.config, context.store)
+        AssessmentService::new(context.config, context.store, self.telemetry.clone())
             .stop(agent, "operator stopped from desktop")?;
         self.changed();
         Ok(())
@@ -405,19 +423,20 @@ impl Service {
             record.run_id == run,
             UiMessage::new("system-the-agent-does-not-belong-to-this-task")
         );
-        let receipt = AssessmentService::new(context.config, context.store).message(
-            agent,
-            text,
-            MessageOptions {
-                kind: if follow_up {
-                    MessageKind::FollowUp
-                } else {
-                    MessageKind::Information
+        let receipt = AssessmentService::new(context.config, context.store, self.telemetry.clone())
+            .message(
+                agent,
+                text,
+                MessageOptions {
+                    kind: if follow_up {
+                        MessageKind::FollowUp
+                    } else {
+                        MessageKind::Information
+                    },
+                    recipient_generation: Some(generation),
+                    ..Default::default()
                 },
-                recipient_generation: Some(generation),
-                ..Default::default()
-            },
-        )?;
+            )?;
         self.changed();
         Ok(receipt)
     }
@@ -634,7 +653,14 @@ mod tests {
     async fn invalid_start_releases_execution_and_stale_workspace_commands_fail() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let store = Store::open(directory.path())?;
-        let service = Service::new(AppConfig::default(), store.clone(), None, None, None);
+        let service = Service::new(
+            AppConfig::default(),
+            store.clone(),
+            None,
+            None,
+            None,
+            crate::adapters::telemetry::TelemetryHandle::disabled(),
+        );
         assert!(
             service
                 .start(1, "missing".into(), "fixture".into(), None)

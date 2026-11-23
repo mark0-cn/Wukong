@@ -8,8 +8,9 @@ import { StorageLocations, type StorageDraft } from '../maintenance/StorageLocat
 import { LanguageSettings } from './LanguageSettings';
 import { WindowsConnection, emptyWindowsConnection, type WindowsConnectionDraft } from './WindowsConnection';
 import { WindowsWorker } from './WindowsWorker';
+import { ObservabilitySettings } from './ObservabilitySettings';
 import type { WindowsConnectionInput } from '../../shared/api/commands';
-import { editedForm, transportEdit } from './transport';
+import { editedForm, transportEdit, atPath } from './transport';
 
 /** The Windows Worker setup commands only exist on a Windows desktop host. */
 const windowsHost = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
@@ -51,11 +52,6 @@ function environmentMap(form: Record<string, Json>): Record<string, Record<strin
   if (!environments || typeof environments !== 'object' || Array.isArray(environments)) return {};
   return Object.fromEntries(Object.entries(environments).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value))) as Record<string, Record<string, Json>>;
 }
-function atPath(form: Record<string, Json>, path: string): Json | undefined {
-  let value: Json | undefined = form;
-  for (const key of path.split('.')) value = value && typeof value === 'object' && !Array.isArray(value) ? value[key] : undefined;
-  return value;
-}
 export function Settings({ open, host, onClose, onSaved, onDirty }: {
   open: boolean; host: Host; onClose: () => void; onSaved: () => void; onDirty: (value: boolean) => void;
 }) {
@@ -63,7 +59,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   const [document, setDocument] = useState<ConfigDocument>();
   const [loadedEpoch, setLoadedEpoch] = useState(host.epoch);
   const [edits, setEdits] = useState<Record<string, Json>>({});
-  const [section, setSection] = useState<'general' | 'budget' | 'connections' | 'storage' | 'advanced'>('general');
+  const [section, setSection] = useState<'general' | 'budget' | 'connections' | 'observability' | 'storage' | 'advanced'>('general');
   const [connectionDraft, setConnectionDraft] = useState<WindowsConnectionDraft>(emptyWindowsConnection);
   const connectionDirty = Boolean(connectionDraft.receipt || connectionDraft.name || connectionDraft.host || connectionDraft.identity || connectionDraft.fingerprint);
   const [storageVisited, setStorageVisited] = useState(false);
@@ -143,8 +139,8 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
   if (!open) return null;
   return <Modal title={t('settings-workspace-settings')} description={t('settings-new-tasks-use-the-current-configuration-resumed')} onClose={() => { if (!storageBusy) onClose(); }} wide>
     <nav className="settings-sections" aria-label={t('ui-settings-sections')}>
-      {(['general', 'budget', 'connections', 'storage', 'advanced'] as const).map(value => <button key={value} aria-pressed={section === value} disabled={busy || storageBusy} onClick={() => { void selectSection(value); }}>
-        {value === 'general' ? t('ui-general-settings') : value === 'budget' ? t('settings-task-budget') : value === 'connections' ? t('connection-environments') : value === 'storage' ? t('settings-storage-locations') : t('ui-advanced-settings')}
+      {(['general', 'budget', 'connections', 'observability', 'storage', 'advanced'] as const).map(value => <button key={value} aria-pressed={section === value} disabled={busy || storageBusy} onClick={() => { void selectSection(value); }}>
+        {value === 'general' ? t('ui-general-settings') : value === 'budget' ? t('settings-task-budget') : value === 'connections' ? t('connection-environments') : value === 'observability' ? t('observability-settings-section') : value === 'storage' ? t('settings-storage-locations') : t('ui-advanced-settings')}
       </button>)}
     </nav>
     <div hidden={section !== 'general'}><LanguageSettings /></div>
@@ -163,7 +159,7 @@ export function Settings({ open, host, onClose, onSaved, onDirty }: {
       </div>}
       {!document ? <p className="muted">{busy ? t('settings-loading-configuration') : t('settings-could-not-load-configuration-please-reload')}</p> : raw && section === 'advanced' ?
       <textarea className="toml-editor" aria-label={t('settings-toml-configuration-source')} spellCheck={false} value={document.source} disabled={busy}
-        onChange={event => setDocument({ ...document, source: event.target.value })} /> : groups(draft).map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
+        onChange={event => setDocument({ ...document, source: event.target.value })} /> : section === 'observability' ? <ObservabilitySettings epoch={host.epoch} form={draft} edits={edits} onEdits={setEdits} disabled={busy || loadedEpoch !== host.epoch} /> : groups(draft).map((group, index) => ({ ...group, fields: group.fields.filter((field, fieldIndex) => index === 0 ? section === 'general' ? fieldIndex < 5 : section === 'advanced' && fieldIndex >= 5 : index === 1 ? section === 'budget' : section === 'advanced') })).filter(group => group.fields.length).map(group => <section key={group.fields[0].path} className="settings-group"><h3>{group.title}</h3>
         <div className="settings-grid">{group.fields.map(field => {
           const value = atPath(draft, field.path);
           const change = (value: Json) => setEdits(previous => field.kind === 'backend' ? transportEdit(document.form, previous, field.path, String(value)) : ({ ...previous, [field.path]: value }));
