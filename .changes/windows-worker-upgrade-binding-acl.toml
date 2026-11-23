@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow native Worker upgrades to replace binding.json while independently enforcing the code-root and binding-file ACL policies."
+zh_CN = "允许原生 Worker 升级替换 binding.json，同时独立强制校验代码根目录与绑定文件的 ACL 策略。"
