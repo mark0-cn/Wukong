@@ -73,6 +73,20 @@ class AssemblyChecks(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Missing native dependency license"):
                     collect(root / "different-version", supplemental=SUPPLEMENTAL_LICENSES)
 
+    def test_opentelemetry_supplements_bind_license_bytes_to_the_packaged_revision(self):
+        for package, version, revision in (
+            ("opentelemetry", "0.32.0", "ec289cb3c6f8260951699c51df968560943c1451"),
+            ("opentelemetry_sdk", "0.32.1", "284a37d93b3856e1975c2807ba3af1421ebd9b52"),
+            ("opentelemetry-proto", "0.32.0", "ec289cb3c6f8260951699c51df968560943c1451"),
+        ):
+            original = SUPPLEMENTAL_LICENSES[(package, version)]
+            provenance = json.loads(original.with_name("source.json").read_text(encoding="utf-8"))
+            self.assertEqual(provenance["package"], package)
+            self.assertEqual(provenance["version"], version)
+            self.assertEqual(provenance["revision"], revision)
+            self.assertEqual(sha256(original), provenance["sha256"])
+            self.assertIn(provenance["revision"], provenance["url"])
+
     def test_native_notices_preserve_license_text_shipped_as_copyright(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

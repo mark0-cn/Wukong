@@ -1,0 +1,9 @@
+{
+  "package": "opentelemetry_sdk",
+  "version": "0.32.1",
+  "revision": "284a37d93b3856e1975c2807ba3af1421ebd9b52",
+  "path_in_vcs": "opentelemetry-sdk",
+  "license_choice": "Apache-2.0",
+  "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/284a37d93b3856e1975c2807ba3af1421ebd9b52/LICENSE",
+  "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+}
