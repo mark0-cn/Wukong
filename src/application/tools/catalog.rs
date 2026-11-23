@@ -1072,7 +1072,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabPrepareArgs>(
             "lab_prepare",
             "tool-lab-prepare",
-            "Start preparation of the assigned Windows lab and return operation_id. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Available by default to catalog-permitted roles. Unsupported execution requirements are rejected at run admission.",
+            "Start preparation of the assigned Windows lab and return operation_id. Every attempt restores fixed base wukong_base_vm; configured signed worker_media may upgrade, verify and republish that base before a reboot and experiment snapshot. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Available by default to catalog-permitted roles. Unsupported execution requirements are rejected at run admission.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {

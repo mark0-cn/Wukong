@@ -61,7 +61,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `lab_list` | analyst / verifier | 否 | controller | 列出已配置的 Windows 实验 VM 别名及分配的环境，不连接或修改状态。 |
 | `lab_operation_cancel` | analyst / verifier | 是 | controller | 请求中断自己拥有的实验宿主操作。取消后客体影响可能仍未知；再次修改前须检查并调和原操作。 |
 | `lab_operation_status` | analyst / verifier | 否 | controller | 按 operation_id 读取持久化实验宿主操作的结果和证据。控制器归属丢失时保留结果未知，不重放操作。 |
-| `lab_prepare` | analyst / verifier | 是 | controller | 启动指定 Windows Lab 的准备并返回 operation_id。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。对工具目录允许的角色默认开启；不支持的执行要求在运行准入时拒绝。 |
+| `lab_prepare` | analyst / verifier | 是 | controller | 启动指定 Windows Lab 的准备并返回 operation_id。每次都会恢复固定基线 wukong_base_vm；配置的签名 worker_media 可先升级、验证并重新发布该基线，再重启并创建实验快照。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。对工具目录允许的角色默认开启；不支持的执行要求在运行准入时拒绝。 |
 | `lab_restore` | analyst / verifier | 是 | controller | 使用所属 lab_ref 启动带隔离保护的基线恢复并返回 operation_id。要求 worker 资源空闲且证据同步完成。未知影响只有在确认恢复后才标记 lost，快照清理单独报告。通过 lab_operation_status 查询。 |
 | `lab_run` | analyst / verifier | 是 | job.start + file.put + job.status + job.cancel | 用所属 lab_ref 将已验证的 exe/user harness 作为普通持久化评估作业启动，返回 run.job_id。通过该句柄调用 job_status、job_cancel 和 job_artifacts。支持 stdin 证据或空 argv，目标哈希必须匹配。保留共享评估租约和完成条件。 |
 | `lab_status` | analyst / verifier | 否 | controller | 读取指定 Windows 实验 VM 的持久状态及有时限的宿主观测。必须提供 vm；发现配置请使用 lab_list。不执行调和或状态修改，长操作期间仍可查询。 |

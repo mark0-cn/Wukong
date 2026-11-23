@@ -111,6 +111,50 @@ pub fn add(installation: &str, sshd: &Path, port: u16, peer: IpAddr) -> Result<(
     Ok(())
 }
 
+pub fn replace(
+    installation: &str,
+    previous_sshd: &Path,
+    next_sshd: &Path,
+    port: u16,
+    peer: IpAddr,
+) -> Result<()> {
+    let _com = Com::open()?;
+    let previous = application_path(previous_sshd)?;
+    let next = application_path(next_sshd)?;
+    let port = port.to_string();
+    let peer = peer.to_string();
+    // SAFETY: `_com` keeps this thread's apartment initialized. `Item` selects
+    // the exact installation-owned rule; every security-relevant binding is
+    // checked against the old package before only its application path changes.
+    unsafe {
+        let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)
+            .context("open Windows firewall policy")?;
+        let rules = policy.Rules().context("open Windows firewall rules")?;
+        let name = BSTR::from(crate::rpc::pipe_transport::service_name(installation)?);
+        let rule = rules
+            .Item(&name)
+            .context("owned SSH firewall rule is missing during upgrade")?;
+        ensure!(
+            rule.ApplicationName()? == previous
+                && rule.Protocol()? == 6
+                && rule.LocalPorts()? == port
+                && rule.RemoteAddresses()? == peer
+                && rule.Direction()? == NET_FW_RULE_DIR_IN
+                && rule.Action()? == NET_FW_ACTION_ALLOW
+                && rule.Profiles()? == NET_FW_PROFILE2_ALL.0
+                && rule.Enabled()? == VARIANT_TRUE,
+            "existing SSH firewall rule differs from the verified installation"
+        );
+        rule.SetApplicationName(&BSTR::from(next.clone()))
+            .context("update owned SSH firewall executable")?;
+        ensure!(
+            rule.ApplicationName()? == next,
+            "SSH firewall executable readback differs from the upgraded package"
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

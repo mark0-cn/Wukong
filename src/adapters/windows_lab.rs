@@ -105,6 +105,11 @@ impl VmHost for VmwareVm {
         Ok(())
     }
 
+    async fn stop(&self) -> Result<()> {
+        self.run(&["-T", "ws", "stop", self.vmx()?, "hard"]).await?;
+        Ok(())
+    }
+
     async fn delete_snapshot(&self, name: &str) -> Result<()> {
         validate_snapshot_name(name)?;
         self.run(&["-T", "ws", "deleteSnapshot", self.vmx()?, name])

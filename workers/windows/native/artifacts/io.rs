@@ -34,6 +34,12 @@ pub(crate) fn publish_json(path: &Path, value: &impl Serialize, policy: &AclPoli
     policy.publish(path, &bytes)
 }
 
+pub(crate) fn replace_json(path: &Path, value: &impl Serialize, policy: &AclPolicy) -> Result<()> {
+    let mut bytes = serde_json::to_vec(value)?;
+    bytes.push(b'\n');
+    policy.replace(path, &bytes)
+}
+
 /// Replace a diagnostic snapshot in an already protected directory. Existing
 /// create-new publication remains unchanged for execution authority records.
 pub(crate) fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {

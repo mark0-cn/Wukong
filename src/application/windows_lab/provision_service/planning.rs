@@ -58,10 +58,8 @@ impl WindowsLab {
             .with_context(|| format!("read registered VMX {}", self.vmx.display()))
     }
 
-    /// Resolve one full boot disk and inspect the powered-off system volume. This
-    /// is only valid once the VM no longer points at a snapshot delta. The
-    /// preflight refuses a disk that still carries an earlier attempt's guest
-    /// leftovers and names the explicit cleanup command for that operation.
+    /// Resolve and inspect the selected powered-off boot disk. Initial installs
+    /// use the full disk; replacements deliberately use the restored base delta.
     pub(super) async fn plan_guest_disk(
         &self,
         vmx_bytes: &[u8],
@@ -288,6 +286,7 @@ impl WindowsLab {
                     disk,
                     boot_task_injection()?,
                     self.baseline.clone(),
+                    snapshot_plan == SnapshotPlan::ReplaceBaseline,
                     builder,
                     Duration::from_secs(options.timeout_seconds),
                 );
@@ -426,10 +425,8 @@ impl WindowsLab {
         })
     }
 
-    /// `--dry-run` with `--replace-baseline`: the powered-off VM still points at
-    /// the baseline snapshot's delta, so the committed guest disk can only be
-    /// validated after the deletion. Report the ordering and every non-disk
-    /// action without mutating the VM, the guest or the controller state.
+    /// `--dry-run` with `--replace-baseline`: report staged verification and
+    /// fixed-base publication without mutating the VM, guest or controller state.
     async fn dry_run_replace_baseline(
         &self,
         options: &ProvisionOptions,
@@ -522,11 +519,11 @@ impl WindowsLab {
             paths.vmx_backup.display()
         ));
         actions.push(format!(
-            "persist the provisioning intent and delete the configured baseline snapshot '{}'",
+            "persist the provisioning intent and update the restored delta while preserving fixed base '{}'",
             self.baseline
         ));
         actions.push(
-            "resolve and validate the guest disk and powered-off system volume after the baseline deletion"
+            "stage the replacement, verify its worker identity, then delete the old base and capture the verified state under the fixed base name"
                 .into(),
         );
         actions.push(format!(
@@ -553,10 +550,9 @@ impl WindowsLab {
             "restore the original VMX bytes and verify the guest receipt plus the removed boot task offline"
                 .into(),
         );
-        actions.push(format!(
-            "create the baseline snapshot '{}' and leave the VM powered off",
-            self.baseline
-        ));
+        actions.push(
+            "create an operation-owned staged base snapshot and leave the VM powered off".into(),
+        );
         actions.push(format!(
             "publish the provisioning receipt under {}/provisions",
             self.store.root().display()
@@ -605,10 +601,15 @@ pub(super) fn planned_actions(plan: &PlannedProvision) -> Vec<String> {
         ),
         "restore the original VMX bytes, verify the guest receipt and the removed scheduled-task registration offline"
             .into(),
-        format!(
-            "create the baseline snapshot '{}' and leave the VM powered off",
-            plan.baseline
-        ),
+        if plan.replaces_baseline {
+            "create an operation-owned staged base snapshot, verify it, retire the old base and capture the verified state under the fixed name"
+                .into()
+        } else {
+            format!(
+                "create the fixed base snapshot '{}' and leave the VM powered off",
+                plan.baseline
+            )
+        },
         format!(
             "publish the provisioning receipt under {}/provisions",
             plan.paths

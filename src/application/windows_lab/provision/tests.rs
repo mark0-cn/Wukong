@@ -623,11 +623,10 @@ fn guest_disk_is_resolved_from_the_registered_vmx() {
     assert!(resolve_guest_disk("sata0:0.present = \"TRUE\"\n", &vmx).is_err());
     assert!(resolve_guest_disk("nvme0:0.fileName = \"../escape.vmdk\"\n", &vmx).is_err());
     fs::write(directory.path().join("base-000001.vmdk"), b"delta").unwrap();
-    assert!(
-        resolve_guest_disk("nvme0:0.fileName = \"base-000001.vmdk\"\n", &vmx)
-            .unwrap_err()
-            .to_string()
-            .contains("delta")
+    let restored = resolve_guest_disk("nvme0:0.fileName = \"base-000001.vmdk\"\n", &vmx).unwrap();
+    assert_eq!(
+        restored.path,
+        fs::canonicalize(directory.path().join("base-000001.vmdk")).unwrap()
     );
 }
 

@@ -22,7 +22,9 @@ use crate::application::windows_lab::types::{
     LabPhase, LabProvision, LabState, OperationKind, PendingOperation, ProvisionSource,
     ProvisioningSpec, RunStatus,
 };
-use crate::application::windows_lab::{LabError, LabStore, ReconcileOutcome, VmHost};
+use crate::application::windows_lab::{
+    BASELINE_SNAPSHOT, LabError, LabStore, ReconcileOutcome, VmHost,
+};
 use crate::application::worker_media::{FinalizeMediaRequest, FinalizedMedia};
 use crate::config::WindowsLabVm;
 use anyhow::{Context, Result, bail};
@@ -49,14 +51,12 @@ struct HostState {
     fail_snapshot: bool,
     fail_revert: bool,
     fail_delete: bool,
-    /// Emulated VMware snapshot commit: rewrite the VMX when the snapshot goes.
-    rewrite_vmx_on_delete: Option<(PathBuf, Vec<u8>)>,
     state_dir: Option<PathBuf>,
     delete_observation: Option<DeleteObservation>,
 }
 
-/// What the controller state and provision directory looked like when the
-/// configured baseline snapshot was deleted.
+/// What the controller state and provision directory looked like when an
+/// operation-owned base-transition snapshot was deleted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DeleteObservation {
     vmx_backups: usize,
@@ -93,9 +93,6 @@ impl FakeHost {
     }
     fn record(&self, event: impl Into<String>) {
         self.events.lock().unwrap().push(event.into());
-    }
-    fn rewrite_vmx_on_delete(&self, vmx: &Path, bytes: Vec<u8>) {
-        self.state.lock().unwrap().rewrite_vmx_on_delete = Some((vmx.to_path_buf(), bytes));
     }
     fn watch_state(&self, state_dir: &Path) {
         self.state.lock().unwrap().state_dir = Some(state_dir.to_path_buf());
@@ -200,6 +197,15 @@ impl VmHost for FakeHost {
         Ok(())
     }
 
+    async fn stop(&self) -> Result<()> {
+        self.record("host:stop");
+        let mut state = self.state.lock().unwrap();
+        state.calls.push("stop".into());
+        state.running = false;
+        state.boot_started = false;
+        Ok(())
+    }
+
     async fn delete_snapshot(&self, name: &str) -> Result<()> {
         self.record(format!("host:delete {name}"));
         let mut state = self.state.lock().unwrap();
@@ -208,10 +214,6 @@ impl VmHost for FakeHost {
             bail!("delete snapshot failed");
         }
         self.observe_delete(&mut state);
-        // A real VMware snapshot commit rewrites the VMX away from the delta.
-        if let Some((vmx, bytes)) = state.rewrite_vmx_on_delete.clone() {
-            fs::write(vmx, bytes)?;
-        }
         state.snapshots.retain(|snapshot| snapshot != name);
         Ok(())
     }
@@ -381,6 +383,7 @@ impl FakeDisk {
 fn plan_json(written: &[GuestFile]) -> serde_json::Value {
     let plan = written
         .iter()
+        .rev()
         .find(|file| file.windows_path.ends_with("provision-plan.json"))
         .expect("provision plan was injected");
     serde_json::from_slice(&plan.bytes).unwrap()
@@ -887,6 +890,63 @@ impl ProvisionEnvironment for FakeEnvironment {
     }
 }
 
+struct PublishingWorker {
+    ready: bool,
+    media: MediaIdentity,
+}
+
+#[async_trait]
+impl crate::application::windows_lab::runner::LabWorker for PublishingWorker {
+    async fn execute(
+        &self,
+        _request: crate::application::windows_lab::runner::LabWorkerRequest,
+    ) -> Result<crate::application::windows_lab::runner::LabWorkerOutcome> {
+        bail!("base publication fixture does not execute targets")
+    }
+
+    async fn doctor(&self) -> Result<serde_json::Value> {
+        ensure!(self.ready, "upgraded worker is not ready");
+        Ok(serde_json::json!({
+            "environment_id": self.media.environment_id,
+            "observation": {
+                "ready": true,
+                "identity": {
+                    "installation_id": self.media.installation_id,
+                    "package_sha256": self.media.manifest_sha256,
+                }
+            }
+        }))
+    }
+}
+
+struct DelayedPublishingWorker {
+    media: MediaIdentity,
+}
+
+#[async_trait]
+impl crate::application::windows_lab::runner::LabWorker for DelayedPublishingWorker {
+    async fn execute(
+        &self,
+        _request: crate::application::windows_lab::runner::LabWorkerRequest,
+    ) -> Result<crate::application::windows_lab::runner::LabWorkerOutcome> {
+        bail!("delayed publication fixture does not execute targets")
+    }
+
+    async fn doctor(&self) -> Result<serde_json::Value> {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        Ok(serde_json::json!({
+            "environment_id": self.media.environment_id,
+            "observation": {
+                "ready": true,
+                "identity": {
+                    "installation_id": self.media.installation_id,
+                    "package_sha256": self.media.manifest_sha256,
+                }
+            }
+        }))
+    }
+}
+
 struct Deployment {
     directory: tempfile::TempDir,
     state_dir: PathBuf,
@@ -895,6 +955,8 @@ struct Deployment {
     disk: PathBuf,
     host: Arc<FakeHost>,
     fixture: fixture::MediaFixture,
+    operation_timeout_seconds: u64,
+    worker_media: Option<PathBuf>,
 }
 
 fn deployment() -> Deployment {
@@ -913,13 +975,14 @@ fn deployment() -> Deployment {
         disk,
         host: Arc::new(FakeHost::new()),
         fixture: fixture::media(),
+        operation_timeout_seconds: 30,
+        worker_media: None,
     }
 }
 
-/// A powered-off deployment whose VM currently sits at the configured baseline
-/// snapshot, so its boot disk is the snapshot delta. `committed` emulates the
-/// VMware snapshot commit that rewrites the VMX to the base disk.
-fn replacement_deployment(committed: bool) -> Deployment {
+/// A powered-off deployment whose VM currently sits at the fixed base snapshot,
+/// so its boot disk is the snapshot delta.
+fn replacement_deployment() -> Deployment {
     let deployment = deployment();
     let base_vmx = deployment.vmx_initial.clone();
     let delta = deployment
@@ -932,13 +995,8 @@ fn replacement_deployment(committed: bool) -> Deployment {
         .replace("Windows 10 x64.vmdk", "Windows 10 x64-000001.vmdk")
         .into_bytes();
     fs::write(&deployment.vmx, &delta_vmx).unwrap();
-    deployment.host.add_snapshot("baseline");
+    deployment.host.add_snapshot(BASELINE_SNAPSHOT);
     deployment.host.watch_state(&deployment.state_dir);
-    if committed {
-        deployment
-            .host
-            .rewrite_vmx_on_delete(&deployment.vmx, base_vmx);
-    }
     deployment
 }
 
@@ -948,9 +1006,9 @@ impl Deployment {
             vmx: self.vmx.clone(),
             vmrun: self.directory.path().join("vmrun.exe"),
             offline: None,
-            baseline_snapshot: "baseline".into(),
+            worker_media: self.worker_media.clone(),
             snapshot_prefix: "lab".into(),
-            operation_timeout_seconds: 30,
+            operation_timeout_seconds: self.operation_timeout_seconds,
             ..Default::default()
         }
     }
@@ -960,7 +1018,7 @@ impl Deployment {
     }
 
     fn state(&self) -> LabState {
-        self.store().load("labvm", "baseline").unwrap()
+        self.store().load("labvm", BASELINE_SNAPSHOT).unwrap()
     }
 
     /// Bind the same configuration identity `WindowsLab::open` computes, so a
@@ -1060,6 +1118,133 @@ fn wired_with(
         .with_guest_network(Arc::new(FakeNetwork))
 }
 
+fn seal_upgrade(fixture: &mut fixture::MediaFixture) {
+    use wukong_worker_package::{Enrollment, Manifest, Signer};
+
+    let keys = fixture.root.parent().unwrap().join("controller.p8");
+    let signer = Signer::from_pkcs8(&fs::read(keys).unwrap()).unwrap();
+    let manifest_path = fixture.root.join("payload/manifest.json");
+    let mut manifest: Manifest =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.version = "1.0.1".into();
+    manifest.source_revision = "b".repeat(40);
+    let (manifest_bytes, manifest_signature) = signer.sign(&manifest).unwrap();
+    fs::write(&manifest_path, &manifest_bytes).unwrap();
+    fs::write(
+        fixture.root.join("payload/manifest.sig"),
+        serde_json::to_vec(&manifest_signature).unwrap(),
+    )
+    .unwrap();
+    let manifest_sha256 = provision::sha256(&manifest_bytes);
+
+    let enrollment_path = fixture.root.join("enrollment/enrollment.json");
+    let mut enrollment: Enrollment =
+        serde_json::from_slice(&fs::read(&enrollment_path).unwrap()).unwrap();
+    enrollment.generation += 1;
+    enrollment.payload_manifest_sha256 = manifest_sha256.clone();
+    let (enrollment_bytes, enrollment_signature) = enrollment.sign(&signer).unwrap();
+    fs::write(&enrollment_path, &enrollment_bytes).unwrap();
+    fs::write(
+        fixture.root.join("enrollment/enrollment.sig"),
+        serde_json::to_vec(&enrollment_signature).unwrap(),
+    )
+    .unwrap();
+
+    let setup_path = fixture.root.join("setup.json");
+    let mut setup: serde_json::Value =
+        serde_json::from_slice(&fs::read(&setup_path).unwrap()).unwrap();
+    setup["controller_version"] = "1.0.1".into();
+    fs::write(setup_path, serde_json::to_vec(&setup).unwrap()).unwrap();
+    let media_path = fixture.root.join("media.json");
+    let mut media: serde_json::Value =
+        serde_json::from_slice(&fs::read(&media_path).unwrap()).unwrap();
+    media["version"] = "1.0.1".into();
+    media["manifest_sha256"] = manifest_sha256.into();
+    media["enrollment_sha256"] = provision::sha256(&enrollment_bytes).into();
+    media["generation"] = enrollment.generation.into();
+    media["source_revision"] = "b".repeat(40).into();
+    fs::write(media_path, serde_json::to_vec(&media).unwrap()).unwrap();
+
+    fixture.identity = verify_media(&fixture.root).unwrap();
+    fixture.connection.generation = fixture.identity.generation;
+    fixture.connection.manifest_sha256 = fixture.identity.manifest_sha256.clone();
+}
+
+fn seed_completed_base(deployment: &Deployment) {
+    let media = deployment.fixture.identity.clone();
+    let mut state = LabState::fresh("labvm", BASELINE_SNAPSHOT);
+    state.last_provision = Some(LabProvision {
+        provision_id: "a".repeat(32),
+        operation_id: "a".repeat(32),
+        generation: 1,
+        status: RunStatus::Completed,
+        source: ProvisionSource::Media {
+            directory: media.media_root.clone(),
+        },
+        media,
+        iso_sha256: None,
+        iso_size: None,
+        vmx_sha256_before: None,
+        vmx_sha256_after: None,
+        hive_sha256_before: None,
+        hive_sha256_after: None,
+        injected: vec![],
+        boot_task_sha256: None,
+        launcher_sha256: None,
+        scripts_ini_sha256: None,
+        gpt_ini_sha256: None,
+        identity_file: None,
+        guest_receipt: None,
+        connection: None,
+        environment_verified: None,
+        verification: None,
+        baseline_snapshot: Some(BASELINE_SNAPSHOT.into()),
+        settled: true,
+        started_at: "2026-01-01T00:00:00Z".into(),
+        ended_at: Some("2026-01-01T00:00:00Z".into()),
+        error: None,
+    });
+    deployment
+        .store()
+        .save(&deployment.with_configuration(state))
+        .unwrap();
+}
+
+struct UpgradeWorker {
+    state_dir: PathBuf,
+}
+
+#[async_trait]
+impl crate::application::windows_lab::runner::LabWorker for UpgradeWorker {
+    async fn execute(
+        &self,
+        _request: crate::application::windows_lab::runner::LabWorkerRequest,
+    ) -> Result<crate::application::windows_lab::runner::LabWorkerOutcome> {
+        bail!("upgrade fixture does not execute targets")
+    }
+
+    async fn doctor(&self) -> Result<serde_json::Value> {
+        let state = LabStore::new(&self.state_dir).load("labvm", BASELINE_SNAPSHOT)?;
+        let current = state.last_provision.as_ref().unwrap();
+        let record = if current.status == RunStatus::Failed {
+            state.rollback_provision.as_ref().unwrap_or(current)
+        } else {
+            current
+        };
+        let media = &record.media;
+        Ok(serde_json::json!({
+            "environment_id": media.environment_id,
+            "observation": {
+                "ready": true,
+                "identity": {
+                    "installation_id": media.installation_id,
+                    "package_sha256": media.manifest_sha256,
+                }
+            }
+        }))
+    }
+}
+
 /// Template-mode options: `--register` requires finalized media that can carry
 /// the controller-managed SSH identity, which media mode does not generate.
 fn template_options(deployment: &Deployment) -> ProvisionOptions {
@@ -1127,7 +1312,7 @@ fn vm_physical_identity(deployment: &Deployment) -> String {
 /// that operation identity as belonging to this VM.
 fn record_failed_provision(deployment: &Deployment, operation_id: &str) -> GuestPaths {
     let paths = GuestPaths::for_provision(operation_id).unwrap();
-    let mut state = deployment.with_configuration(LabState::fresh("labvm", "baseline"));
+    let mut state = deployment.with_configuration(LabState::fresh("labvm", BASELINE_SNAPSHOT));
     state.phase = LabPhase::Failed;
     state.generation = 1;
     state.last_provision = Some(LabProvision {
@@ -1214,7 +1399,7 @@ async fn provision_injects_media_and_verifies_the_guest_receipt() {
     assert!(outcome.environment_block.is_some());
     let calls = deployment.host.calls();
     assert!(calls.contains(&"start".to_string()));
-    assert!(calls.contains(&"snapshot baseline".to_string()));
+    assert!(calls.contains(&format!("snapshot {BASELINE_SNAPSHOT}")));
     let disk_calls = disk.calls();
     assert_eq!(
         disk_calls,
@@ -1331,7 +1516,7 @@ async fn provision_refuses_snapshot_chains_but_replaces_only_the_baseline() {
     let disk = Arc::new(FakeDisk::new(first.fixture.connection.clone()));
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&first, disk.clone(), iso.clone());
-    first.host.add_snapshot("baseline");
+    first.host.add_snapshot(BASELINE_SNAPSHOT);
     let error = lab
         .provision(first.options(first.media_source()))
         .await
@@ -1350,28 +1535,24 @@ async fn provision_refuses_snapshot_chains_but_replaces_only_the_baseline() {
     let replacement = deployment();
     let disk = Arc::new(FakeDisk::new(replacement.fixture.connection.clone()));
     let iso = Arc::new(FakeIso::new());
-    let lab = wired(&replacement, disk, iso);
-    replacement.host.add_snapshot("baseline");
+    let lab = wired(&replacement, disk, iso).with_worker(Arc::new(PublishingWorker {
+        ready: true,
+        media: replacement.fixture.identity.clone(),
+    }));
+    replacement.host.add_snapshot(BASELINE_SNAPSHOT);
     let mut options = replacement.options(replacement.media_source());
     options.replace_baseline = true;
-    lab.provision(options).await.unwrap();
+    let outcome = lab.provision(options).await.unwrap();
+    let operation = outcome.provision.unwrap().provision_id;
+    let staged = provision::staged_base_snapshot(&operation).unwrap();
     let calls = replacement.host.calls();
-    assert!(calls.contains(&"delete baseline".to_string()));
-    assert!(
-        calls
-            .iter()
-            .filter(|call| *call == "snapshot baseline")
-            .count()
-            == 1
-    );
-    assert!(
-        replacement
-            .host
-            .state
-            .lock()
-            .unwrap()
-            .snapshots
-            .contains(&"baseline".to_string())
+    assert!(calls.contains(&format!("snapshot {staged}")));
+    assert!(calls.contains(&format!("delete {BASELINE_SNAPSHOT}")));
+    assert!(calls.contains(&format!("snapshot {BASELINE_SNAPSHOT}")));
+    assert!(calls.contains(&format!("delete {staged}")));
+    assert_eq!(
+        replacement.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
     );
 }
 
@@ -1422,48 +1603,52 @@ async fn offline_disk_requests_use_canonical_windows_guest_paths() {
     );
 }
 #[tokio::test]
-async fn replace_baseline_is_deleted_before_disk_validation_and_recreated() {
-    let deployment = replacement_deployment(true);
+async fn replace_baseline_preserves_old_base_until_verified_staged_replacement() {
+    let deployment = replacement_deployment();
     let delta_vmx = fs::read(&deployment.vmx).unwrap();
     assert_ne!(
         delta_vmx, deployment.vmx_initial,
-        "the VM starts at the delta"
+        "the VM starts at the restored base delta"
     );
     let disk = Arc::new(
         FakeDisk::new(deployment.fixture.connection.clone()).with_events(deployment.host.events()),
     );
     let iso = Arc::new(FakeIso::new());
-    let lab = wired(&deployment, disk, iso);
+    let lab = wired(&deployment, disk, iso).with_worker(Arc::new(PublishingWorker {
+        ready: true,
+        media: deployment.fixture.identity.clone(),
+    }));
     let mut options = deployment.options(deployment.media_source());
     options.replace_baseline = true;
     let outcome = lab.provision(options).await.unwrap();
-    assert_eq!(
-        outcome.provision.as_ref().unwrap().status,
-        RunStatus::Completed
-    );
-
+    let record = outcome.provision.as_ref().unwrap();
+    assert_eq!(record.status, RunStatus::Completed);
     let events = deployment.host.events();
     let events = events.lock().unwrap();
-    let delete = events
+    let observe = events
         .iter()
-        .position(|event| event == "host:delete baseline")
-        .unwrap_or_else(|| panic!("baseline was not deleted: {events:?}"));
-    let inspect = events
+        .position(|event| event == "disk:observe")
+        .expect("guest was observed");
+    let retire_old = events
         .iter()
-        .position(|event| event == "disk:inspect")
-        .unwrap_or_else(|| panic!("disk was not inspected: {events:?}"));
+        .position(|event| event == &format!("host:delete {BASELINE_SNAPSHOT}"))
+        .expect("old base was retired after verification");
     assert!(
-        delete < inspect,
-        "baseline deletion must precede disk resolution: {events:?}"
+        observe < retire_old,
+        "the old base must survive guest installation and verification: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event == &format!("host:snapshot {BASELINE_SNAPSHOT}")),
+        "the verified staged state is captured under the fixed name: {events:?}"
     );
     drop(events);
 
-    // The VMX backup and the persisted intent existed when the baseline was
-    // deleted, and no other snapshot was touched.
     let observation = deployment
         .host
         .delete_observation()
-        .expect("snapshot deletion was observed");
+        .expect("base deletion was observed");
     assert_eq!(
         observation,
         DeleteObservation {
@@ -1473,40 +1658,28 @@ async fn replace_baseline_is_deleted_before_disk_validation_and_recreated() {
         }
     );
     assert_eq!(
-        deployment
-            .host
-            .calls()
-            .iter()
-            .filter(|call| *call == "snapshot baseline")
-            .count(),
-        1
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()],
+        "successful publication leaves no staging garbage"
     );
     assert!(
-        deployment
-            .host
-            .state
-            .lock()
+        String::from_utf8(fs::read(&deployment.vmx).unwrap())
             .unwrap()
-            .snapshots
-            .contains(&"baseline".to_string())
-    );
-    assert_eq!(
-        fs::read(&deployment.vmx).unwrap(),
-        deployment.vmx_initial,
-        "the committed VMX is restored byte for byte"
+            .contains("Windows 10 x64-000001.vmdk"),
+        "the restored replacement keeps its own snapshot delta"
     );
     let state = deployment.state();
     assert_eq!(state.phase, LabPhase::Idle);
     assert!(state.pending.is_none());
     let record = state.last_provision.expect("provision record");
     assert_eq!(record.status, RunStatus::Completed);
-    assert_eq!(record.baseline_snapshot.as_deref(), Some("baseline"));
+    assert_eq!(record.baseline_snapshot.as_deref(), Some(BASELINE_SNAPSHOT));
 }
 
 #[tokio::test]
 async fn replace_baseline_refuses_extra_snapshots_without_deleting_anything() {
     let deployment = deployment();
-    deployment.host.add_snapshot("baseline");
+    deployment.host.add_snapshot(BASELINE_SNAPSHOT);
     deployment.host.add_snapshot("lab-unexpected");
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
     let iso = Arc::new(FakeIso::new());
@@ -1531,12 +1704,10 @@ async fn replace_baseline_refuses_extra_snapshots_without_deleting_anything() {
 }
 
 #[tokio::test]
-async fn failed_validation_after_baseline_deletion_requires_recovery() {
-    // The snapshot is gone but the VMX still points at the delta, so the boot
-    // disk cannot be resolved after the forced deletion.
-    let deployment = replacement_deployment(false);
-    let delta_vmx = fs::read(&deployment.vmx).unwrap();
+async fn replacement_validation_failure_keeps_old_base_and_resolves() {
+    let deployment = replacement_deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    disk.tamper(Tampered::ReceiptInstallation);
     let iso = Arc::new(FakeIso::new());
     let lab = wired(&deployment, disk.clone(), iso);
     let mut options = deployment.options(deployment.media_source());
@@ -1546,15 +1717,11 @@ async fn failed_validation_after_baseline_deletion_requires_recovery() {
         error.downcast_ref::<LabError>().unwrap().code,
         "lab_provision_unknown"
     );
-    assert!(
-        deployment
-            .host
-            .calls()
-            .contains(&"delete baseline".to_string())
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()],
+        "a failed staged install never deletes the old base"
     );
-    assert!(!deployment.host.calls().contains(&"start".to_string()));
-    assert!(disk.calls().is_empty());
-    assert!(deployment.host.state.lock().unwrap().snapshots.is_empty());
 
     let state = deployment.state();
     assert_eq!(state.phase, LabPhase::RecoveryRequired);
@@ -1563,26 +1730,433 @@ async fn failed_validation_after_baseline_deletion_requires_recovery() {
         .clone()
         .expect("provision intent stays pending");
     assert_eq!(pending.kind, OperationKind::Provision);
-    let spec = pending.provision.expect("provision spec");
-    assert!(spec.replaces_baseline);
-    assert!(spec.guest_disk.is_none());
+    let spec = pending.provision.as_ref().expect("provision spec");
+    assert!(
+        spec.replaces_baseline && !spec.base_verified && !spec.base_retired && !spec.base_published
+    );
+    assert_eq!(
+        spec.guest_disk,
+        Some(
+            fs::canonicalize(
+                deployment
+                    .directory
+                    .path()
+                    .join("Windows 10 x64-000001.vmdk")
+            )
+            .unwrap()
+        )
+    );
     assert_eq!(
         state.last_provision.as_ref().unwrap().status,
         RunStatus::Unknown
     );
-    let message = state.last_error.clone().expect("actionable error");
-    assert!(message.contains("deleted"), "{message}");
+
+    lab.reconcile(&pending.operation_id, ReconcileOutcome::Failed)
+        .await
+        .unwrap();
+    let state = deployment.state();
+    assert_eq!(state.phase, LabPhase::Failed);
+    assert!(state.pending.is_none());
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn replacement_readiness_failure_preserves_the_old_base() {
+    let mut deployment = replacement_deployment();
+    deployment.operation_timeout_seconds = 1;
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let lab = wired(&deployment, disk, Arc::new(FakeIso::new())).with_worker(Arc::new(
+        PublishingWorker {
+            ready: false,
+            media: deployment.fixture.identity.clone(),
+        },
+    ));
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    let error = lab.provision(options).await.unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<LabError>().unwrap().code,
+        "lab_provision_unknown"
+    );
+    let state = deployment.state();
+    let pending = state.pending.clone().unwrap();
+    let spec = pending.provision.as_ref().unwrap();
+    let staged = provision::staged_base_snapshot(&spec.provision_id).unwrap();
+    assert!(!spec.base_verified && !spec.base_retired && !spec.base_published);
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string(), staged]
+    );
     assert!(
-        message.contains(&spec.vmx_backup.display().to_string()),
-        "{message}"
+        !deployment
+            .host
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("delete")),
+        "an unverified worker must not retire the old base"
     );
 
-    let directories = deployment.provision_directories();
-    assert_eq!(directories.len(), 1);
+    deployment.host.set_running(false);
+    lab.reconcile(&pending.operation_id, ReconcileOutcome::Failed)
+        .await
+        .unwrap();
     assert_eq!(
-        fs::read(directories[0].join("vmx.bak")).unwrap(),
-        delta_vmx,
-        "the VMX backup is retained for reconciliation"
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn replacement_publication_uses_the_provisioning_timeout_for_worker_boot() {
+    let mut deployment = replacement_deployment();
+    deployment.operation_timeout_seconds = 1;
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let lab = wired(&deployment, disk, Arc::new(FakeIso::new())).with_worker(Arc::new(
+        DelayedPublishingWorker {
+            media: deployment.fixture.identity.clone(),
+        },
+    ));
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    options.timeout_seconds = 60;
+    let outcome = lab.provision(options).await.unwrap();
+    assert_eq!(outcome.provision.unwrap().status, RunStatus::Completed);
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn replacement_rejects_a_ready_worker_from_the_wrong_package() {
+    let deployment = replacement_deployment();
+    let mut wrong_media = deployment.fixture.identity.clone();
+    wrong_media.manifest_sha256 = "f".repeat(64);
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let lab = wired(&deployment, disk, Arc::new(FakeIso::new())).with_worker(Arc::new(
+        PublishingWorker {
+            ready: true,
+            media: wrong_media,
+        },
+    ));
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    let error = lab.provision(options).await.unwrap_err();
+    assert!(
+        format!("{error:#}").contains("doctor identity differs"),
+        "{error:#}"
+    );
+    let state = deployment.state();
+    let spec = state.pending.as_ref().unwrap().provision.as_ref().unwrap();
+    assert!(!spec.base_verified && !spec.base_retired && !spec.base_published);
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [
+            BASELINE_SNAPSHOT.to_string(),
+            provision::staged_base_snapshot(&spec.provision_id).unwrap(),
+        ]
+    );
+    assert!(
+        !deployment
+            .host
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("delete")),
+        "a healthy wrong worker must not retire the old base"
+    );
+}
+
+#[tokio::test]
+async fn replacement_retirement_failure_can_be_rolled_back() {
+    let deployment = replacement_deployment();
+    deployment.host.state.lock().unwrap().fail_delete = true;
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let lab = wired(&deployment, disk, Arc::new(FakeIso::new())).with_worker(Arc::new(
+        PublishingWorker {
+            ready: true,
+            media: deployment.fixture.identity.clone(),
+        },
+    ));
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    lab.provision(options).await.unwrap_err();
+    let state = deployment.state();
+    let pending = state.pending.clone().unwrap();
+    let spec = pending.provision.as_ref().unwrap();
+    assert!(spec.base_verified && !spec.base_retired && !spec.base_published);
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [
+            BASELINE_SNAPSHOT.to_string(),
+            provision::staged_base_snapshot(&spec.provision_id).unwrap(),
+        ]
+    );
+
+    deployment.host.set_running(false);
+    deployment.host.state.lock().unwrap().fail_delete = false;
+    lab.reconcile(&pending.operation_id, ReconcileOutcome::Failed)
+        .await
+        .unwrap();
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+}
+
+async fn reconcile_interrupted_replacement(stage: u8, outcome: ReconcileOutcome) {
+    let deployment = replacement_deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    disk.tamper(Tampered::ReceiptInstallation);
+    let lab = wired(&deployment, disk, Arc::new(FakeIso::new()));
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    lab.provision(options).await.unwrap_err();
+
+    let mut state = deployment.state();
+    let pending = state.pending.clone().unwrap();
+    let spec = state.pending.as_mut().unwrap().provision.as_mut().unwrap();
+    spec.base_verified = true;
+    spec.base_retired = (2..=5).contains(&stage);
+    spec.base_published = stage >= 4;
+    let staged = provision::staged_base_snapshot(&spec.provision_id).unwrap();
+    deployment.store().save(&state).unwrap();
+    let expected = match stage {
+        0 => vec![BASELINE_SNAPSHOT.into(), staged.clone()],
+        1 | 2 => vec![staged.clone()],
+        3 | 4 => vec![BASELINE_SNAPSHOT.into(), staged.clone()],
+        5 => vec![BASELINE_SNAPSHOT.into()],
+        _ => panic!("unknown base transition fixture"),
+    };
+    deployment.host.state.lock().unwrap().snapshots = expected.clone();
+    deployment.host.set_running(false);
+    let result = lab.reconcile(&pending.operation_id, outcome).await;
+    if outcome == ReconcileOutcome::Failed && stage > 0 {
+        let error = result.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("cannot roll back"),
+            "stage {stage}: {error:#}"
+        );
+        assert_eq!(
+            deployment.host.state.lock().unwrap().snapshots,
+            expected,
+            "failed reconciliation must preserve every post-retirement snapshot"
+        );
+        assert!(deployment.state().pending.is_some());
+    } else {
+        result.unwrap();
+        assert_eq!(
+            deployment.host.state.lock().unwrap().snapshots,
+            [BASELINE_SNAPSHOT.to_string()]
+        );
+        assert!(deployment.state().pending.is_none());
+    }
+}
+
+#[tokio::test]
+async fn reconciliation_converges_every_interrupted_base_transition() {
+    for stage in 0..=5 {
+        reconcile_interrupted_replacement(stage, ReconcileOutcome::Completed).await;
+    }
+    for stage in 0..=5 {
+        reconcile_interrupted_replacement(stage, ReconcileOutcome::Failed).await;
+    }
+}
+
+#[tokio::test]
+async fn completed_reconciliation_persists_publication_before_cleanup_can_fail() {
+    let deployment = replacement_deployment();
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    disk.tamper(Tampered::ReceiptInstallation);
+    let lab = wired(&deployment, disk, Arc::new(FakeIso::new()));
+    let mut options = deployment.options(deployment.media_source());
+    options.replace_baseline = true;
+    lab.provision(options).await.unwrap_err();
+
+    let mut state = deployment.state();
+    let pending = state.pending.clone().unwrap();
+    let spec = state.pending.as_mut().unwrap().provision.as_mut().unwrap();
+    spec.base_verified = true;
+    let staged = provision::staged_base_snapshot(&spec.provision_id).unwrap();
+    deployment.store().save(&state).unwrap();
+    deployment.host.state.lock().unwrap().snapshots =
+        vec![BASELINE_SNAPSHOT.into(), staged.clone()];
+    deployment.host.set_running(false);
+
+    // Force VMX restoration to fail only after snapshot publication and staged
+    // cleanup. The retry must rely on durable markers, not the deleted staging
+    // snapshot, to converge.
+    fs::remove_file(&deployment.vmx).unwrap();
+    fs::create_dir(&deployment.vmx).unwrap();
+    lab.reconcile(&pending.operation_id, ReconcileOutcome::Completed)
+        .await
+        .unwrap_err();
+    let interrupted = deployment.state();
+    let spec = interrupted
+        .pending
+        .as_ref()
+        .unwrap()
+        .provision
+        .as_ref()
+        .unwrap();
+    assert!(spec.base_verified && spec.base_retired && spec.base_published);
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+
+    fs::remove_dir(&deployment.vmx).unwrap();
+    fs::write(&deployment.vmx, &deployment.vmx_initial).unwrap();
+    lab.reconcile(&pending.operation_id, ReconcileOutcome::Completed)
+        .await
+        .unwrap();
+    assert!(deployment.state().pending.is_none());
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+}
+
+#[tokio::test]
+async fn prepare_upgrades_publishes_reboots_and_converges_on_the_new_base() {
+    let mut deployment = replacement_deployment();
+    deployment.worker_media = Some(deployment.fixture.root.clone());
+    seed_completed_base(&deployment);
+    let current = deployment.fixture.identity.clone();
+    seal_upgrade(&mut deployment.fixture);
+    let candidate = deployment.fixture.identity.clone();
+    assert_ne!(current.manifest_sha256, candidate.manifest_sha256);
+
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let lab =
+        wired(&deployment, disk, Arc::new(FakeIso::new())).with_worker(Arc::new(UpgradeWorker {
+            state_dir: deployment.state_dir.clone(),
+        }));
+    let spec: crate::application::windows_lab::ExperimentSpec =
+        serde_json::from_value(serde_json::json!({
+            "target_sha256": "a".repeat(64),
+            "launch": "exe",
+            "input_channel": "stdin",
+            "account": "user"
+        }))
+        .unwrap();
+    let lease = lab
+        .prepare("analyst", "signed upgrade", spec)
+        .await
+        .unwrap();
+    let state = deployment.state();
+    assert_eq!(state.phase, LabPhase::Ready);
+    assert_eq!(state.active.as_ref().unwrap().lab_id, lease.lab_id);
+    let provision = state.last_provision.as_ref().unwrap();
+    assert_eq!(provision.status, RunStatus::Completed);
+    assert!(provision.settled);
+    assert_eq!(provision.media.manifest_sha256, candidate.manifest_sha256);
+    assert_eq!(provision.media.generation, candidate.generation);
+    assert_eq!(
+        state
+            .rollback_provision
+            .as_ref()
+            .unwrap()
+            .media
+            .manifest_sha256,
+        current.manifest_sha256,
+        "the previous settled base receipt survives the replacement attempt"
+    );
+
+    let snapshots = deployment.host.state.lock().unwrap().snapshots.clone();
+    assert!(snapshots.contains(&BASELINE_SNAPSHOT.to_string()));
+    assert!(snapshots.contains(&lease.snapshot));
+    assert_eq!(snapshots.len(), 2, "no staging garbage: {snapshots:?}");
+    let calls = deployment.host.calls();
+    assert!(
+        calls
+            .iter()
+            .filter(|call| call.as_str() == format!("revert {BASELINE_SNAPSHOT}"))
+            .count()
+            >= 2,
+        "both the old and published bases are restored before use: {calls:?}"
+    );
+    assert!(
+        calls.contains(&"stop".into()),
+        "upgrade reboot starts from a stopped guest"
+    );
+}
+
+#[tokio::test]
+async fn failed_upgrade_can_restore_old_provenance_and_retry() {
+    let mut deployment = replacement_deployment();
+    deployment.worker_media = Some(deployment.fixture.root.clone());
+    seed_completed_base(&deployment);
+    let current = deployment.fixture.identity.clone();
+    seal_upgrade(&mut deployment.fixture);
+    let candidate = deployment.fixture.identity.clone();
+    deployment.host.state.lock().unwrap().fail_delete = true;
+    let lab = wired(
+        &deployment,
+        Arc::new(FakeDisk::new(deployment.fixture.connection.clone())),
+        Arc::new(FakeIso::new()),
+    )
+    .with_worker(Arc::new(UpgradeWorker {
+        state_dir: deployment.state_dir.clone(),
+    }));
+    let spec: crate::application::windows_lab::ExperimentSpec =
+        serde_json::from_value(serde_json::json!({
+            "target_sha256": "a".repeat(64),
+            "launch": "exe",
+            "input_channel": "stdin",
+            "account": "user"
+        }))
+        .unwrap();
+
+    lab.prepare("analyst", "interrupted upgrade", spec.clone())
+        .await
+        .unwrap_err();
+    let state = deployment.state();
+    let pending = state.pending.clone().unwrap();
+    assert_eq!(pending.kind, OperationKind::Provision);
+    assert_eq!(
+        state.last_provision.as_ref().unwrap().status,
+        RunStatus::Unknown
+    );
+    deployment.host.state.lock().unwrap().fail_delete = false;
+    lab.reconcile(&pending.operation_id, ReconcileOutcome::Failed)
+        .await
+        .unwrap();
+    let rolled_back = deployment.state();
+    assert_eq!(
+        rolled_back.last_provision.as_ref().unwrap().status,
+        RunStatus::Failed
+    );
+    assert_eq!(
+        rolled_back
+            .rollback_provision
+            .as_ref()
+            .unwrap()
+            .media
+            .manifest_sha256,
+        current.manifest_sha256
+    );
+    assert_eq!(
+        deployment.host.state.lock().unwrap().snapshots,
+        [BASELINE_SNAPSHOT.to_string()]
+    );
+
+    let lease = lab.prepare("analyst", "retry upgrade", spec).await.unwrap();
+    let state = deployment.state();
+    assert_eq!(state.phase, LabPhase::Ready);
+    assert_eq!(state.active.as_ref().unwrap().lab_id, lease.lab_id);
+    let provision = state.last_provision.as_ref().unwrap();
+    assert_eq!(provision.status, RunStatus::Completed);
+    assert_eq!(provision.media.manifest_sha256, candidate.manifest_sha256);
+    let snapshots = deployment.host.state.lock().unwrap().snapshots.clone();
+    assert!(snapshots.contains(&BASELINE_SNAPSHOT.to_string()));
+    assert!(snapshots.contains(&lease.snapshot));
+    assert_eq!(
+        snapshots.len(),
+        2,
+        "retry leaves no staging garbage: {snapshots:?}"
     );
 }
 
@@ -1604,7 +2178,7 @@ async fn replace_baseline_without_a_snapshot_is_a_noop() {
     assert_eq!(
         calls
             .iter()
-            .filter(|call| *call == "snapshot baseline")
+            .filter(|call| call.as_str() == format!("snapshot {BASELINE_SNAPSHOT}"))
             .count(),
         1,
         "the pristine flow creates the baseline after provisioning"
@@ -1616,7 +2190,7 @@ async fn replace_baseline_without_a_snapshot_is_a_noop() {
             .lock()
             .unwrap()
             .snapshots
-            .contains(&"baseline".to_string())
+            .contains(&BASELINE_SNAPSHOT.to_string())
     );
     assert_eq!(deployment.state().phase, LabPhase::Idle);
     assert_eq!(fs::read(&deployment.vmx).unwrap(), deployment.vmx_initial);
@@ -1624,7 +2198,7 @@ async fn replace_baseline_without_a_snapshot_is_a_noop() {
 
 #[tokio::test]
 async fn replace_baseline_dry_run_plans_without_deleting_or_inspecting_the_disk() {
-    let deployment = replacement_deployment(true);
+    let deployment = replacement_deployment();
     let delta_vmx = fs::read(&deployment.vmx).unwrap();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
     let iso = Arc::new(FakeIso::new());
@@ -1636,14 +2210,11 @@ async fn replace_baseline_dry_run_plans_without_deleting_or_inspecting_the_disk(
     assert!(outcome.dry_run);
     let planned = outcome.planned_actions.join("\n");
     assert!(
-        planned.contains("delete the configured baseline snapshot 'baseline'"),
+        planned.contains(&format!("preserving fixed base '{BASELINE_SNAPSHOT}'")),
         "{planned}"
     );
-    assert!(planned.contains("after the baseline deletion"), "{planned}");
-    assert!(
-        planned.contains("create the baseline snapshot 'baseline'"),
-        "{planned}"
-    );
+    assert!(planned.contains("verify its worker identity"), "{planned}");
+    assert!(planned.contains("staged base snapshot"), "{planned}");
     assert_eq!(fs::read(&deployment.vmx).unwrap(), delta_vmx);
     assert!(
         deployment
@@ -1652,7 +2223,7 @@ async fn replace_baseline_dry_run_plans_without_deleting_or_inspecting_the_disk(
             .lock()
             .unwrap()
             .snapshots
-            .contains(&"baseline".to_string())
+            .contains(&BASELINE_SNAPSHOT.to_string())
     );
     assert!(
         !deployment
@@ -1802,6 +2373,9 @@ async fn reconcile_completed_resolves_a_leftover_boot_task() {
             .join("offline.iso")
             .is_file()
     );
+    // Completion is an operator attestation after independently confirming the
+    // guest and its fixed base; reconciliation must not invent that snapshot.
+    deployment.host.add_snapshot(BASELINE_SNAPSHOT);
     lab.reconcile(&operation, ReconcileOutcome::Completed)
         .await
         .unwrap();
@@ -1811,6 +2385,7 @@ async fn reconcile_completed_resolves_a_leftover_boot_task() {
     let record = state.last_provision.unwrap();
     assert_eq!(record.status, RunStatus::Completed);
     assert!(record.settled);
+    assert_eq!(record.baseline_snapshot.as_deref(), Some(BASELINE_SNAPSHOT));
     assert_eq!(fs::read(&deployment.vmx).unwrap(), deployment.vmx_initial);
     assert!(
         !deployment.provision_directories()[0]
@@ -2462,7 +3037,7 @@ async fn template_provisioning_registers_and_powers_off() {
     );
     assert!(!deployment.host.state.lock().unwrap().running);
     let calls = deployment.host.calls();
-    assert!(calls.contains(&"revert baseline".to_string()));
+    assert!(calls.contains(&format!("revert {BASELINE_SNAPSHOT}")));
     assert!(
         environment
             .state
@@ -2552,7 +3127,7 @@ async fn successful_registration_rebinds_the_persisted_configuration_identity() 
         planned
             .planned_actions
             .iter()
-            .any(|action| action.contains("delete the configured baseline snapshot"))
+            .any(|action| action.contains("preserving fixed base"))
     );
 }
 
@@ -2719,12 +3294,15 @@ async fn restart_recovery_covers_provisioning_intent() {
         guest_disk: Some(deployment.disk.clone()),
         service_name: "WukongLabProvision-a".into(),
         guest_root: GuestPaths::for_provision(&"a".repeat(32)).unwrap().root,
-        baseline_snapshot: "baseline".into(),
+        baseline_snapshot: BASELINE_SNAPSHOT.into(),
         replaces_baseline: false,
+        base_verified: false,
+        base_retired: false,
+        base_published: false,
         identity_file: None,
         injected: vec![],
     };
-    let mut state = LabState::fresh("labvm", "baseline");
+    let mut state = LabState::fresh("labvm", BASELINE_SNAPSHOT);
     state.phase = LabPhase::Provisioning;
     state.generation = 1;
     state.pending = Some(PendingOperation {
@@ -2739,7 +3317,7 @@ async fn restart_recovery_covers_provisioning_intent() {
         provision: Some(spec),
         package_sha256: None,
         install_sha256: None,
-        snapshot: "baseline".into(),
+        snapshot: BASELINE_SNAPSHOT.into(),
         started_at: "2026-01-01T00:00:00Z".into(),
     });
     state.last_provision = Some(LabProvision {
@@ -2797,16 +3375,27 @@ async fn restart_recovery_covers_provisioning_intent() {
 }
 
 #[tokio::test]
-async fn scheme_two_state_without_provision_fields_still_loads() {
+async fn state_schema_two_is_rejected_without_migration() {
     let deployment = deployment();
-    let state = deployment.with_configuration(LabState::fresh("labvm", "baseline"));
+    let state = deployment.with_configuration(LabState::fresh(
+        "labvm",
+        crate::application::windows_lab::BASELINE_SNAPSHOT,
+    ));
     let mut record = serde_json::to_value(&state).unwrap();
-    record.as_object_mut().unwrap().remove("last_provision");
+    record["schema"] = serde_json::json!(2);
     let path = deployment.state_dir.join("windows-lab").join("labvm.json");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
-    let lab = deployment.lab();
-    let status = lab.status().await.unwrap();
-    assert_eq!(status["state"]["last_provision"], serde_json::Value::Null);
-    assert_eq!(status["state"]["schema"], 2);
+    let error = format!(
+        "{:#}",
+        WindowsLab::open(
+            &deployment.state_dir,
+            "labvm",
+            &deployment.config(),
+            deployment.host.clone(),
+        )
+        .err()
+        .expect("old state schema must be rejected")
+    );
+    assert!(error.contains("unsupported lab state schema 2"), "{error}");
 }

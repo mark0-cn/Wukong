@@ -180,7 +180,7 @@ impl LabService {
                 json!({
                     "vm": id,
                     "environment": vm.environment,
-                    "baseline_snapshot": vm.baseline_snapshot,
+                    "baseline_snapshot": crate::application::windows_lab::BASELINE_SNAPSHOT,
                     "snapshot_prefix": vm.snapshot_prefix,
                     "start_after_restore": vm.start_after_restore,
                 })

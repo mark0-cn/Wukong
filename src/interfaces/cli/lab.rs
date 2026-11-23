@@ -54,7 +54,7 @@ pub enum Command {
         /// One-command override for the configured mkisofs executable.
         #[arg(long)]
         iso_tool: Option<PathBuf>,
-        /// Delete and recreate the configured baseline snapshot.
+        /// Stage a verified replacement and publish it as the fixed base snapshot.
         #[arg(long)]
         replace_baseline: bool,
         /// Write the managed-SSH environment into the active configuration.
@@ -84,7 +84,7 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Create the baseline (if needed) and one immutable experiment snapshot.
+    /// Restore the fixed base, upgrade its worker when configured, then snapshot the experiment.
     Prepare {
         #[arg(long)]
         vm: String,
@@ -113,7 +113,7 @@ pub enum Command {
         #[arg(long, default_value_t = 120)]
         timeout: u64,
     },
-    /// Delete unused experiment snapshots, keeping the baseline and active one.
+    /// Delete unused experiment and receipt-proven base-transition snapshots.
     Prune {
         #[arg(long)]
         vm: String,
