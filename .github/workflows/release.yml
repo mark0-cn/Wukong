@@ -162,7 +162,9 @@ jobs:
       target: linux-desktop
 
   image:
-    needs: metadata
+    if: >-
+      always() && needs.metadata.result == 'success' && needs.checks.result == 'success'
+    needs: [metadata, checks]
     runs-on: ${{ vars.WORKBENCH_LINUX_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 120
     outputs:

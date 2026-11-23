@@ -33,6 +33,14 @@ class PublishGateTests(unittest.TestCase):
             ),
         )
 
+    def test_image_waits_for_successful_checks(self):
+        workflow = Path(".github/workflows/release.yml").read_text()
+        block = re.search(r"  image:\n(.*?)\n  acceptance:", workflow, re.S).group(1)
+        self.assertIn("needs: [metadata, checks]", block)
+        self.assertIn("needs.metadata.result == 'success'", block)
+        self.assertIn("needs.checks.result == 'success'", block)
+        self.assertIn("always()", block)
+
     def test_tag_publishes_after_reuse_skips(self):
         self.assertTrue(self.allowed())
 
