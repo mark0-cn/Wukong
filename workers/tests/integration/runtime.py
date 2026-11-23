@@ -93,9 +93,7 @@ def main():
     client = Client(state)
     parent_trace = "4bf92f3577b34da6a3ce929d0e0e4736"
     parent_span = "00f067aa0ba902b7"
-    doctor = client.call(
-        "doctor", traceparent=f"00-{parent_trace}-{parent_span}-01"
-    )
+    doctor = client.call("doctor", traceparent=f"00-{parent_trace}-{parent_span}-01")
     assert client.last_telemetry and client.last_telemetry.get("traces")
     exported = ExportTraceServiceRequest.FromString(
         base64.b64decode(client.last_telemetry["traces"], validate=True)

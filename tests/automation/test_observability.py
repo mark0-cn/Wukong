@@ -207,10 +207,12 @@ class ObservabilityStackTests(unittest.TestCase):
         self.assertEqual(self.compose["name"], "wukong-observability")
         self.assertEqual(
             self.compose["networks"],
-            {"default": {
-                "driver": "bridge",
-                "driver_opts": {"com.docker.network.bridge.enable_ip_masquerade": "false"},
-            }},
+            {
+                "default": {
+                    "driver": "bridge",
+                    "driver_opts": {"com.docker.network.bridge.enable_ip_masquerade": "false"},
+                }
+            },
         )
         for name, service in self.compose["services"].items():
             with self.subTest(service=name):
@@ -378,6 +380,7 @@ class ObservabilityStackTests(unittest.TestCase):
         ):
             self.assertIn(endpoint, self.readme)
         self.assertIn("do not replace real OTLP", self.readme)
+
     def test_acceptance_probe_is_loopback_only_and_task_scoped(self):
         source = (STACK / "acceptance.py").read_text(encoding="utf-8")
         ast.parse(source, filename="acceptance.py")
@@ -386,7 +389,11 @@ class ObservabilityStackTests(unittest.TestCase):
             if isinstance(node, ast.Assign) and len(node.targets) == 1:
                 target = node.targets[0]
                 if isinstance(target, ast.Name) and target.id in {
-                    "COLLECTOR", "TEMPO", "LOKI", "PROMETHEUS", "GRAFANA"
+                    "COLLECTOR",
+                    "TEMPO",
+                    "LOKI",
+                    "PROMETHEUS",
+                    "GRAFANA",
                 }:
                     namespace[target.id] = ast.literal_eval(node.value)
         self.assertEqual(set(namespace), {"COLLECTOR", "TEMPO", "LOKI", "PROMETHEUS", "GRAFANA"})
@@ -394,7 +401,7 @@ class ObservabilityStackTests(unittest.TestCase):
             self.assertTrue(endpoint.startswith("http://127.0.0.1:"), endpoint)
         self.assertIn("python -I scripts/observability/acceptance.py", self.readme)
         self.assertIn("not_covered", source)
-        self.assertNotIn("add_argument(\"--endpoint\"", source)
+        self.assertNotIn('add_argument("--endpoint"', source)
 
 
 if __name__ == "__main__":
