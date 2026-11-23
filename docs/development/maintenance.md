@@ -14,6 +14,7 @@ English · [简体中文](maintenance.zh-CN.md)
 - `application/windows_worker_setup/inventory` projects read-only deployment diagnostics: `application/worker_media` owns the generation-record scan, the setup state module owns the recovery record and imported receipt, and the configuration owns the current registration. The desktop consumes the projected report and never reads these records or runs the import/verification workflow itself.
 - `application/coordinator` separates runs/tasks/messages/waits/completion use cases, committing through the same Store transactions. `adapters/binary` retains public address/hash APIs; profiling, strings and Ghidra lifecycle have separate modules.
 - `storage` uses IMMEDIATE write transactions and independent read-only WAL snapshots. `storage/conversations` owns conversation payloads/revisions. Current state schema is 5, without legacy migration.
+- `adapters/telemetry` owns process-lifetime trace/metric/optional-log activation, curated local JSONL, bounded Worker relay and one total shutdown deadline. `adapters/observability` owns bounded read-only Store/Tempo/Loki/Prometheus projections and validated Grafana links. Desktop commands accept query intent and the current host epoch, never backend credentials, arbitrary URLs, query languages, Store handles or local paths. Keep export activation separate from query construction, and keep business completion/recovery independent of telemetry delivery.
 
 See [worker components](../../workers/runtime/README.md). Deploy the Linux runtime directory and generated protocol schema, and install the independent `workers/analysis` package; entry files do not re-export modules. Windows packaging uses its explicit component inventory instead of copying the Linux runtime.
 
@@ -101,6 +102,21 @@ python workers/tests/run.py unit -p test_bridge.py
 Install `workers/analysis` and `workers/runtime/requirements.txt` in a virtual environment and make `python` available before worker tests. Ordinary tests use trusted local fixtures/loopback services; ignored real Ghidra/Docker acceptance requires each test's documented environment.
 
 Sibling-container network acceptance builds `tests/acceptance/network.Dockerfile` with the repository root as its context, installing the analysis package and the same pinned Linux worker requirements before entering the isolated network. A bare Python image does not provide the worker's metadata-publication dependencies.
+
+<a id="observability-validation"></a>
+
+## Observability validation
+
+For telemetry, native query, protocol-envelope or local-stack changes, run the affected Rust/Python tests plus the documentation-independent static entry points:
+
+```sh
+python -m unittest tests.automation.test_observability -v
+docker compose -f scripts/observability/compose.yaml config
+```
+
+Use the [observability guide](../user/observability.md#local-acceptance-stack) for the pinned images, loopback health commands, configuration and volume-preserving shutdown. Real acceptance must configure a controller export, execute identified work, and check Local activity, trace search/detail, optional curated logs, service-scoped metrics and Grafana links. Stop one query backend to establish independent panel degradation. Exercise Linux Python and native Windows Workers in their respective isolated environments and compare business IDs, results, evidence hashes, retry and recovery behavior with telemetry enabled and unavailable.
+
+Configuration parsing and static tests do not establish real Collector/Tempo/Loki/Prometheus/Grafana behavior, native GUI behavior, live-model execution or Worker propagation. Record actual package/target identities and executed steps; do not convert a procedure into a passed acceptance claim. Telemetry loss must never trigger replay of an uncertain business effect.
 
 <a id="可重复性能基准"></a>
 

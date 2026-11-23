@@ -9,6 +9,7 @@
 ## 使用与安装
 
 - [使用指南](user/usage.zh-CN.md)：桌面、模型、任务和报告。
+- [可观察性](user/observability.zh-CN.md)：telemetry 导出、桌面活动与后端查询、Worker 传播及本地验收栈。
 - [在线安装与更新](user/online-install.zh-CN.md)：Windows/Linux 安装器和应用内更新。
 - [语言设置](user/languages.zh-CN.md)：界面与任务输出语言。
 - [Pwn 工作环境](user/pwn-workbench.zh-CN.md)：工具、题目环境和迁移。

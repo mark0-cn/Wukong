@@ -26,7 +26,7 @@ flowchart TB
         APP --> DOMAIN
         APP --> IO
     end
-    PROTO["共享 Worker 协议 v3"]
+    PROTO["共享 Worker 协议 v4"]
     LINUX["Linux Worker<br/>Python RPC · 资源所有权 · 系统适配器"]
     WIN["Windows Worker · 可丢弃 VM<br/>原生 RPC · ResourceManager · 系统适配器"]
     IN --> APP
@@ -37,7 +37,7 @@ flowchart TB
 
 应用层查询入口提供中立快照。桌面健康命令将观测交给 `application/maintenance/updates/health`，Windows 安装页面通过 `application/windows_worker_setup/inventory` 读取清单。`interfaces/report/bundle` 管理导出报告的文件清单和离线完整性校验。桌面任务展示层分别呈现记录的执行结果、资源清理确认和阻塞原因，只关联任务记录中已有的证据引用，绝不把执行结束当作清理确认。Windows 部署诊断同样由各记录所属模块读取生成记录、安装恢复记录、已导入回执和当前登记状态，并区分缺失、损坏与未校验；桌面只投影结果。
 
-公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v3。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。
+公开执行通过 SSH/stdio 使用 JSON-RPC 协议 v4。独立 `workers/protocol` crate 负责方法标识、请求/响应类型、副作用、资源需求及生成的 JSON Schema。Rust/jsonrpsee 和 Python/jsonrpcserver 注册实际处理器，双方校验同一组契约样本。模型工具目录负责角色可见性和所需方法，各 Worker 目录负责处理器及就绪状态。第三方观察保留为原始证据，文件/作业/会话身份与传输配置使用结构化类型。
 
 控制器连接、配置、身份及租约位于 `src/adapters/worker` 与 `src/adapters/environments`；`ToolContext` 将已绑定 Worker 传给文件、作业、会话和验证用例。`WorkerGateway` 保留稳定请求 ID 及未改写的 Worker 回执，由相应用例将资源 ID 转成控制器归属记录。`src/application/effects` 和 `src/storage` 保存业务收据、证据及通知，Worker 执行账本另行记录外部副作用。重复的会话启动回执不能重新打开控制器已关闭的会话，也不能抹掉其 transcript。
 
@@ -47,7 +47,7 @@ Windows 目标运行在签名部署记录声明的专用、可丢弃 VM 中。�
 
 `workers/analysis` 是只接收明确输入、不拥有 Worker 状态或传输的 Python 包。Linux 适配器保留文件约束和真实调试，Windows 一次性辅助程序使用同一分析包。Windows 组件清单排除 Linux Worker 服务及依赖。架构检查位于 `tests/automation/test_execution_boundaries.py`。
 
-控制器存储要求 schema 5，Windows 资源账本要求版本 2，包清单要求 schema 2。旧格式或协议直接拒绝；v3 使用新工作区和新 Worker 实例，不提供迁移、自动删除或旧配置适配层。现有目录及证据保持原样。当前验收与历史结果分别记录。
+控制器存储要求 schema 5，Windows 资源账本要求版本 2，包清单要求 schema 2。旧格式或协议直接拒绝；v4 使用新工作区和新 Worker 实例，不提供迁移、自动删除或旧配置适配层。现有目录及证据保持原样。当前验收与历史结果分别记录。
 
 
 Windows 的执行管理入口只有原生 Worker。控制器负责业务任务和证据，`workers/protocol` 共用公开类型，原生服务负责能力、租约、文件和资源。Python 在 Windows 上作为一次性隔离分析工具；Linux 保留 Python Worker。详见[跨平台环境架构](cross-platform-environments.zh-CN.md)和[当前 Windows 组件指南](../../workers/windows/README.zh-CN.md)。
@@ -61,6 +61,8 @@ Windows 的执行管理入口只有原生 Worker。控制器负责业务任务�
 | `application/coordinator` | 共享事务入口；`runs`、`tasks`、`messages`、`waits`、`completion` 分别管理运行、子任务、消息、依赖等待与完成 |
 | `application/agents`、`prompts/` | 角色与能力提示词装配；`src/application/prompts.rs` 统一维护内置目录 |
 | `adapters/models` | provider 配置与原生连接 |
+| `adapters/telemetry` | 进程持有的 trace、低基数 metric、精选可选 log/JSONL、有界 Worker relay 与关闭 |
+| `adapters/observability` | 只读持久本地活动、独立降级的 Tempo/Loki/Prometheus 查询及经过校验的 Grafana 链接 |
 | `application/assessment/runner`、`bootstrap` | 运行生命周期与具体依赖装配 |
 | `application/agent_runtime/host`、`application/model_catalog`、`application/usage` | 内核可调用的业务接口、角色模型选择、用量及预算记账 |
 | `application/agent_runtime` | Rig 执行与日志、子任务及消息协议的业务接入，模型与工具准入、原生会话投影 |
@@ -213,7 +215,7 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 `EvidenceSyncService` 在资源锁外传输，全局最多两个任务、每个 worker 环境最多一个。产物清单和逐文件进度持久化，以 worker 身份、路径、SHA256 和大小标识文件；重启后复用已验证文件，无需重新下载。网络失败按有界退避重试；完整性或大小失败明确保留为失败。提交时重新获取资源锁，校验当前身份及 controller fence。状态查询和工作上下文展示有界进度与错误。
 
-首次观察到执行终态时，事务性发送 `job_execution_finished`，包含原始证据、清理及同步状态，不能据此认定业务成功。只有清理确认、证据齐全且后处理完成后，才发送现有 `job_completed`。两阶段分别去重；未确认邮件在重启后继续投递，旧 generation 通知标记为 stale。verifier 认证和 root 成功完成必须要求证据就绪；证据无法取得时可以明确报告带缺口的不确定结果。`lost` 保持终态，退出码和验证标志来自 `result`。控制端新增字段带默认值：已有完整产物记录映射为就绪，已有最终通知不补发第一阶段通知。worker 协议 v3、工具名和权限保持不变，RPC `error.data.kind` 继续提供类型化恢复类别。
+首次观察到执行终态时，事务性发送 `job_execution_finished`，包含原始证据、清理及同步状态，不能据此认定业务成功。只有清理确认、证据齐全且后处理完成后，才发送现有 `job_completed`。两阶段分别去重；未确认邮件在重启后继续投递，旧 generation 通知标记为 stale。verifier 认证和 root 成功完成必须要求证据就绪；证据无法取得时可以明确报告带缺口的不确定结果。`lost` 保持终态，退出码和验证标志来自 `result`。控制端新增字段带默认值：已有完整产物记录映射为就绪，已有最终通知不补发第一阶段通知。worker 协议 v4、工具名和权限保持不变，RPC `error.data.kind` 继续提供类型化恢复类别。
 
 运行时角色只有 `root`、`analyst`、`verifier`。root 负责拆解、派单、证据协调和最终交付；analyst 负责目标分析；verifier 独立检查其他实例的结论。子任务的 `role` 只接受 analyst 或 verifier。模型、预算和工具权限由角色决定，`skills` 不授予新权限。
 
@@ -254,6 +256,18 @@ SQLite 使用 WAL、独立只读连接和单写入连接。普通查询以读事
 类型边界与此对应：`AgentMetadata` 不含 checkpoint 或继承历史，元数据读取和写入接口使用该具体类型；`AgentConversation` 表示可选会话载荷，`AgentSnapshot` 在继承、恢复、报告和聊天展示时显式组合两者。完整快照使用平铺 JSON 结构，业务热路径使用元数据类型。
 
 `interfaces/desktop/presentation` 把公开进度、操作员消息和工具结果组合为展示 DTO，前端 `Conversation` 使用 assistant-ui 和虚拟列表呈现聊天。命令名、参数与返回值由 `ui/src/shared/api/commands.ts` 的映射约束，`bridge` 统一调用；该类型检查不代替 Rust 权限和 epoch 校验。`useDesktopLifecycle` 管理关闭确认、原生文件拖入和键盘监听，`useStartupUpdates` 管理启动更新检查。样式入口保留固定导入顺序，颜色、分栏和组件样式分别维护。性能回归和模块边界见[维护约定](../development/maintenance.zh-CN.md)。
+
+<a id="observability-boundaries"></a>
+
+## 可观察性边界
+
+业务 Store/Event/Job 记录、回执、原始证据和独立验证仍是权威依据。Telemetry 尽力投递，不能解除完成、证据、清理或恢复门槛。桌面第四个工作区视图中的本地活动是 Store 的有界投影，没有 telemetry 后端时仍可使用。
+
+`adapters/telemetry` 每个进程只激活一次控制器导出器，拥有其关闭期限，并在 Wukong span 之外复用 Rig 原生 span。Metric label 刻意排除 run/Agent/call ID。本地 JSONL 和可选 OTLP log 只接受精选 `wukong_telemetry` 事件；普通诊断和敏感模型／工具内容不是任意日志输入。`OTEL_SDK_DISABLED`、服务命名、endpoint/header 优先级、采样和不保存凭据的配置方式见[可观察性用户指南](../user/observability.zh-CN.md)。
+
+协议 4 通过 JSON-RPC 顶层 `_wukong_telemetry` 成员携带标准 W3C 上下文和有界的 Base64 OTLP protobuf 批次。原始业务 `id`、`method`、`params`、哈希及稳定请求／重放语义保持不变。Linux 和 Windows 原生 Worker 持有有界进程本地队列，不持有后端凭据，也不新增网络路径。控制器在业务边界剥离该旁路，对 relay 内容执行允许清单和边界检查，并统一持有外部导出。无效、过大、队列溢出或后端拒绝的 telemetry 可以丢弃，不改变业务回执。
+
+`adapters/observability` 根据经过校验的意图构造原生只读 Tempo/Loki/Prometheus 查询和 Grafana Explore 链接。WebView 不能提供后端 URL、header、任意 TraceQL/LogQL/PromQL 或本地路径。每个外部信号都有独立的未配置／降级／截断元数据；由于业务标识不进入 metric label，指标保持服务范围。查询凭据只来自指定名称的环境变量。导出修改需要重启控制器，保存的查询配置则用于后续查询。
 
 <a id="addresses-and-static-analysis"></a>
 

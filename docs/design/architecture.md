@@ -26,7 +26,7 @@ flowchart TB
         APP --> DOMAIN
         APP --> IO
     end
-    PROTO["Shared Worker protocol v3"]
+    PROTO["Shared Worker protocol v4"]
     LINUX["Linux Worker<br/>Python RPC · Resource ownership · OS adapters"]
     WIN["Windows Worker · disposable VM<br/>Native RPC · ResourceManager · OS adapters"]
     IN --> APP
@@ -37,7 +37,7 @@ flowchart TB
 
 The application query facades supply neutral snapshots. Desktop health commands delegate observation to `application/maintenance/updates/health`, and the Windows setup page reads its inventory through `application/windows_worker_setup/inventory`. `interfaces/report/bundle` owns the file manifest and offline integrity checks for exported reports. Desktop job presentation keeps the recorded execution result, resource-cleanup confirmation and blocking reason separate, linking only the evidence references already stored on the job; it never treats a finished execution as cleanup confirmation. The Windows deployment diagnostics likewise read generation records, the installation recovery record, the imported receipt and the current registration in their owning modules, keeping missing, corrupt and unverified states distinct; the desktop only projects the result.
 
-Public execution uses JSON-RPC protocol v3 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
+Public execution uses JSON-RPC protocol v4 over SSH/stdio. The independent `workers/protocol` crate owns method identities, request/response types, effects, resource demand and the generated JSON Schema. Rust/jsonrpsee and Python/jsonrpcserver register actual handlers; both validate the same contract corpus. The model-tool catalog owns role visibility and required methods; each worker registry owns its handlers and readiness. Third-party observations remain raw evidence, while file/job/session identities and transport configuration are structured.
 
 Controller connections/configuration/identity/leases live under `src/adapters/worker` and `src/adapters/environments`; `ToolContext` carries a bound worker into file/job/session/verification use cases. `WorkerGateway` retains stable request IDs and unmodified worker receipts. Those use cases translate resource IDs into controller ownership records. `src/application/effects` and `src/storage` retain business receipts, evidence and notifications; the worker's execution ledger separately records external effects. A repeated session-start receipt cannot reopen a closed controller session or erase its transcript.
 
@@ -47,7 +47,7 @@ Windows targets run in a dedicated disposable VM declared in signed enrollment. 
 
 `workers/analysis` is a Python package with explicit inputs and no worker state or transport. Linux adapters retain confinement/live debugging; Windows disposable helpers use the same package. The Windows component inventory excludes Linux worker services/dependencies. Architecture guards live in `tests/automation/test_execution_boundaries.py`.
 
-The controller store requires schema 5, the Windows resource journal version 2 and package manifests schema 2. Older formats/protocols fail closed. Use new workspaces and worker instances for v3; there is no migration, automatic deletion or legacy configuration adapter. Existing directories and evidence stay intact. Current acceptance is recorded separately from historical results.
+The controller store requires schema 5, the Windows resource journal version 2 and package manifests schema 2. Older formats/protocols fail closed. Use new workspaces and worker instances for v4; there is no migration, automatic deletion or legacy configuration adapter. Existing directories and evidence stay intact. Current acceptance is recorded separately from historical results.
 
 
 Worker dependencies are enforced by architecture tests: native core ownership types are independent of artifact storage; RPC routes into resource operations; tool-specific plans and result adapters stay outside lifecycle commits. Python core/platform/execution/debugger/resources/operations follow explicit dependency directions. Both platforms consume a shared lifecycle corpus covering outcome certainty, cleanup and durable retry semantics. See [worker boundaries](../../workers/runtime/README.md#module-boundaries) and [protocol semantics](../../workers/protocol/README.md).
@@ -61,6 +61,8 @@ Windows has one native worker authority. The controller owns business tasks/evid
 | `application/coordinator` | Shared transaction entry; `runs`, `tasks`, `messages`, `waits`, `completion` manage runs, children, mail, dependencies and completion |
 | `application/agents`, `prompts/` | Role/capability prompt assembly; `src/application/prompts.rs` owns builtin registration |
 | `adapters/models` | Provider configuration and native connections |
+| `adapters/telemetry` | Process-owned traces, low-cardinality metrics, curated optional logs/JSONL, bounded Worker relay and shutdown |
+| `adapters/observability` | Read-only durable local activity, independently degraded Tempo/Loki/Prometheus queries and validated Grafana links |
 | `application/assessment/runner`, `bootstrap` | Run lifecycle and concrete dependency assembly |
 | `application/agent_runtime/host`, `application/model_catalog`, `application/usage` | Kernel-facing business APIs, role model selection, usage/budget accounting |
 | `application/agent_runtime` | Business integration with Rig execution/logging, child/message protocol, model/tool admission and native conversation projection |
@@ -213,7 +215,7 @@ The desktop and CLI use `AssessmentService` for assessment start/resume; the des
 
 `EvidenceSyncService` transfers outside the resource lock, with two tasks globally and one per worker environment. It persists the manifest and per-file progress keyed by worker identity, path, SHA256 and size; verified files survive restart without redownload. Network failures retry with bounded backoff; integrity/size failures remain explicit failures. Publication reacquires the resource lock and checks the current identity and controller fence. Status queries and working context show bounded progress and errors.
 
-The first terminal observation transactionally delivers `job_execution_finished` with original evidence, cleanup and synchronization state. It cannot authorize business success. Only confirmed cleanup, complete evidence and completed postprocessing permit the existing `job_completed` notification. The two phases deduplicate separately; unacknowledged mail survives restart and old-generation notices become stale. Verifier certification and root success require evidence readiness; unavailable evidence may instead support an explicit inconclusive result with gaps. `lost` remains terminal; exit/verification flags come from `result`. Additive controller fields have defaults: existing complete artifact records remain ready and existing final notifications do not receive a backfilled first phase. Worker protocol v3, tool names and permissions are unchanged. RPC `error.data.kind` retains typed recovery categories.
+The first terminal observation transactionally delivers `job_execution_finished` with original evidence, cleanup and synchronization state. It cannot authorize business success. Only confirmed cleanup, complete evidence and completed postprocessing permit the existing `job_completed` notification. The two phases deduplicate separately; unacknowledged mail survives restart and old-generation notices become stale. Verifier certification and root success require evidence readiness; unavailable evidence may instead support an explicit inconclusive result with gaps. `lost` remains terminal; exit/verification flags come from `result`. Additive controller fields have defaults: existing complete artifact records remain ready and existing final notifications do not receive a backfilled first phase. Worker protocol v4, tool names and permissions are unchanged. RPC `error.data.kind` retains typed recovery categories.
 
 Runtime roles are only `root`, `analyst`, `verifier`. Root decomposes/dispatches/coordinates/delivers; analysts inspect targets; verifiers independently check other instances. Child `role` accepts only analyst/verifier. Roles determine models, budgets and permissions; Skills grant none.
 
@@ -254,6 +256,18 @@ SQLite uses WAL, independent read-only connections and one writer. Reads see con
 `AgentMetadata` excludes checkpoints/history and is the metadata read/write type. `AgentConversation` is the optional conversation payload. `AgentSnapshot` explicitly combines them for inheritance/recovery/reports/chat. Full snapshots use flat JSON; hot paths use metadata.
 
 `interfaces/desktop/presentation` combines public progress/operator messages/tool results into DTOs. Frontend `Conversation` uses assistant-ui and virtualization. `ui/src/shared/api/commands.ts` maps command names/arguments/results; `bridge` invokes them. Type checking does not replace Rust permission/epoch validation. `useDesktopLifecycle` handles close confirmation/native drops/keyboard listeners; `useStartupUpdates` handles startup checks. Styles retain fixed import order with separate color/layout/component ownership. See [maintenance](../development/maintenance.md) for boundaries/benchmarks.
+
+<a id="observability-boundaries"></a>
+
+## Observability boundaries
+
+Business Store/Event/Job records, receipts, original evidence and independent verification remain authoritative. Telemetry is best-effort and cannot release completion, evidence, cleanup or recovery gates. Local activity in the fourth desktop workspace view is a bounded Store projection and remains available without telemetry backends.
+
+`adapters/telemetry` activates controller exporters once per process, owns their shutdown deadline, and reuses native Rig spans alongside Wukong spans. Metrics deliberately exclude run/Agent/call IDs from labels. Local JSONL and optional OTLP logs accept only curated `wukong_telemetry` events; general diagnostics and sensitive model/tool content are not arbitrary log input. `OTEL_SDK_DISABLED`, service naming, endpoint/header precedence, sampling and credential-free persisted configuration are covered in the [observability user guide](../user/observability.md).
+
+Protocol 4 carries standard W3C context and bounded base64 OTLP protobuf batches in top-level `_wukong_telemetry` JSON-RPC members. The raw business `id`, `method`, `params`, hashes and stable request/replay semantics remain unchanged. Linux and native Windows Workers hold bounded process-local queues without backend credentials or new network paths. The controller strips the side channel at the business boundary, allowlists and bounds relay content, and owns all external export. Invalid, oversized, queued-out or backend-rejected telemetry can be dropped without changing business receipts.
+
+`adapters/observability` constructs native read-only Tempo/Loki/Prometheus queries and Grafana Explore links from validated intent. The webview cannot supply backend URLs, headers, arbitrary TraceQL/LogQL/PromQL or local paths. Each external signal has independent unconfigured/degraded/truncated metadata; metrics are service-scoped because business identifiers stay off metric labels. Query credentials come only from named environment variables. Export changes require controller restart, while saved query configuration is used for subsequent queries.
 
 <a id="地址与静态分析"></a>
 
