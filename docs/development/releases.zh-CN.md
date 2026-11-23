@@ -19,6 +19,7 @@ Settings → Secrets and variables → Actions：
 | Secret | DOCKERHUB_TOKEN | Docker Hub 仓库 Read/Write PAT，不需要 Delete |
 | Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri 更新签名私钥内容，仅可信发布工作流使用 |
 | Variable | RELEASE_APP_ID | 专用发布 GitHub App 的 App ID |
+| Variable | RELEASE_APP_SLUG | 专用发布 App 的 URL slug，不包含 `[bot]` 后缀 |
 | Secret | RELEASE_APP_PRIVATE_KEY | 该 App 生成的 PEM 私钥全文 |
 
 PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源码、包、命令参数或发布说明。公开镜像允许客户端匿名拉取；发布凭据只用于 CI。
@@ -28,12 +29,14 @@ PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源�
 1. 在 [GitHub Apps 设置](https://github.com/settings/apps/new) 创建 App，Homepage 填仓库 URL，关闭 Webhook；仅允许安装到自己的账号即可。
 2. Repository permissions 设置 **Contents: Read and write**、**Pull requests: Read and write**；不需要 Administration、Actions write 或 Workflows write。
 3. Install App → Only select repositories → `mark0-cn/Wukong`。
-4. 将 App ID 保存到上述仓库 Variable，Generate a private key 后将 PEM 全文保存到上述 Secret；不要把私钥提交到仓库或聊天。
+4. 将 App ID 和 URL slug 保存到上述仓库 Variables，Generate a private key 后将 PEM 全文保存到上述 Secret；不要把私钥提交到仓库或聊天。
 
 工作流按当前仓库签发短期 installation token，结束后撤销。创建 PR 时请求 Contents/PR 写权限；打 tag 时只请求 Contents 写权限。
 App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发发布工作流；不再额外 dispatch 一套分支 CI。
 这是为避免内置 `GITHUB_TOKEN` 创建 PR 时的工作流批准要求，以及该 token 的 push 事件不触发后续工作流的限制。
 参考 [GitHub 触发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)。
+
+必须配置服务器端发布限制：启用 `v*` tag ruleset，仅允许发布 App 创建、更新或删除 tag；配置 `release-publication` Environment，指定维护者为必需审核人并禁止管理员绕过。工作流还会独立拒绝 actor 不是 `<RELEASE_APP_SLUG>[bot]` 的 tag push，最终发布 job 也必须等待 Environment 审批。手工推送 tag 不是替代发布路径。
 
 默认使用 GitHub 标准托管 `ubuntu-24.04` / `windows-2025`。镜像构建和验收是不同 job，彼此只传 digest 与小文件，不传镜像 tar。磁盘准备脚本仅允许在 GitHub 托管 Linux VM 上运行，删除该 job 不需要的预装 SDK，打印空间并做预检。若空间不足，可以把可选 Variable `WORKBENCH_LINUX_RUNNER` 设置为已配置的大规格 **GitHub 托管** runner 标签；不会自动开通付费资源。
 
@@ -100,7 +103,7 @@ tag 只允许 `v主版本.次版本.补丁版本`，例如 `v0.1.0`、`v12.3.45`
 tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `master`。
 
 工作流监听所有 tag，在 metadata 阶段先校验格式和版本，不通过就不会构建、打包或发布。
-工作流校验本身不会拒绝非法 Git push；服务器端强制要求需要适用的 tag Ruleset。
+仅允许发布 App 的 `v*` tag ruleset 会在未授权 Git push 触发工作流前将其拒绝；actor 校验是纵深防御，不能替代服务器端强制规则。
 历史提交的 tag 使用该提交中的工作流。仓库当前 Rulesets 应另行核对，不能把工作流过滤当作服务器强制规则。
 
 `release.yml` 自动执行：

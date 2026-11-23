@@ -60,8 +60,17 @@ jobs:
           NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
           USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EXPECTED_ACTOR: ${{ vars.RELEASE_APP_SLUG }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            if [[ ! "$EXPECTED_ACTOR" =~ ^[a-z0-9-]+$ ]]; then
+              echo '::error::Configure RELEASE_APP_SLUG with the release App slug, without the [bot] suffix.'
+              exit 1
+            fi
+            if [[ "$GITHUB_ACTOR" != "${EXPECTED_ACTOR}[bot]" ]]; then
+              echo "::error::Tag publication requires the configured release App actor, not $GITHUB_ACTOR."
+              exit 1
+            fi
             version=$(python -m scripts.release.cli check --tag "$GITHUB_REF_NAME")
           else
             version=$(python -m scripts.release.cli check)
@@ -376,6 +385,7 @@ jobs:
       always() && needs.metadata.result == 'success' && needs.package.result == 'success' &&
       github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [metadata, package]
+    environment: release-publication
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

@@ -19,6 +19,7 @@ Repository: `mark0-cn/Wukong`. Public image: `hlmark0/wukong`. Distributions: Wi
 | Secret | DOCKERHUB_TOKEN | Docker Hub repository Read/Write PAT; Delete is unnecessary |
 | Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri updater private key, only for trusted release workflows |
 | Variable | RELEASE_APP_ID | Dedicated release GitHub App ID |
+| Variable | RELEASE_APP_SLUG | Dedicated release App URL slug, without the `[bot]` suffix |
 | Secret | RELEASE_APP_PRIVATE_KEY | Full PEM private key generated for that App |
 
 Replace expired Docker PATs in Secrets. Never put PATs in source, packages, command arguments or release notes. Clients pull public images anonymously; publishing credentials are CI-only.
@@ -28,9 +29,11 @@ One-time App setup:
 1. Create an App in [GitHub Apps settings](https://github.com/settings/apps/new), use the repository URL as Homepage, disable Webhook, and restrict installation to your account.
 2. Repository permissions: **Contents: Read and write**, **Pull requests: Read and write**. Administration, Actions write and Workflows write are unnecessary.
 3. **Install App → Only select repositories → `mark0-cn/Wukong`**.
-4. Save App ID in the variable above and the complete generated PEM in the secret. Never commit/send the private key in chat.
+4. Save the App ID and URL slug in the variables above and the complete generated PEM in the secret. Never commit/send the private key in chat.
 
 Workflows issue short-lived repository installation tokens and revoke them afterward. PR creation requests Contents/PR write; tagging requests only Contents write. App-created PRs trigger native `pull_request` CI; App-pushed tags trigger publishing, with no extra branch CI dispatch. This avoids built-in `GITHUB_TOKEN` PR-approval restrictions and its push events not triggering subsequent workflows. See [GitHub trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+Server-side publication controls are required: configure an active `v*` tag ruleset that restricts creation, updates and deletion to the release App, and a `release-publication` Environment with a designated maintainer as required reviewer and administrator bypass disabled. The workflow independently rejects tag pushes whose actor is not `<RELEASE_APP_SLUG>[bot]`; the final publication job also waits for Environment approval. Manual tag pushes are not an alternative release path.
 
 Defaults are standard GitHub-hosted `ubuntu-24.04` / `windows-2025`. Image build and acceptance are separate jobs exchanging only digests/small files, not image tars. Disk preparation is restricted to hosted Linux VMs, removes unneeded preinstalled SDKs, prints space and preflights capacity. If necessary, set optional `WORKBENCH_LINUX_RUNNER` to an already-configured larger **GitHub-hosted** runner label; no paid resources are provisioned automatically.
 
@@ -80,7 +83,7 @@ Preparation creates no tag/image/Release. Version must increase; existing tags a
 
 Tags must be `vMAJOR.MINOR.PATCH`, e.g. `v0.1.0`, `v12.3.45`. Components are ASCII digits, allowing standalone zero but no leading zeros. Reject `1.2.3`, `V1.2.3`, `v1.2`, `v01.2.3`, `v1.2.3-rc.1`, `v1.2.3+build`. Tags must match source versions and point to commits included in default branch master.
 
-The workflow listens to all tags and validates metadata before image build/package/publication. Workflow validation does not itself reject invalid Git pushes; server-side enforcement requires an applicable tag Ruleset. Historical-commit tags execute that commit's workflow. Check current repository Rulesets separately rather than assuming workflow filtering is server enforcement.
+The workflow listens to all tags and validates metadata before image build/package/publication. The App-only `v*` tag ruleset rejects unauthorized Git pushes before they start this workflow; actor validation is defense in depth, not a replacement for server-side enforcement. Historical-commit tags execute that commit's workflow. Check current repository Rulesets separately rather than assuming workflow filtering is server enforcement.
 
 `release.yml` performs:
 
