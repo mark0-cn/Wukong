@@ -1,0 +1,252 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Local controller traces, logs, and metrics. Filter by run or trace and continue in Explore.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [],
+      "title": "Explore telemetry",
+      "type": "link",
+      "url": "/explore"
+    }
+  ],
+  "panels": [
+    {
+      "description": "How to use this fixed local dashboard.",
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "Set **Run ID** to find its traces and logs. Select a trace to inspect spans and linked logs, or set **Trace ID** for a direct lookup. Empty filters show all local telemetry. Metrics intentionally have no run/agent/call labels; use Explore for other safe aggregate queries. Telemetry is best-effort and is not business evidence.",
+        "mode": "markdown"
+      },
+      "pluginVersion": "12.0.1",
+      "title": "Run and trace exploration",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "description": "TraceQL search using the Run ID span attribute. Empty Run ID matches all runs.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 2,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "limit": 20,
+          "query": "{ span.run_id =~ \"${run_id}.*\" }",
+          "queryType": "traceqlSearch",
+          "refId": "A"
+        }
+      ],
+      "title": "Traces for run",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "description": "Direct trace lookup. Paste a trace ID into the dashboard variable.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 3,
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "query": "$trace_id",
+          "queryType": "traceId",
+          "refId": "A"
+        }
+      ],
+      "title": "Trace by ID",
+      "type": "traces"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "Case-insensitive filters over OTLP structured metadata; empty Run ID and Trace ID values match all logs.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "id": 4,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": true,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=~\".+\"} | run_id=~\"(?i).*${run_id}.*\" | trace_id=~\"(?i).*${trace_id}.*\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Controller logs",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Aggregated rates for exported counters. Low-cardinality labels remain available in Explore.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "pointSize": 5,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (__name__) (rate({__name__=~\".+_total\"}[5m]))",
+          "legendFormat": "{{__name__}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Controller counter rates",
+      "type": "timeseries"
+    }
+  ],
+  "preload": false,
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": [
+    "wukong",
+    "local",
+    "opentelemetry"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "Wukong run ID; empty matches all runs.",
+        "hide": 0,
+        "label": "Run ID",
+        "name": "run_id",
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "W3C trace ID; empty matches all log lines and disables direct trace detail.",
+        "hide": 0,
+        "label": "Trace ID",
+        "name": "trace_id",
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Wukong Observability",
+  "uid": "wukong-observability",
+  "version": 1
+}
