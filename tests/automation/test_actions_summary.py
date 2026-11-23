@@ -122,6 +122,7 @@ class SummaryTests(unittest.TestCase):
                     apt="false",
                     uninstall="false",
                     release_clients="false",
+                    reuse="false",
                 ),
             },
             "windows": {"result": "success", "outputs": {"rust_cache_hit": "true"}},

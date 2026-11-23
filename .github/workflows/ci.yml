@@ -52,6 +52,8 @@ jobs:
         env:
           BUILD_RELEASE_CLIENTS: ${{ inputs.build_release_clients || false }}
           WINDOWS_WORKER_ACCEPTANCE: ${{ inputs.windows_worker_acceptance == true || contains(github.event.pull_request.labels.*.name, 'windows-worker-acceptance') }}
+          FORCE_FULL_CI: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+          GH_TOKEN: ${{ github.token }}
         run: python -m scripts.ci.ci_scope
       - name: Documentation pairs, links and review records
         run: python -m scripts.ci.check_docs
@@ -63,7 +65,7 @@ jobs:
 
   windows:
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.linux == 'true'
+    if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.linux == 'true') && needs.changes.outputs.reuse != 'true'
     env:
       # CI-only: retain line information while reducing debug data and cache size.
       # Keep assertions/overflow checks and the local/release profiles unchanged.
@@ -168,7 +170,7 @@ jobs:
 
   windows-worker:
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.rust == 'true' && needs.changes.outputs.reuse != 'true'
     env:
       CARGO_PROFILE_DEV_DEBUG: '1'
       CARGO_PROFILE_TEST_DEBUG: '1'
@@ -216,7 +218,7 @@ jobs:
 
   linux:
     needs: changes
-    if: needs.changes.outputs.linux == 'true'
+    if: needs.changes.outputs.linux == 'true' && needs.changes.outputs.reuse != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -309,7 +311,7 @@ jobs:
 
   acceptance:
     needs: changes
-    if: needs.changes.outputs.apt == 'true' || needs.changes.outputs.uninstall == 'true'
+    if: (needs.changes.outputs.apt == 'true' || needs.changes.outputs.uninstall == 'true') && needs.changes.outputs.reuse != 'true'
     uses: ./.github/workflows/acceptance.yml
     with:
       apt: ${{ needs.changes.outputs.apt == 'true' }}
@@ -317,21 +319,21 @@ jobs:
 
   windows-client:
     needs: changes
-    if: needs.changes.outputs.release_clients == 'true'
+    if: needs.changes.outputs.release_clients == 'true' && needs.changes.outputs.reuse != 'true'
     uses: ./.github/workflows/build-client.yml
     with:
       target: windows
 
   linux-client:
     needs: changes
-    if: needs.changes.outputs.release_clients == 'true'
+    if: needs.changes.outputs.release_clients == 'true' && needs.changes.outputs.reuse != 'true'
     uses: ./.github/workflows/build-client.yml
     with:
       target: linux
 
   linux-desktop-client:
     needs: changes
-    if: needs.changes.outputs.release_clients == 'true'
+    if: needs.changes.outputs.release_clients == 'true' && needs.changes.outputs.reuse != 'true'
     uses: ./.github/workflows/build-client.yml
     with:
       target: linux-desktop
@@ -357,6 +359,22 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python -c 'import json, os, sys; from scripts.ci.ci_scope import checks_passed; sys.exit(0 if checks_passed(json.loads(os.environ["NEEDS_JSON"])) else 1)'
+      - name: Write optional reusable test attestation
+        id: attestation
+        if: success() && github.event_name == 'pull_request' && needs.changes.outputs.reuse == 'false'
+        continue-on-error: true # Evidence availability must not change this run's required result.
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python -m scripts.ci.ci_reuse write --output target/ci-attestation/ci-result.json
+      - name: Upload optional reusable test attestation
+        if: steps.attestation.outcome == 'success'
+        continue-on-error: true # A later run falls back to full checks when evidence is unavailable.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ci-test-attestation-v1
+          path: target/ci-attestation/ci-result.json
+          if-no-files-found: error
+          retention-days: 7
 
   release-request:
     needs: [changes, summary]

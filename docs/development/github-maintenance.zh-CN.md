@@ -106,7 +106,7 @@ apt、gem、Dockerfile 内联 pip 依赖与 AFL 基础镜像另行维护。
 
 普通 CI 只在 `master` push 和面向 `master` 的 PR 触发，避免同一开发分支的 push/PR 重复执行。
 未开 PR 的分支可手动启动 CI；版本准备工作流使用发布 App 创建 PR，由原生 PR 事件启动完整 CI。
-PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。
+PR 更新取消旧运行；主分支运行允许完成以保存缓存，等待中的请求由 GitHub concurrency 合并调度。推送修订前添加 `full-ci` 标签可禁止该修订复用历史测试结果，所选运行启动后移除标签。手动 Checks 始终完整运行。
 
 Windows 原生 worker 安装验收需要显式选择：手动运行 Checks 时启用 `windows_worker_acceptance`，或在推送待验收修订前给 PR 加上 `windows-worker-acceptance` 标签。仅修改标签不会启动 CI。此选项强制完整组件检查，并在原生编译后运行独立托管夹具；所选运行启动后移除标签，避免之后无关修订重复安装。夹具拒绝开发宿主和自托管机器，仅上传公开报告。按 worker 程序阻断外网会保留 CI agent 联网，不能替代最终的 Windows VM 整机断网验收。它不发布 Release，也不证明生产目标隔离或卸载已经完成；参见[原生组件指南](../../workers/windows/README.zh-CN.md)。
 
@@ -114,7 +114,9 @@ Windows 原生 worker 安装验收需要显式选择：手动运行 Checks 时�
 
 PR 与 master 使用 `scripts/ci/ci_scope.py` 按完整改动范围选择检查：README、AGENTS、docs Markdown、有效的追加式 `.changes/<slug>.toml` 与翻译核对记录只做轻量检查，整项 Windows/Linux job 均跳过；changes 始终校验文档配对、链接和核对记录。`ui/` 增加 Windows 与 Linux 前端检查；runtime/tests/fixtures/evals 增加 Linux 与 Windows Python 测试。Rust、公共脚本、锁文件、工作流和未知路径执行完整组件检查；运行时 prompts 不属于普通文档。版本 PR、版本递增的 master 提交、手动 Checks 和发布调用执行完整组件及 APT/卸载验收。PR 使用 merge-base 范围，master 使用 push 的 before/after 全范围；重命名包含新旧路径，计算失败阻止 CI。Windows 发布脚本与安装器事务测试仅随 Rust/共享改动运行。
 
-`summary` 是最终门禁：changes 必须成功，Windows、独立 Windows Worker、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
+`summary` 是最终门禁：changes 必须成功，Windows、独立 Windows Worker、Linux、复用的 acceptance 和三个客户端预构建结果必须与选择范围一致。APT/卸载按受影响路径或工作流变更选中；子工作流的 acceptance-gate 独立检查每个选中 job。需要运行的任务失败、取消或意外跳过均不能通过；只有未选中的任务或具有独立验证历史证明的任务允许跳过。始终触发顶层 Checks，在 job 内选择范围，避免 required check 永久 Pending；Policy 的标题/正文编辑不取消平台 CI。
+
+同仓库普通 PR 只能复用同一 PR 最近七天内成功 Checks 的重型测试证据。`scripts/ci/ci_reuse.py` 将有界的 `ci-test-attestation-v1` artifact 绑定到仓库、运行、尝试、PR、head SHA、实际测试的 merge SHA/tree、范围和 job 结果，并通过 API 独立核对生成 job。复用要求范围完全一致，且实际 merge tree 相同，或增量只包含上述轻量文档/发布片段；绝不只凭祖先关系复用。当前 `summary` 与 `commit-policy` 始终重跑；选中 job 只有在摘要记录已验证来源运行和原因时才可跳过。复用运行不再签发新证据。API、artifact、身份、时效或 diff 校验失败均回退正常执行。master push、版本 PR、手动/发布调用、`full-ci` 和原生 Worker 安装验收运行不使用历史复用。证据写入/上传是可选能力，不改变当前运行结果。发布授权、客户端/安装器产物和 tag 身份仍仅接受完全相同的 SHA。
 
 Rust 使用固定工具链和参数派生缓存键，主分支负责写入，PR 只恢复。
 CI 的 `windows-checks-v2` 缓存与 Release 编译缓存分开。独立 Worker job 使用 `windows-worker-checks-v1`，只覆盖 Windows Worker/package workspace 及其 target 目录，两个 Windows job 不会竞争写入同一缓存。首次或工具链/参数变化仍需重新编译。

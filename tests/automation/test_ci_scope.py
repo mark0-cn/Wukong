@@ -46,6 +46,7 @@ class ScopeTests(unittest.TestCase):
                     apt="false",
                     uninstall="false",
                     release_clients="true",
+                    reuse="false",
                 ),
             },
             **{
@@ -132,6 +133,7 @@ class ScopeTests(unittest.TestCase):
                         apt="false",
                         uninstall="false",
                         release_clients="false",
+                        reuse="false",
                     ),
                 },
                 "windows": {"result": "success" if linux == "true" else "skipped"},
@@ -208,6 +210,7 @@ class ScopeTests(unittest.TestCase):
                     apt="true",
                     uninstall="true",
                     release_clients="false",
+                    reuse="false",
                 ),
             },
             **{
