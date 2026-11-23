@@ -635,7 +635,9 @@ def finalize(
             raise ValueError("Sealed manifest differs from the reported identity")
         sealed_manifest = json.loads(regular(package / "manifest.json").read_text(encoding="utf-8"))
         if sealed_manifest.get("version") != media_version:
-            raise ValueError("Sealed worker manifest version differs from the offline media version")
+            raise ValueError(
+                "Sealed worker manifest version differs from the offline media version"
+            )
         regular(package / "manifest.sig")
         enrollment = dict(
             schema=1,

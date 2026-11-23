@@ -86,63 +86,87 @@ def attributes(values: dict[str, str]) -> list[dict[str, Any]]:
 def export(run_id: str, trace_id: str, start: int, end: int, timeout: float) -> None:
     resource = {"attributes": attributes({"service.name": "wukong"})}
     trace = {
-        "resourceSpans": [{
-            "resource": resource,
-            "scopeSpans": [{
-                "scope": {"name": "wukong.acceptance"},
-                "spans": [{
-                    "traceId": trace_id,
-                    "spanId": secrets.token_hex(8),
-                    "name": "wukong.assessment",
-                    "kind": 1,
-                    "startTimeUnixNano": str(start),
-                    "endTimeUnixNano": str(end),
-                    "attributes": attributes({"run_id": run_id, "outcome": "completed"}),
-                    "status": {"code": "STATUS_CODE_OK"},
-                }],
-            }],
-        }],
+        "resourceSpans": [
+            {
+                "resource": resource,
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "wukong.acceptance"},
+                        "spans": [
+                            {
+                                "traceId": trace_id,
+                                "spanId": secrets.token_hex(8),
+                                "name": "wukong.assessment",
+                                "kind": 1,
+                                "startTimeUnixNano": str(start),
+                                "endTimeUnixNano": str(end),
+                                "attributes": attributes(
+                                    {"run_id": run_id, "outcome": "completed"}
+                                ),
+                                "status": {"code": "STATUS_CODE_OK"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
     }
     log = {
-        "resourceLogs": [{
-            "resource": resource,
-            "scopeLogs": [{
-                "scope": {"name": "wukong.acceptance"},
-                "logRecords": [{
-                    "timeUnixNano": str(end),
-                    "observedTimeUnixNano": str(end),
-                    "severityText": "INFO",
-                    "body": {"stringValue": "run_finished"},
-                    "attributes": attributes({
-                        "run_id": run_id,
-                        "trace_id": trace_id,
-                        "event": "run_finished",
-                        "outcome": "completed",
-                    }),
-                }],
-            }],
-        }],
+        "resourceLogs": [
+            {
+                "resource": resource,
+                "scopeLogs": [
+                    {
+                        "scope": {"name": "wukong.acceptance"},
+                        "logRecords": [
+                            {
+                                "timeUnixNano": str(end),
+                                "observedTimeUnixNano": str(end),
+                                "severityText": "INFO",
+                                "body": {"stringValue": "run_finished"},
+                                "attributes": attributes(
+                                    {
+                                        "run_id": run_id,
+                                        "trace_id": trace_id,
+                                        "event": "run_finished",
+                                        "outcome": "completed",
+                                    }
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
     }
     metric = {
-        "resourceMetrics": [{
-            "resource": resource,
-            "scopeMetrics": [{
-                "scope": {"name": "wukong.acceptance"},
-                "metrics": [{
-                    "name": "wukong.run.started",
-                    "sum": {
-                        "aggregationTemporality": "AGGREGATION_TEMPORALITY_DELTA",
-                        "isMonotonic": True,
-                        "dataPoints": [{
-                            "startTimeUnixNano": str(start),
-                            "timeUnixNano": str(end),
-                            "asInt": "1",
-                            "attributes": attributes({"outcome": "acceptance"}),
-                        }],
-                    },
-                }],
-            }],
-        }],
+        "resourceMetrics": [
+            {
+                "resource": resource,
+                "scopeMetrics": [
+                    {
+                        "scope": {"name": "wukong.acceptance"},
+                        "metrics": [
+                            {
+                                "name": "wukong.run.started",
+                                "sum": {
+                                    "aggregationTemporality": "AGGREGATION_TEMPORALITY_DELTA",
+                                    "isMonotonic": True,
+                                    "dataPoints": [
+                                        {
+                                            "startTimeUnixNano": str(start),
+                                            "timeUnixNano": str(end),
+                                            "asInt": "1",
+                                            "attributes": attributes({"outcome": "acceptance"}),
+                                        }
+                                    ],
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
     }
     for signal, payload in (("traces", trace), ("logs", log), ("metrics", metric)):
         request_object(f"{COLLECTOR}/v1/{signal}", payload=payload, timeout=timeout)
@@ -160,7 +184,9 @@ def verify(run_id: str, trace_id: str, start: int, end: int, timeout: float) -> 
             parameters={**seconds, "q": f'{{ .run_id = "{run_id}" }}', "limit": "20"},
             timeout=timeout,
         )
-        return any(item.get("traceID", "").lower() == trace_id for item in response.get("traces", []))
+        return any(
+            item.get("traceID", "").lower() == trace_id for item in response.get("traces", [])
+        )
 
     wait_for("Tempo run search", traces, 45)
     detail = request_object(f"{TEMPO}/api/traces/{trace_id}", timeout=timeout)
@@ -199,7 +225,9 @@ def verify(run_id: str, trace_id: str, start: int, end: int, timeout: float) -> 
 
     wait_for("Prometheus controller metric", metrics, 60)
     health = request_object(f"{GRAFANA}/api/health", timeout=timeout)
-    dashboard = request_object(f"{GRAFANA}/api/dashboards/uid/wukong-observability", timeout=timeout)
+    dashboard = request_object(
+        f"{GRAFANA}/api/dashboards/uid/wukong-observability", timeout=timeout
+    )
     sources = request_json(f"{GRAFANA}/api/datasources", timeout=timeout)
     if health.get("database") != "ok":
         raise RuntimeError("Grafana database health is not ok")
@@ -214,7 +242,9 @@ def verify(run_id: str, trace_id: str, start: int, end: int, timeout: float) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--timeout", type=float, default=5, help="individual HTTP timeout in seconds")
+    parser.add_argument(
+        "--timeout", type=float, default=5, help="individual HTTP timeout in seconds"
+    )
     arguments = parser.parse_args()
     if not 1 <= arguments.timeout <= 60:
         parser.error("--timeout must be between 1 and 60 seconds")
@@ -224,13 +254,17 @@ def main() -> int:
     start = end - 250_000_000
     export(run_id, trace_id, start, end, arguments.timeout)
     verify(run_id, trace_id, start, end, arguments.timeout)
-    print(json.dumps({
-        "status": "passed",
-        "run_id": run_id,
-        "trace_id": trace_id,
-        "verified": ["otlp", "tempo", "loki", "prometheus", "grafana"],
-        "not_covered": ["native GUI", "model analysis", "Worker relay"],
-    }))
+    print(
+        json.dumps(
+            {
+                "status": "passed",
+                "run_id": run_id,
+                "trace_id": trace_id,
+                "verified": ["otlp", "tempo", "loki", "prometheus", "grafana"],
+                "not_covered": ["native GUI", "model analysis", "Worker relay"],
+            }
+        )
+    )
     return 0
 
 
