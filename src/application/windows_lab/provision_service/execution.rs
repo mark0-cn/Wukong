@@ -366,7 +366,7 @@ impl WindowsLab {
         finish: &EnvironmentFinish,
         media: &MediaIdentity,
         baseline: &str,
-        guest_network: Arc<dyn GuestNetwork>,
+        guest_network: Option<Arc<dyn GuestNetwork>>,
     ) -> EnvironmentFinished {
         let mut finished = EnvironmentFinished {
             registration: None,
@@ -387,7 +387,18 @@ impl WindowsLab {
                 let identity = finish.identity_file.as_deref().context(
                     "registered environment requires the controller-managed SSH identity key",
                 )?;
-                let guest_ip = self.wait_guest_ip(guest_network.as_ref(), deadline).await?;
+                let guest_ip = match finish.guest_ip {
+                    Some(address) => address.to_string(),
+                    None => {
+                        self.wait_guest_ip(
+                            guest_network.as_deref().context(
+                                "guest address discovery requires the vmrun adapter; configure [windows_lab.vms.<alias>.offline] or pass an explicit guest IPv4 address",
+                            )?,
+                            deadline,
+                        )
+                        .await?
+                    },
+                };
                 let registered = finish
                     .registrar
                     .register(&finish.connection, media, &guest_ip, identity)

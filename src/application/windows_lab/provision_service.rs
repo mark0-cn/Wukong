@@ -29,7 +29,7 @@ use planning::planned_actions;
 use recovery::remove_provision_working_files;
 use serde::Serialize;
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 use wukong_worker_package::ConnectionReceipt;
 
 pub struct ProvisionOptions {
@@ -170,6 +170,7 @@ struct EnvironmentFinish {
     environment_id: String,
     connection: ConnectionReceipt,
     identity_file: Option<PathBuf>,
+    guest_ip: Option<Ipv4Addr>,
     register: bool,
     verify: bool,
     timeout: Duration,
@@ -370,13 +371,11 @@ impl WindowsLab {
                 environment_id: plan.media.environment_id.clone(),
                 connection: evidence.connection,
                 identity_file: plan.identity_file.clone(),
+                guest_ip: None,
                 register: options.register,
                 verify: options.verify_environment,
                 timeout: Duration::from_secs(options.timeout_seconds),
             };
-            let guest_network = guest_network.context(
-                "guest address discovery requires the vmrun adapter; configure [windows_lab.vms.<alias>.offline]",
-            )?;
             let finished = self
                 .finish_environment(&finish, &plan.media, &plan.baseline, guest_network)
                 .await;
@@ -424,6 +423,127 @@ impl WindowsLab {
             environment_block,
             registration,
             verification,
+        })
+    }
+
+    /// Retry registration and doctor from a settled installation receipt without
+    /// repeating the native installer or replacing its fixed base. An explicit
+    /// address supports guests whose VMware Tools cannot report one; the pinned
+    /// host key and identity-matched doctor still prove the selected endpoint.
+    pub async fn register_environment(
+        &self,
+        guest_ip: Option<Ipv4Addr>,
+        timeout_seconds: u64,
+    ) -> Result<ProvisionOutcome> {
+        ensure!(
+            (60..=7200).contains(&timeout_seconds),
+            "registration timeout must be 60–7200 seconds"
+        );
+        let registrar = self
+            .environment_registrar
+            .clone()
+            .context("environment registration requires the controller environment registrar")?;
+        let _gate = self.gate.lock().await;
+        let _lock = self.store.lock(&self.vm_id)?;
+        let _environment_guard = crate::adapters::environments::lab_guard::acquire(
+            &crate::adapters::environments::lab_guard::path(&self.vmx)?,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
+        )?;
+        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
+        self.mark_restart_recovery(&mut state)?;
+        ensure!(
+            matches!(state.phase, LabPhase::Idle | LabPhase::Failed),
+            "lab VM {} is {:?}; restore or reconcile it before registration",
+            self.vm_id,
+            state.phase
+        );
+        ensure!(
+            state.pending.is_none() && state.active.is_none(),
+            "lab VM has an active or pending operation; reconcile or restore it before registration"
+        );
+        let mut record = state
+            .last_provision
+            .clone()
+            .context("lab VM has no provisioning receipt to register")?;
+        ensure!(
+            record.status == RunStatus::Completed
+                && record.settled
+                && record.baseline_snapshot.as_deref() == Some(self.baseline.as_str()),
+            "the last provisioning receipt did not settle the current fixed base"
+        );
+        let snapshots = self.step(self.host.snapshots()).await.map_err(step_error)?;
+        ensure!(
+            snapshots.iter().any(|name| name == &self.baseline),
+            "fixed base snapshot '{}' is missing",
+            self.baseline
+        );
+        let connection: ConnectionReceipt = serde_json::from_value(
+            record
+                .connection
+                .clone()
+                .context("the provisioning receipt has no worker connection")?,
+        )
+        .context("parse the provisioned worker connection")?;
+        super::provision::validate_connection(&connection, &record.media)?;
+        let finish = EnvironmentFinish {
+            registrar,
+            environment_id: record.media.environment_id.clone(),
+            connection,
+            identity_file: record.identity_file.clone(),
+            guest_ip,
+            register: true,
+            verify: true,
+            timeout: Duration::from_secs(timeout_seconds),
+        };
+        let finished = self
+            .finish_environment(
+                &finish,
+                &record.media,
+                &self.baseline,
+                self.guest_network.clone(),
+            )
+            .await;
+        let adoption = match &finished.registered {
+            Some(registered) => self.adopt_registered_configuration(&mut state, registered),
+            None => Ok(()),
+        };
+        let failure = match (finished.failure, adoption) {
+            (Some(error), _) | (None, Err(error)) => Some(error),
+            (None, Ok(())) => None,
+        };
+        record.ended_at = Some(now());
+        if let Some(error) = failure {
+            let _ = self.step(self.host.revert(&self.baseline)).await;
+            record.environment_verified = Some(false);
+            record.error = Some(format!("{error:#}"));
+            state.last_provision = Some(record.clone());
+            state.last_error = Some(format!("{error:#}"));
+            self.store.save(&state)?;
+            let _ = self.write_provision_receipt(&record);
+            return Err(error.context(
+                "environment registration/doctor failed; the installed fixed base was retained",
+            ));
+        }
+        record.verification = finished.verification.clone();
+        record.environment_verified = Some(true);
+        record.error = None;
+        state.phase = LabPhase::Idle;
+        state.last_error = None;
+        state.last_provision = Some(record.clone());
+        self.store.save(&state)?;
+        let receipt = self.write_provision_receipt(&record)?;
+        Ok(ProvisionOutcome {
+            dry_run: false,
+            planned_actions: vec![
+                "register the settled worker receipt at the selected guest IPv4 address".into(),
+                "run the managed-SSH environment doctor".into(),
+                format!("restore fixed base '{}'", self.baseline),
+            ],
+            provision: Some(record),
+            receipt: Some(receipt),
+            environment_block: None,
+            registration: finished.registration,
+            verification: finished.verification,
         })
     }
 }

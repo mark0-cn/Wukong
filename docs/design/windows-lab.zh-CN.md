@@ -82,7 +82,7 @@ CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的�
 - `--template` 模式不需要 Python 解释器或源码检出：Windows 上由控制器内置的 Rust finalizer 用控制器密钥目录密封模板、调用模板载荷内打包的 `ssh-keygen.exe` 生成控制器管理的 SSH 身份并装配介质。`python -m scripts.worker.media finalize` 模块仍可用于脚本工作流；`--media` 部署不使用 finalizer。
 - 控制器 `state_dir`（以及最终介质输出目录）应保持足够短：Windows `MAX_PATH` 同样约束暂存的离线介质，其载荷包含 131 个字符的相对路径。finalize 会在较短的临时工作区暂存，并在配置目录过深时以明确错误指出越界路径；应把该目录移到更短的绝对路径，而不是依赖长路径开关。
 - 已登记且关机的实验 VM，且不存在快照链。只允许存在 `wukong_base_vm`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。不存在快照时，`--replace-baseline` 是明确记录的空操作。首次安装要求启动盘是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；链接盘与外部盘会被拒绝。替换会先恢复固定基线，并有意检查其本地差异盘。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
-- 请求 `--register` 时需要 VMware Tools：控制器在写入环境前用 `vmrun getGuestIPAddress` 发现客体 IPv4。
+- 自动 `--register` 地址发现需要 VMware Tools：控制器在写入环境前用 `vmrun getGuestIPAddress` 发现客体 IPv4。已稳定安装的登记/doctor 失败后，`lab register --vm <alias> --guest-ip <IPv4>` 可从保留的回执重试而不重新安装；显式地址仍必须通过固定主机密钥和 doctor 校验。
 - finalize 规格中的 `management_peer` 必须是客体视角的控制器 IPv4 源地址。安装后的 Worker 把 SSH 精确固定到该地址（授权键 `from=`、`AllowUsers user@address`、自有防火墙规则），其他地址会导致环境 doctor 无法连通。
 - `--register` 需要一个活动配置文件：传入全局 `--config`，或在可发现 `wukong.toml` 的位置运行。
 
@@ -130,6 +130,8 @@ timeout_seconds = 600
 
 客体启动后，命令等待 `vmrun` 报告的客体 IPv4，写入 `[environments.<environment_id>]` 作为 managed-SSH Windows 环境（installation id、`wkgm...` 用户、SSH 端口、控制器客户端身份文件路径，以及包含来自已校验回执的安装程序生成 Worker 主机密钥的公开 known-hosts 固定项；该项以控制器本地别名 `wukong-worker-<installation_id>` 为键，managed SSH 通过 `HostKeyAlias` 使用该别名），先写出旧配置的时间戳备份，不带 `--force` 时拒绝替换不同的环境，在未设置时写入 `default_environment`，并在替换时撤回旧的主机固定项。已校验回执必须携带规范的 Ed25519 主机公钥，且其上报指纹必须等于重新计算的 SHA-256 指纹；主机密钥为空、缺失或格式错误，或指纹不匹配，都会使部署失败且绝不会被登记。该固定项把控制器 SSH 的服务端认证绑定到安装程序生成的主机密钥（针对管理对端与端口）；登记介质中的客户端密钥不再与它比较。`--verify-environment` 要求环境已配置（由 `--register` 或手工写入），并在启动后运行 `EnvironmentRegistry::doctor`，按截止时间重试；它对两种介质模式都有效，也可与 `--register` 组合。成功后 VM 会回滚到新基线。登记或 doctor 失败会单独报告：命令会尝试回滚 VM，基线保留，部署记录显示 `environment_verified: false`。重写完成前的失败会从时间戳备份恢复配置并保留被替换的公开固定项，因此旧的环境映射以及为它持久化的实验室配置标识仍然有效；只有完全发布的登记才会撤回被替换的固定项。
 
+`wukong lab register --vm <alias> [--guest-ip <IPv4>] [--force]` 从现有固定基线的最新稳定回执重试登记和强制 doctor，不会重跑安装器、修改客体磁盘或替换快照。未显式给出地址时使用同样有界的 VMware Tools 发现；显式地址是 Tools 不可用时的操作者观测，不是 doctor 绕过。命令要求 VM 空闲且没有活动/待定工作，校验回执连接与介质身份及控制器身份文件的绑定，只采纳本次写入的环境配置，并在验证后恢复同一固定基线。
+
 ### 试运行、失败与调和
 
 `--dry-run` 执行相同的只读前置校验并打印精确的规划动作（重新校验介质、ISO 路径、VMX 备份与 CD 设备、固定客体文件、计划任务文件与 TaskCache 注册、启动器、启动/关机、VMX 恢复、固定/暂存基线创建、就绪验证与发布、回执路径），但不 finalize 模板介质、不构建 ISO、不编辑 VMX、不写客体文件、不创建或删除快照，也不发布部署状态或回执。VM 仍须关机且离线工具必须已配置；无快照的计划只读检查磁盘。对已有固定基线使用 `--replace-baseline` 时，只读计划在客体磁盘之前停止：关机的 VM 仍指向快照差异盘，因此计划报告固定基线恢复、VMX 备份与意图持久化，并说明恢复后的差异盘只在执行时校验；它不检查客体系统卷。`--iso-tool` 可为单条命令覆盖配置的 `mkisofs` 可执行文件（绝对路径；配置不变）；`--force` 只与 `--register` 一起有效。
@@ -155,6 +157,9 @@ wukong --config wukong.toml lab provision --vm lab `
   --template D:/release/wukong-windows-worker-media-<version> `
   --keys D:/wukong-controller-keys --spec enrollment-spec.json `
   --replace-baseline --register --verify-environment
+
+# Tools 无法报告地址时，从稳定回执重试登记/doctor。
+wukong --config wukong.toml lab register --vm lab --guest-ip 192.168.199.128 --force
 
 # 校验并打印计划动作，不 finalize 介质、不改动 VM。
 wukong --config wukong.toml lab provision --vm lab --media D:/media/windows-worker --dry-run

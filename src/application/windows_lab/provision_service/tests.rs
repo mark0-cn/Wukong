@@ -3243,6 +3243,63 @@ async fn failed_registration_keeps_the_previous_configuration_identity() {
     assert!(error.contains("configuration changed"), "{error}");
 }
 
+#[tokio::test]
+async fn registration_retries_the_settled_receipt_without_reinstalling() {
+    let deployment = deployment();
+    let old_environment = deployment.environment("192.168.199.128");
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    let failed_environment =
+        Arc::new(FakeEnvironment::new().failing("simulated guest address discovery failure"));
+    let lab = wired_with(
+        &deployment,
+        disk.clone(),
+        Arc::new(FakeIso::new()),
+        deployment.lab_mapping(&old_environment),
+    )
+    .with_environment_registrar(failed_environment);
+    let mut options = template_options(&deployment);
+    options.register = true;
+    options.verify_environment = true;
+    lab.provision(options).await.unwrap_err();
+    let disk_calls = disk.calls();
+    assert_eq!(
+        deployment
+            .state()
+            .last_provision
+            .unwrap()
+            .environment_verified,
+        Some(false)
+    );
+
+    // No offline disk, ISO builder, media finalizer or guest-network adapter is
+    // needed for an operator-supplied address. The settled receipt and identity
+    // file alone authorize registration, and doctor remains mandatory.
+    let environment = Arc::new(FakeEnvironment::new());
+    let outcome = deployment
+        .lab_mapping(&old_environment)
+        .with_environment_registrar(environment.clone())
+        .register_environment(Some("192.168.199.129".parse().unwrap()), 60)
+        .await
+        .unwrap();
+    assert_eq!(disk.calls(), disk_calls);
+    assert_eq!(environment.registrations(), 1);
+    assert_eq!(
+        environment.state.lock().unwrap().registrations[0].0,
+        "192.168.199.129"
+    );
+    assert!(outcome.verification.is_some());
+    let record = outcome.provision.unwrap();
+    assert_eq!(record.environment_verified, Some(true));
+    assert!(record.error.is_none());
+    assert!(record.settled);
+    let registered = environment.registered().unwrap();
+    reopened(&deployment, &registered)
+        .unwrap()
+        .status()
+        .await
+        .unwrap();
+}
+
 /// Registration is the only step allowed to move the identity: the rewrite it
 /// commits is adopted even when a later step of the same command (here the
 /// baseline revert) fails, because the configuration file is already changed.
