@@ -17,7 +17,7 @@ class ScopeTests(unittest.TestCase):
         )
         self.assertTrue(selected["frontend"])
         self.assertFalse(selected["rust"])
-        self.assertFalse(selected["linux"])
+        self.assertTrue(selected["linux"])
         self.assertTrue(select_scope([".changes/executable.py"], "pull_request")["rust"])
 
     def test_clients_only_for_master_version_increase_or_explicit_prewarm(self):
@@ -88,7 +88,7 @@ class ScopeTests(unittest.TestCase):
                 ],
                 (False, False, False),
             ),
-            (["ui/src/app/App.tsx"], (False, True, False)),
+            (["ui/src/app/App.tsx"], (False, True, True)),
             (["workers/runtime/requirements.txt"], (False, False, True)),
             (["workers/tests/unit/test_profile.py"], (False, False, True)),
             (["evals/analysis/score.py", "fixtures/src/benign.c"], (False, False, True)),

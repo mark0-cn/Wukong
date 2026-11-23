@@ -74,6 +74,7 @@ def select_scope(paths, event_name, head_branch="", force_full=False):
             continue
         if path.startswith("ui/"):
             result["frontend"] = True
+            result["linux"] = True
         elif path.startswith(("workers/runtime/", "workers/tests/", "fixtures/", "evals/")):
             result["linux"] = True
         else:
