@@ -49,9 +49,9 @@ Explicitly enable GitHub native auto-merge after creating an ordinary PR intende
 
 ## Dependabot
 
-Default-branch `.github/dependabot.yml` manages Cargo, the npm workspace, `workers/runtime/requirements.txt` and commit-pinned GitHub Actions. Checks are staggered Mondays 09:10–09:40 Beijing time, with at most seven simultaneous version-update PRs. Rig dependencies update together; other compatible updates group by ecosystem, with separate security groups. Repository settings enable alerts/automatic security updates. PRs still require CI and maintainer merge.
+Default-branch `.github/dependabot.yml` manages Cargo, the npm workspace, `workers/requirements.txt`, `workers/runtime/requirements.txt`, `scripts/ci/requirements.txt` and commit-pinned GitHub Actions. Checks are staggered Mondays 09:10–09:40 Beijing time, with at most eleven simultaneous version-update PRs. Rig dependencies update together; other compatible updates group by ecosystem, with separate security groups. Repository settings enable alerts/automatic security updates. PRs still require CI and maintainer merge.
 
-Inline Dockerfile Python dependencies, apt/gem, AFL base images and custom tool locks are outside this configuration. Rust compiler updates must change `rust-toolchain.toml` and Cargo `rust-version` together. Check compatibility between Tauri Rust/npm packages.
+apt/gem, AFL base images and custom tool locks are outside this configuration. Review the image lock's intentional angr/AFL compatibility pins rather than treating every proposed Python update as independently compatible. Rust compiler updates must change `rust-toolchain.toml` and Cargo `rust-version` together. Check compatibility between Tauri Rust/npm packages.
 
 Dependabot uses ordinary CI without Docker Hub/model secrets. Its configuration does not govern other PR merge methods or replace plan-restricted private-repository Rulesets.
 
@@ -63,7 +63,7 @@ Run **Actions → Maintenance → Run workflow (`task=toolchain`)**, or wait for
 
 Checks cover stable pwndbg, pwninit, Ghidra, Temurin JDK 25 and GEF. The 30-day `toolchain-update-report` artifact contains `report.md`, `report.json`, `candidates.json`, including differences, upstream links and SHA256 sources. New versions are normal; API/asset format errors or changed same-version SHA256 fail. Assets without upstream SHA256 are `checksum_review_required` and omitted from candidates. GEF pins source commit, verifies Git blob identity and computes SHA256, requiring source review; this is not an independent publisher signature/checksum.
 
-Checks propose upgrades only: no automatic lockfile edits, PRs, merges or releases. Review candidates/upstream changes, update locks and duplicated Dockerfile SHA256/paths, verify downloads, rebuild and run full acceptance. Temurin stays on JDK 25; maintain apt/gem/inline pip/AFL separately.
+Checks propose upgrades only: no automatic lockfile edits, PRs, merges or releases. Review candidates/upstream changes, update locks and duplicated Dockerfile SHA256/paths, verify downloads, rebuild and run full acceptance. Temurin stays on JDK 25; maintain apt/gem and AFL separately.
 
 <a id="不可变-release"></a>
 

@@ -23,6 +23,8 @@ worker 组件划分见 `workers/runtime/README.md`。部署 Linux 运行时目�
 
 项目 Python 使用 `scripts/dev/requirements.txt` 和 `ruff.toml` 固定的开发专用 Ruff 版本。先运行 `python -m pip install -r scripts/dev/requirements.txt`，再运行 `python -m ruff format --check workers scripts tests evals fixtures` 和 `python -m ruff check workers scripts tests evals fixtures`。格式变更与逻辑变更分开提交。静态检查覆盖语法、控制流、无效比较及未定义名称，可选依赖的导入仍需人工审查。运行时包不安装 Ruff；生成产物、外部基准和缓存的第三方依赖不在格式化范围内。
 
+Linux Worker 镜像通过 `pip --require-hashes --no-deps --no-build-isolation` 安装完整的 `workers/requirements.txt` 锁，其中包含运行时及传递依赖。SHA-256 哈希来自固定 AFL++ 基础镜像中为 Linux amd64/Python 3.12 选择的实际发行包；更新时必须在该环境中从下载的发行包重新计算，不能复制未经验证的值。只有完整锁有意混用元数据解析器会拒绝的 angr 9.2.x 组件版本，才需要 `--no-deps`；部分 requirements 文件绝不能使用该选项。除非相应验收证据发生变化，否则保留自包含的 `angr==9.2.78`、兼容 Python 3.12 的 `pycparser==2.21` 以及兼容 AFL `unicornafl` 的 `unicorn==2.1.4` 约束。宿主机 Linux 测试从 `scripts/ci/requirements.txt` 获取相同的 pyelftools 精确版本；镜像外的轻量运行时 requirements 仍保持独立。
+
 跨模块调用保持类型化，资源归属和业务完成门槛保留在统一入口。通用元数据查询不读取 checkpoint；需要继承、follow-up 或完整导出时显式使用完整读取接口。元数据写入不得清空会话，checkpoint 与邮箱确认仍在同一持久化事务提交。
 
 工作台操作在完整的归属作用域内持有 `OperationLock`。守卫会先显式解锁，再关闭文件；不要替换成析构时只关闭描述符的普通文件。在 Unix 上，无关的并发 fork 可能在 exec 前临时继承打开文件描述，导致只依赖关闭的锁超出归属作用域。描述符克隆回归检查在保持互斥的同时，后继操作能够立即获得锁。

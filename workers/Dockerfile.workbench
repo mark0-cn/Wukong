@@ -15,9 +15,6 @@ RUN --mount=type=bind,source=workers/deps/pwndbg.tar.xz,target=/deps/pwndbg.tar.
     echo '17049a23ba8cbcf4780c4bc9b4aeb519f2801ceabe7304b55d3d622acca03b8c  /deps/pwndbg.tar.xz' | sha256sum -c - \
     && mkdir -p /opt/pwndbg && tar -xJf /deps/pwndbg.tar.xz -C /opt \
     && ln -s /opt/pwndbg/bin/pwndbg /usr/local/bin/pwndbg
-COPY workers/runtime/requirements.txt /tmp/wukong-runtime-requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --break-system-packages -r /tmp/wukong-runtime-requirements.txt
 RUN mkdir -p /opt/wukong \
     && python3 -m pip freeze > /opt/wukong/python.freeze.txt \
     && dpkg-query -W > /opt/wukong/debian-packages.txt \

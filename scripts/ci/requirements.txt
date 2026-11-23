@@ -1,3 +1,4 @@
-# Documentation and release automation only; never part of worker runtime bundles.
+# CI documentation, release automation and Linux analysis tests; never part of worker runtime bundles.
 markdown-it-py==4.3.0
 mdurl==0.1.2
+pyelftools==0.33
