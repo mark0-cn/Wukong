@@ -41,7 +41,7 @@ GitHub 自动合并会等待合入条件满足；排队并不等于完成。如�
 | Internal / Client | `build-client.yml` | 仅供调用的客户端构建 |
 | Internal / Installer | `build-installer.yml` | 仅供调用的安装器打包/验收 |
 
-Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变量与 `DOCKERHUB_TOKEN`，只推送独立的 `wukong-workbench` 仓库，绝不推送正式 `wukong` 镜像或其 `latest` 标签。它不要求操作者白名单、environment 审核人或管理员权限：维护者传入客户端版本（必须等于检出的 `Cargo.toml` 版本）和可选 ref 即可运行，运行摘要记录操作者、源码提交、digest 和大小。唯一的手动 Docker Hub 配置是一次性创建 `wukong-workbench` 仓库；参见[本地发布构建](local-builds.zh-CN.md#ci-built-workbench-image)。
+Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变量与 `DOCKERHUB_TOKEN`，只推送独立的 `wukong-workbench` 仓库，绝不推送正式 `wukong` 镜像或其 `latest` 标签。维护者传入客户端版本（必须等于检出的 `Cargo.toml` 版本）和已包含在 `master` 中的可选 ref；未合入源码会被拒绝。`workbench-publication` Environment 要求指定维护者审批，但不设操作者白名单。推送前，工作流校验锁定输入、执行真实的兄弟容器验收；除明确确认标签不存在外，registry 检查错误均失败关闭。推送后核对远端 digest，并在摘要记录操作者、源码提交、digest 和大小。唯一的手动 Docker Hub 配置是一次性创建 `wukong-workbench` 仓库；参见[本地发布构建](local-builds.zh-CN.md#ci-built-workbench-image)。
 
 `Acceptance/all` 运行三个专项验收，不替代 `Checks` 的全量组件检查或 `Release/rehearse` 的容器/发布包验收。原生安装卸载只在可丢弃的托管 runner 执行。内部工作流仍可能显示在 Actions 列表，通过名称区分。普通 PR 只有 Checks 与 Policy 两个顶层运行；专项验收作为 Checks 子任务汇总。普通 master 提交不启动 Release。
 

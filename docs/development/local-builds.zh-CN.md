@@ -59,10 +59,10 @@ CI 发布打包不使用此模式：`scripts/release/build_installer.py` 默认�
 本地构建工作台镜像需要编译庞大的工具镜像，因此维护者按客户端版本用**Actions → Workbench image** 手动工作流发布一次，而不是让每个构建者分别编译：
 
 1. 把 `version` 设为所选 ref 的 `Cargo.toml` 已声明的客户端 MAJOR.MINOR.PATCH 版本；输入与检出不一致时工作流会失败。
-2. 可选地把 `ref` 设为要构建的分支、标签或提交；默认是启动运行时所选的 ref。
-3. 运行。工作流会校验锁定的构建输入，构建与本地相同的 `workbench` Bake 目标，检查载入镜像为 linux/amd64 且工具导入可用，然后推送 `<DOCKERHUB_NAMESPACE>/wukong-workbench:local-<version>`。运行摘要记录操作者、源码 ref、提交、digest 和大小。它绝不会推送正式的 `<namespace>/wukong` 镜像，也不会创建或移动 `latest` 标签；它不是正式发布。
+2. 可选地把 `ref` 设为已包含在 `master` 中的分支、标签或提交；默认是启动运行时所选的 ref。未合入源码会被拒绝。
+3. 运行并批准 `workbench-publication` Environment 部署。工作流会校验锁定的构建输入，构建与本地相同的 `workbench` Bake 目标，检查载入镜像为 linux/amd64，执行工具导入和真实的兄弟容器验收，然后推送 `<DOCKERHUB_NAMESPACE>/wukong-workbench:local-<version>`。registry 检查仅在明确确认标签不存在时继续，其他错误均失败关闭；远端 digest 必须与推送镜像一致。运行摘要记录操作者、源码 ref、提交、digest 和大小。它绝不会推送正式的 `<namespace>/wukong` 镜像，也不会创建或移动 `latest` 标签；它不是正式发布。
 
-构建者随后只需运行 `cargo package-local`，它会拉取匹配的 `local-<version>` 标签并标记为 `wukong:local`，覆盖更旧的本地标签。描述文件记录同一引用，因此在另一台机器上使用安装包时会在引导阶段重复该拉取（[在另一台机器上运行安装包](#run-on-another-machine)）。不兼容的变更通过递增客户端版本处理：`runtime_protocol`/`data_schema` 变化需要新版本，也就需要新的不可变 `local-<version>` 标签（工作流拒绝覆盖已存在的版本标签）。如果拉取失败——标签缺失、私有仓库未登录或网络不可达——打包会打印维护者工作流和本地 Bake 命令，然后在本机已有 `wukong:local` 标签时复用它，否则回退到本地构建。一次性 Docker Hub 配置是在发布账号下创建独立的 `wukong-workbench` 仓库；复用已有的 `DOCKERHUB_NAMESPACE`/`DOCKERHUB_USERNAME` 变量和具备写权限的 `DOCKERHUB_TOKEN` secret，运行不需要 environment 审核人或操作者白名单。
+构建者随后只需运行 `cargo package-local`，它会拉取匹配的 `local-<version>` 标签并标记为 `wukong:local`，覆盖更旧的本地标签。描述文件记录同一引用，因此在另一台机器上使用安装包时会在引导阶段重复该拉取（[在另一台机器上运行安装包](#run-on-another-machine)）。不兼容的变更通过递增客户端版本处理：`runtime_protocol`/`data_schema` 变化需要新版本，也就需要新的不可变 `local-<version>` 标签（工作流拒绝覆盖已存在的版本标签）。如果拉取失败——标签缺失、私有仓库未登录或网络不可达——打包会打印维护者工作流和本地 Bake 命令，然后在本机已有 `wukong:local` 标签时复用它，否则回退到本地构建。一次性 Docker Hub 配置是在发布账号下创建独立的 `wukong-workbench` 仓库；复用已有的 `DOCKERHUB_NAMESPACE`/`DOCKERHUB_USERNAME` 变量和具备写权限的 `DOCKERHUB_TOKEN` secret。`workbench-publication` Environment 要求指定维护者审批，但不设操作者白名单。
 
 <a id="windows-worker-media-template"></a>
 
