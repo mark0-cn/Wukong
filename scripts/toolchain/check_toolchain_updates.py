@@ -26,7 +26,7 @@ SOURCES = {
     ),
     "temurin": (
         "adoptium/temurin25-binaries",
-        r"jdk-(25\.\d+\.\d+\+\d+)",
+        r"jdk-(25\.\d+\.\d+(?:\.\d+)?\+\d+)",
         r"OpenJDK25U-jdk_x64_linux_hotspot_[\d._]+\.tar\.gz",
     ),
     "gef": ("hugsy/gef", r"(\d{4}\.\d{2})", None),
@@ -61,9 +61,14 @@ def api(path):
 
 
 def version_key(value):
-    if not re.fullmatch(r"\d+(?:[.+]\d+)+", value):
+    match = re.fullmatch(r"(\d+(?:\.\d+)+)(?:\+(\d+))?", value)
+    if not match:
         raise ValueError("Unrecognized version: " + value)
-    parts = tuple(map(int, re.split(r"[.+]", value)))
+    parts = tuple(map(int, match[1].split(".")))
+    if match[2] is not None:
+        # Temurin patch releases extend the base version before the build number:
+        # 25.0.5.1+2 is newer than 25.0.5+8.
+        return parts + (0,) * max(0, 4 - len(parts)) + (int(match[2]),)
     return parts + (0,) * max(0, 5 - len(parts))
 
 
