@@ -36,7 +36,7 @@ App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发
 这是为避免内置 `GITHUB_TOKEN` 创建 PR 时的工作流批准要求，以及该 token 的 push 事件不触发后续工作流的限制。
 参考 [GitHub 触发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)。
 
-必须配置服务器端发布限制：启用 `v*` tag ruleset，仅允许发布 App 创建、更新或删除 tag；配置 `release-publication` Environment，指定维护者为必需审核人并禁止管理员绕过。工作流还会独立拒绝 actor 不是 `<RELEASE_APP_SLUG>[bot]` 的 tag push，最终发布 job 也必须等待 Environment 审批。手工推送 tag 不是替代发布路径。
+必须配置服务器端发布限制：启用 `v*` tag ruleset，仅允许发布 App 创建、更新或删除 tag；配置 `release-publication` Environment，指定维护者为必需审核人并禁止管理员绕过。工作流还会独立拒绝 actor 不是 `<RELEASE_APP_SLUG>[bot]` 的 tag push，最终发布 job 也必须等待 Environment 审批。审核人不能批准自己发起的正式或恢复发布部署。独立的 `workbench-publication` Environment 允许指定维护者批准自己手动发起的 Workbench 部署，但同样禁止管理员绕过。手工推送 tag 不是替代发布路径。
 
 默认使用 GitHub 标准托管 `ubuntu-24.04` / `windows-2025`。镜像构建和验收是不同 job，彼此只传 digest 与小文件，不传镜像 tar。磁盘准备脚本仅允许在 GitHub 托管 Linux VM 上运行，删除该 job 不需要的预装 SDK，打印空间并做预检。若空间不足，可以把可选 Variable `WORKBENCH_LINUX_RUNNER` 设置为已配置的大规格 **GitHub 托管** runner 标签；不会自动开通付费资源。
 
