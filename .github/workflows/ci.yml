@@ -38,6 +38,9 @@ jobs:
       release_clients: ${{ steps.scope.outputs.release_clients }}
       apt: ${{ steps.scope.outputs.apt }}
       uninstall: ${{ steps.scope.outputs.uninstall }}
+      reuse: ${{ steps.scope.outputs.reuse }}
+      reuse_source_run: ${{ steps.scope.outputs.reuse_source_run }}
+      reuse_reason: ${{ steps.scope.outputs.reuse_reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

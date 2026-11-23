@@ -291,6 +291,9 @@ class ReuseTests(unittest.TestCase):
 
     def test_workflow_reuse_is_gated_and_attestation_is_optional(self):
         workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        changes = workflow[workflow.index("  changes:") : workflow.index("  windows:")]
+        for name in ("reuse", "reuse_source_run", "reuse_reason"):
+            self.assertIn(f"{name}: ${{{{ steps.scope.outputs.{name} }}}}", changes)
         self.assertEqual(workflow.count("needs.changes.outputs.reuse != 'true'"), 7)
         self.assertIn("needs.changes.outputs.reuse == 'false'", workflow)
         self.assertIn("name: ci-test-attestation-v1", workflow)
