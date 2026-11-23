@@ -185,7 +185,7 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 
 ## 已验收产物的发布恢复
 
-如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Release (`operation=recover`)**，填写原始 tag 发布 `release_run_id`。执行此入口表示批准发布该已有版本；恢复 job 独立取得 Contents 写权限，不运行构建、不需要签名私钥。
+如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Release (`operation=recover`)**，填写原始 tag 发布 `release_run_id`。执行此入口表示批准发布该已有版本，恢复 job 还必须获得与正式发布相同的 `release-publication` Environment 审批；原 publish 被跳过或拒绝不会绕过此审批。恢复 job 独立取得 Contents 写权限，不运行构建、不需要签名私钥。
 入口只接受同仓库 tag push 的已结束运行，逐项要求验收 job 成功，固定该尝试上传的 online-release artifact ID，并核对 tag 未移动、提交仍属于 master。下载原始安装文件、签名和验收清单后，使用原提交的发布逻辑校验并发布原始字节和镜像 digest。
 此入口不编译、不重新签名、不移动或新建 tag，不需要更新签名私钥。已发布且内容不同的附件或固定镜像仍拒绝覆盖。产物过期或缺失时不能使用此入口。
 

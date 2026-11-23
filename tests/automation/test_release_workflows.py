@@ -40,6 +40,8 @@ class PublishGateTests(unittest.TestCase):
         self.assertIn('"$GITHUB_ACTOR" != "${EXPECTED_ACTOR}[bot]"', metadata)
         publish = re.search(r"  publish:\n(.*?)\n  summary:", workflow, re.S).group(1)
         self.assertIn("environment: release-publication", publish)
+        recovery = workflow[workflow.index("  recovery-publish:") :]
+        self.assertIn("environment: release-publication", recovery)
 
     def test_image_waits_for_successful_checks(self):
         workflow = Path(".github/workflows/release.yml").read_text()

@@ -530,6 +530,7 @@ jobs:
         run: python -m scripts.release.recover_publish --run-id "$RELEASE_RUN"
   recovery-publish:
     needs: recovery-source
+    environment: release-publication
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

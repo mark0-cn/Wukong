@@ -157,7 +157,7 @@ See [desktop updates](desktop-updates.md) for check/prepare/switch/confirm rules
 
 ## Recover publication of accepted artifacts
 
-If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Release (`operation=recover`)** manually on master with the original tag `release_run_id`. Invoking it authorizes publishing that existing version. The separate recovery job obtains Contents write permission without building or using a signing private key.
+If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Release (`operation=recover`)** manually on master with the original tag `release_run_id`. Invoking it authorizes publishing that existing version, and the recovery job must receive the same `release-publication` Environment approval as ordinary publication; a skipped or rejected original publish never bypasses this approval. The separate recovery job obtains Contents write permission without building or using a signing private key.
 
 It accepts only completed same-repository tag-push runs, requires each acceptance job success, pins that attempt's online-release artifact ID and checks unmoved tag/master ancestry. Download original installers/signatures/acceptance manifests; use the original commit's publisher to validate/publish identical bytes/digest. It neither compiles, resigns nor moves/creates tags, and needs no signing private key. Different existing attachments/fixed images remain protected. Missing/expired artifacts cannot use this path.
 
