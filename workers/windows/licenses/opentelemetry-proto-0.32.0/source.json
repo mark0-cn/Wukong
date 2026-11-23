@@ -1,0 +1,9 @@
+{
+  "package": "opentelemetry-proto",
+  "version": "0.32.0",
+  "revision": "ec289cb3c6f8260951699c51df968560943c1451",
+  "path_in_vcs": "opentelemetry-proto",
+  "license_choice": "Apache-2.0",
+  "url": "https://raw.githubusercontent.com/open-telemetry/opentelemetry-rust/ec289cb3c6f8260951699c51df968560943c1451/LICENSE",
+  "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+}
