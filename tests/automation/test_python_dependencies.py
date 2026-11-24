@@ -16,7 +16,7 @@ COMPATIBILITY_PINS = {
     "bitstring": "3.1.9",
     "z3-solver": "4.13.4.0",
     "unicorn": "2.1.4",
-    "protobuf": "5.29.4",
+    "protobuf": "5.29.6",
     "capstone": "5.0.6",
 }
 
