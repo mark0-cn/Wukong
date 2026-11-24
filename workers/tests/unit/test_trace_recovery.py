@@ -87,7 +87,7 @@ class TraceRecoveryTests(unittest.TestCase):
 
     def test_trace_artifacts_exclude_private_debugger_session(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             job = root / "jobs" / ("c" * 32)
             debugger = job / "trace" / "debugger"
             debugger.mkdir(parents=True)
