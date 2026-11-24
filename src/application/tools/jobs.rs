@@ -9,6 +9,7 @@ pub(crate) struct JobService {
     pub(super) files: FilesService,
     pub(super) locks: ResourceLocks,
     pub(super) sync_limits: evidence_sync::SyncLimits,
+    pub(super) telemetry: crate::adapters::telemetry::TelemetryHandle,
 }
 
 impl JobService {

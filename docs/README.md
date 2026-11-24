@@ -9,6 +9,7 @@ English · [简体中文](README.zh-CN.md)
 ## Usage and installation
 
 - [User guide](user/usage.md): desktop, models, tasks and reports.
+- [Observability](user/observability.md): telemetry export, desktop activity and backend queries, Worker propagation, and the local acceptance stack.
 - [Online installation and updates](user/online-install.md): Windows/Linux installers and in-app updates.
 - [Language settings](user/languages.md): interface and task output languages.
 - [Pwn workbench](user/pwn-workbench.md): tools, challenge environments and migration.

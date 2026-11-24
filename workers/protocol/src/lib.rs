@@ -11,14 +11,16 @@ pub use responses::*;
 mod methods;
 pub mod params;
 pub use methods::*;
+mod transport;
+pub use transport::*;
 
-pub const PROTOCOL: u32 = 3;
+pub const PROTOCOL: u32 = 4;
 pub const MAX_RPC_BYTES: usize = 48 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerIdentity {
-    #[schemars(range(min = 3, max = 3))]
+    #[schemars(range(min = 4, max = 4))]
     pub protocol: u32,
     #[schemars(length(min = 1, max = 256))]
     pub installation_id: String,

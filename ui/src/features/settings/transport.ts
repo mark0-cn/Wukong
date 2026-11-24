@@ -1,6 +1,11 @@
 import type { Json } from '../../shared/api/types';
 
 type Form = Record<string, Json>;
+export function atPath(form: Form, path: string): Json | undefined {
+  let value: Json | undefined = form;
+  for (const key of path.split('.')) value = value && typeof value === 'object' && !Array.isArray(value) ? value[key] : undefined;
+  return value;
+}
 export function editedForm(form: Form, edits: Form): Form {
   const draft = structuredClone(form);
   for (const [path, value] of Object.entries(edits)) {

@@ -63,7 +63,7 @@ impl Plan {
             &base.join("payload"),
             pinned,
             &Compatibility {
-                runtime_protocol: 3,
+                runtime_protocol: 4,
                 controller_version: &setup.controller_version,
             },
         )?;
@@ -202,7 +202,7 @@ fn install(plan: Plan) -> Result<ConnectionReceipt> {
         &package,
         &key,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: &deployment.controller_version,
         },
         &code,
@@ -226,7 +226,7 @@ fn install(plan: Plan) -> Result<ConnectionReceipt> {
     )?;
     crate::artifacts::io::write_new_json(
         &root.join("binding.json"),
-        &json!({"schema":1,"protocol":3,"installation_id":deployment.installation_id,"package_sha256":plan.manifest.sha256()}),
+        &json!({"schema":1,"protocol":4,"installation_id":deployment.installation_id,"package_sha256":plan.manifest.sha256()}),
         &private.clone().with_account(&worker.sid, false)?,
     )?;
     let entry = &plan.manifest.manifest().entrypoints;
@@ -333,7 +333,7 @@ fn upgrade(root: PathBuf, plan: Plan) -> Result<ConnectionReceipt> {
         &next.package(&root),
         &key,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: &next.controller_version,
         },
         &code,
@@ -357,7 +357,7 @@ fn upgrade(root: PathBuf, plan: Plan) -> Result<ConnectionReceipt> {
     let worker = next.account(Role::Worker)?;
     crate::artifacts::io::replace_json_with_parent(
         &root.join("binding.json"),
-        &json!({"schema":1,"protocol":3,"installation_id":next.installation_id,"package_sha256":plan.manifest.sha256()}),
+        &json!({"schema":1,"protocol":4,"installation_id":next.installation_id,"package_sha256":plan.manifest.sha256()}),
         &private.clone().with_account(&worker.sid, false)?,
         &code,
     )?;

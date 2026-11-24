@@ -55,7 +55,7 @@ pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
         source_revision: "a".repeat(40),
         toolchain_lock_sha256: hex::encode(Sha256::digest(b"fixture")),
         toolchain_lock_path: "lock.json".into(),
-        runtime_protocol: 3,
+        runtime_protocol: 4,
         minimum_controller_version: "1.0.0".into(),
         entrypoints: EntryPoints {
             worker: "worker.exe".into(),
@@ -75,7 +75,7 @@ pub(crate) fn inert_package(root: &Path, signer: &Signer) -> Result<()> {
         &manifest,
         signer,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: "1.0.0",
         },
     )?;
@@ -90,7 +90,7 @@ fn native_staging_creates_protected_exact_copies_without_overwrite_or_execution(
     let (signer, _) = Signer::generate()?;
     inert_package(&source, &signer)?;
     let expected = Compatibility {
-        runtime_protocol: 3,
+        runtime_protocol: 4,
         controller_version: "1.0.0",
     };
     let policy = AclPolicy::current_user()?;
@@ -180,7 +180,7 @@ fn stages_explicit_read_only_offline_media_without_execution() -> Result<()> {
         &destination,
         &key,
         &Compatibility {
-            runtime_protocol: 3,
+            runtime_protocol: 4,
             controller_version: &version,
         },
         &AclPolicy::current_user()?,

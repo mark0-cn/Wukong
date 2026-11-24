@@ -6,6 +6,7 @@ import re
 import subprocess
 import zipfile
 from pathlib import Path
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import DIGEST, bump_version, read_json, sha256, version, write_json
 
@@ -52,7 +53,7 @@ def package(binary, metadata, output, tag, *, released_image=False):
         "image": image["repository"] + "@" + image["digest"],
         "image_id": image["image_id"],
         "image_size_bytes": image["size_bytes"],
-        "runtime_protocol": 3,
+        "runtime_protocol": RUNTIME_PROTOCOL,
         "data_schema": 5,
         "files": {name: sha256(path) for name, path in members.items()},
     }

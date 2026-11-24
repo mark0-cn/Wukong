@@ -110,7 +110,7 @@ impl Deployment {
             &package,
             &key,
             &Compatibility {
-                runtime_protocol: 3,
+                runtime_protocol: 4,
                 controller_version: &self.controller_version,
             },
         )?;

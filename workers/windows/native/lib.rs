@@ -13,3 +13,5 @@ pub mod pe_imports;
 pub mod resources;
 #[cfg(windows)]
 pub mod rpc;
+#[cfg(windows)]
+pub mod telemetry;

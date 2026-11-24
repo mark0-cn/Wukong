@@ -369,6 +369,14 @@ macro_rules! handler {
             finding_details,
             evidence_preview,
             tool_details,
+            super::observability::observability_status,
+            super::observability::observability_run,
+            super::observability::observability_local_activity,
+            super::observability::observability_traces,
+            super::observability::observability_trace,
+            super::observability::observability_logs,
+            super::observability::observability_metrics,
+            super::observability::observability_grafana_link,
             shutdown_workspace
             $(, $worker)*
         ]
@@ -380,6 +388,7 @@ pub fn run(
     selected: Option<String>,
     path: Option<PathBuf>,
     state_override: Option<PathBuf>,
+    telemetry: crate::adapters::telemetry::TelemetryHandle,
 ) -> anyhow::Result<()> {
     if let Some(id) = &selected {
         store.require::<RunRecord>("run", id)?;
@@ -387,8 +396,9 @@ pub fn run(
     tauri::async_runtime::set(tokio::runtime::Handle::current());
     let controller = Arc::new(super::updates::Controller::default());
     controller.initialization(&config);
-    let service = Service::new(config, store, selected, path, state_override);
+    let service = Service::new(config, store, selected, path, state_override, telemetry);
     let updates = service.clone();
+    let observability_context = service.clone();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(
@@ -397,6 +407,9 @@ pub fn run(
                 .build(),
         )
         .manage(controller.clone())
+        .manage(super::observability::ObservabilityState::new(
+            move |epoch| observability_context.observability_context(epoch),
+        ))
         .manage(service)
         .invoke_handler({
             #[cfg(windows)]

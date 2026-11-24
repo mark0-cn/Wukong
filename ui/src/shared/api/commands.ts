@@ -141,12 +141,89 @@ export interface Commands {
   update_cache_directory: Command<Epoch & { destination: string }, string>;
   update_data_directory: Command<Epoch & { destination: string }, void>;
   workbench_action: Command<Epoch & { request: WorkbenchRequest }, Json>;
+  observability_status: Command<Epoch, ObservabilityStatus>;
+  observability_run: Command<Epoch & { request: ObservabilityRunRequest }, ObservabilityRunSnapshot>;
+  observability_local_activity: Command<Epoch & { run: string; cursor: string | null; limit: number }, ObservabilityLocalActivity>;
+  observability_traces: Command<Epoch & { run: string; request: ObservabilityPageRequest }, ObservabilitySignal<ObservabilityTraceList>>;
+  observability_trace: Command<Epoch & { run: string; traceId: string }, ObservabilitySignal<ObservabilityTrace>>;
+  observability_logs: Command<Epoch & { run: string; traceId: string | null; request: ObservabilityPageRequest }, ObservabilitySignal<ObservabilityLogBatch>>;
+  observability_metrics: Command<Epoch & { run: string; metric: ObservabilityMetricName; range: ObservabilityTimeRange; limit: number }, ObservabilitySignal<ObservabilityMetricBatch>>;
+  observability_grafana_link: Command<Epoch & { target: ObservabilityGrafanaTarget; range: ObservabilityTimeRange }, string | null>;
 }
 export interface CleanupPreview {
   fingerprint: string; files: number; bytes: number; paths: string[];
   resources: {kind: string; id: string; name: string}[];
   retained: {path: string; reason: string}[]; errors: string[]; truncated: boolean;
 }
+
+export interface ObservabilityTimeRange { start: string; end: string }
+export interface ObservabilityPageRequest { range: ObservabilityTimeRange; limit: number; cursor: string | null }
+export interface ObservabilityBackendError { kind: string; message: string; status?: number }
+export interface ObservabilitySignal<T> {
+  configured: boolean; partial: boolean; truncated: boolean; stale: boolean; queried_at: string;
+  error: ObservabilityBackendError | null; data: T | null;
+}
+export interface ObservabilityBackendCapability { configured: boolean; origin: string | null; credential_available: boolean }
+export interface ObservabilityDeliveryHealth { healthy: boolean | null; last_error: string | null }
+export interface ObservabilityTelemetryStatus {
+  activated: boolean; traces: boolean; metrics: boolean; logs: boolean; local_jsonl: boolean; worker_relay: boolean;
+  worker_relay_status: { traces: ObservabilityDeliveryHealth; logs: ObservabilityDeliveryHealth };
+  last_error: string | null;
+}
+export interface ObservabilityStatus {
+  capabilities: { tempo: ObservabilityBackendCapability; loki: ObservabilityBackendCapability; prometheus: ObservabilityBackendCapability; grafana: ObservabilityBackendCapability };
+  exporter: ObservabilityTelemetryStatus;
+  queried_at: string;
+}
+export interface ObservabilityTraceSummary {
+  trace_id: string; root_service_name: string | null; root_trace_name: string | null;
+  start_time: string | null; duration_ms: number; span_count: number;
+}
+export interface ObservabilityTraceList { run_id: string; traces: ObservabilityTraceSummary[]; next_cursor: string | null }
+export interface ObservabilityTraceSpan {
+  trace_id: string; span_id: string; parent_span_id: string | null; name: string;
+  start_time: string | null; end_time: string | null; duration_nanos: number | null; status: string | null;
+  attributes: Record<string, Json>; resource: Record<string, Json>;
+}
+export interface ObservabilityTrace { trace_id: string; spans: ObservabilityTraceSpan[] }
+export interface ObservabilityLogEntry {
+  timestamp: string; timestamp_nanos: string; line: string; line_truncated: boolean;
+  labels: { service_name: string | null; level: string | null; target: string | null };
+  attributes: Record<string, Json>;
+}
+export interface ObservabilityLogBatch { run_id: string; trace_id: string | null; entries: ObservabilityLogEntry[]; next_cursor: string | null }
+export type ObservabilityMetricName = 'runs_started' | 'runs_finished' | 'active_runs' | 'run_duration_count' |
+  'agent_generation_duration_count' | 'worker_rpc_duration_count' | 'worker_rpc_retries' | 'model_operation_duration_count' |
+  'model_token_usage_count' | 'evidence_sync_duration_count' | 'telemetry_dropped';
+export interface ObservabilityMetricBatch {
+  metric: ObservabilityMetricName; expression: string; scope: 'service'; step_seconds: number;
+  series: { labels: Record<string, string>; points: { timestamp: string; value: number }[] }[];
+}
+export interface ObservabilityLocalRun {
+  id: string; status: string; root_id: string; created_at: string; updated_at: string;
+  total_tokens: number; cost_usd: number; summary: string | null;
+}
+export interface ObservabilityLocalAgent {
+  id: string; parent_id: string | null; name: string; role: string; status: string; generation: number; turns: number;
+  total_tokens: number; cost_usd: number; created_at: string; updated_at: string;
+}
+export interface ObservabilityLocalEvent { seq: number; agent_id: string | null; kind: string; created_at: string; data: Json; data_truncated: boolean }
+export interface ObservabilityToolCounts { total: number; prepared: number; running: number; completed: number; failed: number; uncertain: number; side_effecting: number }
+export interface ObservabilityResourceCounts { jobs: number; active_jobs: number; terminal_jobs: number; evidence_pending: number }
+export interface ObservabilityLocalActivity {
+  activity_kind: 'local_business_activity'; run: ObservabilityLocalRun; agents: ObservabilityLocalAgent[]; events: ObservabilityLocalEvent[];
+  tools: ObservabilityToolCounts; resources: ObservabilityResourceCounts; next_cursor: string | null;
+  has_more: boolean; partial: boolean; truncated: boolean; stale: boolean; queried_at: string;
+}
+export interface ObservabilityRunRequest {
+  run: string; range: ObservabilityTimeRange; limit: number; trace_cursor: string | null; log_cursor: string | null;
+  local_cursor: string | null; metric: ObservabilityMetricName;
+}
+export interface ObservabilityRunSnapshot {
+  local: ObservabilityLocalActivity; traces: ObservabilitySignal<ObservabilityTraceList>;
+  logs: ObservabilitySignal<ObservabilityLogBatch>; metrics: ObservabilitySignal<ObservabilityMetricBatch>;
+}
+export type ObservabilityGrafanaTarget = { traces: { run: string } } | { logs: { run: string; trace_id: string | null } } | { metrics: { metric: ObservabilityMetricName } };
 export interface Events {
   'workspace-changed': unknown;
   'close-requested': { busy: boolean };

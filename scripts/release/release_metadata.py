@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 
 from scripts._lib.checksums import sha256
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts._lib.versioning import validate_tag
 from scripts.release.cli import validate_image
 
@@ -113,7 +114,7 @@ def release_image(number, revision, repository=DEFAULT_REPOSITORY):
         or manifest.get("tool_platform") != "linux/amd64"
     ):
         raise ValueError("Release must provide a Windows x64 client and linux/amd64 image")
-    if manifest.get("runtime_protocol") != 3 or manifest.get("data_schema") != 5:
+    if manifest.get("runtime_protocol") != RUNTIME_PROTOCOL or manifest.get("data_schema") != 5:
         raise ValueError("Release runtime protocol or data schema is not supported")
     source = manifest.get("image_source_revision", manifest.get("source_revision"))
     if not isinstance(source, str) or not re.fullmatch(r"[0-9a-f]{40}", source):

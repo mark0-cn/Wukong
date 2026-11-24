@@ -276,6 +276,7 @@ async fn repeated_doctor_failures_link_prior_calls_without_hiding_fresh_probes()
 async fn doctor_failure_exposes_default_windows_lab_recovery() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let mut unavailable = environment(&temp.path().join("worker"));
+    unavailable.platform = Platform::Windows;
     unavailable.runtime.trusted_local_mut().unwrap().python =
         temp.path().join("missing-python.exe").display().to_string();
     let docker = EnvironmentConfig {
@@ -437,7 +438,7 @@ async fn colliding_worker_job_ids_cannot_overwrite_or_cross_environment_boundari
 for line in sys.stdin:
     request=json.loads(line)
     method=request['method']
-    if method=='ping': result={'identity':{'protocol':3,'installation_id':__import__('hashlib').sha256(str(sys.argv).encode()).hexdigest(),'boot_id':'fixture-boot','package_sha256':'0'*64}}
+    if method=='ping': result={'identity':{'protocol':4,'installation_id':__import__('hashlib').sha256(str(sys.argv).encode()).hexdigest(),'boot_id':'fixture-boot','package_sha256':'0'*64}}
     elif method=='doctor': result={'os':platform.system().lower(),'capabilities':{'process_jobs':True},'methods':{name:{'ready':True} for name in ('job.start','job.status','job.artifacts')}}
     elif method=='job.start': result={'job_id':'same-local-id','state':'running'}
     elif method=='job.status': result={'job_id':'same-local-id','state':'completed','result':{'exit_code':0}}

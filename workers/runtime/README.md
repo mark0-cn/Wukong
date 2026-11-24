@@ -140,6 +140,9 @@ JSON-RPC 2.0 requests and responses are one JSON object per stdio line. Error
 responses identify unavailable tools; `doctor` returns actual capabilities,
 executable paths and versions instead of claiming missing backends are usable.
 Requests/responses are capped at 48 MiB. Single-frame file uploads are capped at 32 MiB; resumable transfers support up to 16 GiB using chunks of at most 1 MiB. See [analysis environments](../../docs/design/cross-platform-environments.md).
+
+Protocol 4 adds a top-level `_wukong_telemetry` envelope extension. The worker removes it before JSON-RPC validation so it never enters `params`, and uses its W3C trace context only as the RPC server span's remote parent; invalid or absent context does not change dispatch. Responses may carry base64-encoded standard OTLP `ExportTraceServiceRequest` protobuf for server, dispatch and critical job/session operation spans. The process queue holds at most 1,024 spans and 384 KiB of serialized protobuf. Each telemetry batch is at most 512 KiB and must also fit the remaining 48 MiB RPC budget; complete exports are retained or dropped in bounded fashion, never by truncating a business response. The worker has no telemetry HTTP endpoint or token and does not record tool arguments/results, target paths, environment values or secrets. Pending telemetry at process exit is best-effort discarded.
+
 The controller uses jsonrpsee over bounded stdio frames. RPC errors preserve a
 healthy connection; malformed/oversized frames and timeouts close it. The next
 call reconnects, without automatically replaying the failed request.

@@ -35,7 +35,7 @@ mod tests {
             run_id: "run".into(),
             environment_id: "windows".into(),
             identity: crate::adapters::worker::protocol::WorkerIdentity {
-                protocol: 3,
+                protocol: 4,
                 installation_id: "installation".into(),
                 boot_id: "boot".into(),
                 package_sha256: "0".repeat(64),

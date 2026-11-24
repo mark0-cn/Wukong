@@ -173,5 +173,7 @@ pub fn contract() -> Value {
         "identity": schemars::schema_for!(WorkerIdentity),
         "capacity": schemars::schema_for!(WorkerCapacity),
         "session": schemars::schema_for!(SessionHandle),
-        "capabilities": schemars::schema_for!(RegisteredMethods)})
+        "capabilities": schemars::schema_for!(RegisteredMethods),
+        "trace_context": schemars::schema_for!(crate::TraceContext),
+        "telemetry_batch": schemars::schema_for!(crate::TelemetryBatch)})
 }

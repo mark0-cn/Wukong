@@ -28,7 +28,7 @@ pub use template::APP_VERSION;
 pub(crate) const MEDIA_SCHEMA: u32 = 1;
 /// Worker package runtime protocol the released template must declare.
 #[cfg(windows)]
-pub(crate) const RUNTIME_PROTOCOL: u32 = 3;
+pub(crate) const RUNTIME_PROTOCOL: u32 = crate::adapters::worker::protocol::PROTOCOL;
 #[cfg(windows)]
 pub(crate) const MEDIA_RECORD: &str = "media.json";
 #[cfg(windows)]

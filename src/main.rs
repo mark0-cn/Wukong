@@ -54,15 +54,13 @@ async fn main() -> std::process::ExitCode {
             Err(_) => eprintln!("{message}"),
         }
     }));
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .init();
+    let telemetry = wukong::adapters::telemetry::TelemetryRuntime::new();
     let result = if recover {
         wukong::updates::recovery::recover()
     } else {
-        wukong::interface::run(cli).await
+        wukong::interface::run(cli, &telemetry).await
     };
+    telemetry.shutdown().await;
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {

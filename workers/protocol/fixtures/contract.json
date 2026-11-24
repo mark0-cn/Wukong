@@ -204,7 +204,7 @@
   {
     "kind": "identity",
     "value": {
-      "protocol": 3,
+      "protocol": 4,
       "installation_id": "test",
       "boot_id": "boot",
       "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

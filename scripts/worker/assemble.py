@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 from scripts._lib.checksums import sha256
+from scripts._lib.protocol import RUNTIME_PROTOCOL
 from scripts._lib.repository import ROOT
 from scripts._lib.versioning import version
 from scripts.worker.layout import prepare
@@ -21,6 +22,11 @@ from scripts.worker.build_debugger import BINARY as DEBUGGER_BINARY, validate as
 BINARIES = ["wukong-worker.exe", "wukong-package.exe"]
 SUPPLEMENTAL_LICENSES = {
     ("fixture3-ddmin", "0.1.1"): ROOT / "workers/windows/licenses/fixture3-ddmin-0.1.1/LICENSE",
+    ("opentelemetry", "0.32.0"): ROOT / "workers/windows/licenses/opentelemetry-0.32.0/LICENSE",
+    ("opentelemetry_sdk", "0.32.1"): ROOT
+    / "workers/windows/licenses/opentelemetry_sdk-0.32.1/LICENSE",
+    ("opentelemetry-proto", "0.32.0"): ROOT
+    / "workers/windows/licenses/opentelemetry-proto-0.32.0/LICENSE",
     ("jsonrpsee-core", "0.26.1"): ROOT / "workers/windows/licenses/jsonrpsee-0.26.1/LICENSE",
     ("jsonrpsee-types", "0.26.1"): ROOT / "workers/windows/licenses/jsonrpsee-0.26.1/LICENSE",
     ("uuid-simd", "0.8.0"): ROOT / "workers/windows/licenses/simd-0.8.0/LICENSE",
@@ -199,7 +205,7 @@ def stage(cache, output, native):
         source_revision=native_metadata["source_revision"],
         toolchain_lock_sha256=sha256(output / "toolchain.lock.json"),
         toolchain_lock_path="toolchain.lock.json",
-        runtime_protocol=3,
+        runtime_protocol=RUNTIME_PROTOCOL,
         minimum_controller_version=version(),
         entrypoints=dict(
             worker="runtime/native/wukong-worker.exe",

@@ -8,7 +8,7 @@ use std::{
 
 fn identity() -> Identity {
     Identity {
-        protocol: 3,
+        protocol: wukong_worker_protocol::PROTOCOL,
         installation_id: "a".repeat(32),
         boot_id: format!("windows:{}:40", "b".repeat(32)),
         package_sha256: "c".repeat(64),
@@ -258,10 +258,49 @@ async fn persisted_native_resource_state_still_blocks_takeover_after_worker_reop
 }
 async fn call(worker: &Arc<Worker>, value: &Value) -> Result<Value> {
     Ok(serde_json::from_slice(
-        &crate::rpc::server::Server::new(worker.clone())?
-            .call(&serde_json::to_vec(value)?)
-            .await?,
+        &crate::rpc::server::Server::with_telemetry(
+            worker.clone(),
+            crate::telemetry::Telemetry::disabled(),
+        )?
+        .call(&serde_json::to_vec(value)?)
+        .await?,
     )?)
+}
+
+fn context(trace_id: &str, parent_id: &str) -> wukong_worker_protocol::TraceContext {
+    wukong_worker_protocol::TraceContext {
+        traceparent: format!("00-{trace_id}-{parent_id}-01"),
+        tracestate: Some("vendor=opaque".into()),
+    }
+}
+
+async fn traced_call(
+    worker: &Arc<Worker>,
+    telemetry: &crate::telemetry::Telemetry,
+    request: &str,
+) -> Result<(Value, Option<wukong_worker_protocol::TelemetryBatch>)> {
+    let response = crate::rpc::server::Server::with_telemetry(worker.clone(), telemetry.clone())?
+        .call(request.as_bytes())
+        .await?;
+    let response = std::str::from_utf8(&response)?
+        .strip_suffix('\n')
+        .expect("native RPC response is newline framed");
+    let extracted = wukong_worker_protocol::extract_response_telemetry(response)?;
+    Ok((serde_json::from_str(&extracted.message)?, extracted.batch))
+}
+
+fn decode_traces(
+    batch: &wukong_worker_protocol::TelemetryBatch,
+) -> Result<opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest> {
+    use base64::Engine as _;
+    use prost::Message as _;
+    let encoded = batch.traces.as_ref().expect("trace batch is present");
+    let bytes = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+    Ok(
+        opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest::decode(
+            bytes.as_slice(),
+        )?,
+    )
 }
 fn release(lease: &Value) -> Value {
     request(
@@ -544,6 +583,139 @@ async fn rpc_status_cancel_and_host_shutdown_share_the_initialized_resource_stat
     assert!(
         successor["epoch"].as_u64().unwrap() > lease["epoch"].as_u64().unwrap(),
         "{successor}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn rpc_trace_context_preserves_raw_params_and_exports_standard_otlp() -> Result<()> {
+    use serde_json::value::RawValue;
+    use std::collections::BTreeMap;
+
+    let (_root, worker) = fixture()?;
+    let (telemetry, _guard) = crate::telemetry::Telemetry::new();
+    let trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+    let parent_id = "00f067aa0ba902b7";
+    let parent = context(trace_id, parent_id);
+    let raw = r#"{"jsonrpc":"2.0","id":7,"method":"file.put","params":{"request_id":"stable","call_id":"call"}}"#;
+    let injected = wukong_worker_protocol::attach_trace_context(raw, Some(&parent))?;
+    assert_eq!(
+        injected.status,
+        wukong_worker_protocol::EnvelopeStatus::Attached
+    );
+    let stripped = wukong_worker_protocol::extract_trace_context(&injected.message)?;
+    assert_eq!(stripped.context, Some(parent));
+    let before: BTreeMap<String, Box<RawValue>> = serde_json::from_str(raw)?;
+    let after: BTreeMap<String, Box<RawValue>> = serde_json::from_str(&stripped.message)?;
+    for member in ["jsonrpc", "id", "method", "params"] {
+        assert_eq!(before[member].get(), after[member].get());
+    }
+
+    let expected = call(&worker, &serde_json::from_str(&stripped.message)?).await?;
+    let (business, batch) = traced_call(&worker, &telemetry, &injected.message).await?;
+    assert_eq!(business, expected);
+    assert!(business.get("error").is_some());
+    assert_eq!(business["id"], 7);
+    let batch = batch.expect("sampled RPC returns a telemetry batch");
+    assert!(batch.is_bounded());
+    let decoded = decode_traces(&batch)?;
+    let spans: Vec<_> = decoded
+        .resource_spans
+        .iter()
+        .flat_map(|resource| &resource.scope_spans)
+        .flat_map(|scope| &scope.spans)
+        .collect();
+    let server = spans
+        .iter()
+        .find(|span| span.name == "rpc.server")
+        .expect("RPC server span is exported");
+    let method = spans
+        .iter()
+        .find(|span| span.name == "file.put")
+        .expect("registered method span is exported");
+    assert_eq!(server.trace_id, hex::decode(trace_id)?);
+    assert_eq!(server.parent_span_id, hex::decode(parent_id)?);
+    assert_eq!(server.trace_state, "vendor=opaque");
+    assert_eq!(method.trace_id, server.trace_id);
+    assert_eq!(method.parent_span_id, server.span_id);
+    assert!(spans.iter().all(|span| span.events.is_empty()));
+    assert!(spans.iter().all(|span| span.links.is_empty()));
+    assert!(
+        spans.iter().all(|span| {
+            span.attributes
+                .iter()
+                .all(|attribute| matches!(attribute.key.as_str(), "rpc.system" | "rpc.method"))
+        }),
+        "{spans:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_trace_context_is_dropped_without_changing_business_errors() -> Result<()> {
+    let (_root, worker) = fixture()?;
+    let (telemetry, _guard) = crate::telemetry::Telemetry::new();
+    let raw = r#"{"jsonrpc":"2.0","id":8,"method":"file.get","params":{"path":"secret-target-path"},"_wukong_telemetry":{"traceparent":"00-00000000000000000000000000000000-00f067aa0ba902b7-01"}}"#;
+    let stripped = wukong_worker_protocol::extract_trace_context(raw)?;
+    assert!(stripped.dropped);
+    assert!(stripped.context.is_none());
+    let expected = call(&worker, &serde_json::from_str(&stripped.message)?).await?;
+    let (actual, batch) = traced_call(&worker, &telemetry, raw).await?;
+    assert_eq!(actual, expected);
+    assert!(actual.get("error").is_some());
+    let decoded = decode_traces(&batch.expect("invalid parent still yields local RPC spans"))?;
+    let server = decoded
+        .resource_spans
+        .iter()
+        .flat_map(|resource| &resource.scope_spans)
+        .flat_map(|scope| &scope.spans)
+        .find(|span| span.name == "rpc.server")
+        .expect("RPC server span is exported");
+    assert!(server.parent_span_id.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn different_trace_contexts_do_not_change_operation_replay() -> Result<()> {
+    let (_root, worker) = fixture()?;
+    let (telemetry, _guard) = crate::telemetry::Telemetry::new();
+    let put = request(
+        "file.put",
+        json!({"path":"replay.bin","data_base64":"YWJj","request_id":"stable"}),
+    );
+    let raw = serde_json::to_string(&put)?;
+    let first = wukong_worker_protocol::attach_trace_context(
+        &raw,
+        Some(&context(
+            "4bf92f3577b34da6a3ce929d0e0e4736",
+            "00f067aa0ba902b7",
+        )),
+    )?;
+    let second = wukong_worker_protocol::attach_trace_context(
+        &raw,
+        Some(&context(
+            "6bf92f3577b34da6a3ce929d0e0e4736",
+            "10f067aa0ba902b7",
+        )),
+    )?;
+    let first_stripped = wukong_worker_protocol::extract_trace_context(&first.message)?;
+    let second_stripped = wukong_worker_protocol::extract_trace_context(&second.message)?;
+    assert_eq!(first_stripped.message, second_stripped.message);
+    let (first_business, first_batch) = traced_call(&worker, &telemetry, &first.message).await?;
+    let (second_business, second_batch) = traced_call(&worker, &telemetry, &second.message).await?;
+    assert!(first_business.get("error").is_some());
+    assert_eq!(first_business, second_business);
+    assert_ne!(
+        decode_traces(&first_batch.unwrap())?.resource_spans[0].scope_spans[0]
+            .spans
+            .iter()
+            .map(|span| &span.trace_id)
+            .collect::<Vec<_>>(),
+        decode_traces(&second_batch.unwrap())?.resource_spans[0].scope_spans[0]
+            .spans
+            .iter()
+            .map(|span| &span.trace_id)
+            .collect::<Vec<_>>()
     );
     Ok(())
 }

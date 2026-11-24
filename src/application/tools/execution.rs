@@ -16,6 +16,7 @@ impl ExecutionService {
         gateway: WorkerGateway,
         locks: ResourceLocks,
         sync_limits: evidence_sync::SyncLimits,
+        telemetry: crate::adapters::telemetry::TelemetryHandle,
     ) -> Self {
         let files = FilesService {
             store: store.clone(),
@@ -27,6 +28,7 @@ impl ExecutionService {
             files: files.clone(),
             locks: locks.clone(),
             sync_limits,
+            telemetry,
         };
         let sessions = SessionsService {
             store: store.clone(),

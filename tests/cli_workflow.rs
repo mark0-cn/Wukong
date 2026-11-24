@@ -356,6 +356,7 @@ async fn workflow(pause_then_resume: bool) -> Result<()> {
         Some(run.id.clone()),
         Some(config_path),
         None,
+        wukong::adapters::telemetry::TelemetryHandle::disabled(),
     );
     let envelope = desktop.read(wukong::desktop::workspace::WorkspaceRequest::default())?;
     let data = envelope

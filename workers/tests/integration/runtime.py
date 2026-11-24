@@ -15,6 +15,8 @@ import sys
 import tempfile
 import time
 
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
 FIXTURE = r"""
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,7 +91,26 @@ def main():
     args = parser.parse_args()
     state = Path(args.state).resolve()
     client = Client(state)
-    doctor = client.call("doctor")
+    parent_trace = "4bf92f3577b34da6a3ce929d0e0e4736"
+    parent_span = "00f067aa0ba902b7"
+    doctor = client.call("doctor", traceparent=f"00-{parent_trace}-{parent_span}-01")
+    assert client.last_telemetry and client.last_telemetry.get("traces")
+    exported = ExportTraceServiceRequest.FromString(
+        base64.b64decode(client.last_telemetry["traces"], validate=True)
+    )
+    spans = [
+        span
+        for resource in exported.resource_spans
+        for scope in resource.scope_spans
+        for span in scope.spans
+    ]
+    assert any(
+        span.name == "rpc.server"
+        and span.trace_id.hex() == parent_trace
+        and span.parent_span_id.hex() == parent_span
+        for span in spans
+    ), "Worker did not preserve the remote W3C parent in its OTLP response"
+    telemetry_proof = {"span_count": len(spans), "trace_id": parent_trace}
     assert doctor["capabilities"]["debug_gdb_mi"], doctor
     source = client.put("fixture.c", FIXTURE.encode())
     # The acceptance harness compiles its own trusted fixture; analysed-target
@@ -235,6 +256,7 @@ def main():
     assert base64.b64decode(data["data_base64"]) == b"BAD", data
     results = {
         "fixture_linkage": "static" if args.static_fixture else "dynamic",
+        "telemetry": telemetry_proof,
         "doctor": doctor,
         "gdb": {
             "breakpoint": breakpoint,

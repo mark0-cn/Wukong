@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PingResult {
-    #[schemars(range(min = 3, max = 3))]
+    #[schemars(range(min = 4, max = 4))]
     pub protocol: u32,
     pub identity: WorkerIdentity,
     pub daemon_id: String,
@@ -16,7 +16,7 @@ pub struct PingResult {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DoctorResult {
-    #[schemars(range(min = 3, max = 3))]
+    #[schemars(range(min = 4, max = 4))]
     pub protocol: u32,
     pub identity: WorkerIdentity,
     pub os: String,

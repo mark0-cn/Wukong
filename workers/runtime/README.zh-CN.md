@@ -106,7 +106,11 @@ remote_state_dir = "/state/wukong"
 
 ## 协议
 
-JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`doctor` 返回真实能力、路径、版本，不宣称缺失后端可用。请求/响应最大 48 MiB；单帧上传最大 32 MiB，可恢复传输支持最大 16 GiB 文件，每块最多 1 MiB。参见[分析环境](../../docs/design/cross-platform-environments.zh-CN.md)。控制端使用 jsonrpsee 有界 stdio；RPC 错误保留健康连接，格式/大小错误及超时关闭连接。下次重连不自动重放失败请求。
+JSON-RPC 2.0 每个 stdio 行一个对象。错误指出不可用工具；`doctor` 返回真实能力、路径、版本，不宣称缺失后端可用。请求/响应最大 48 MiB；单帧上传最大 32 MiB，可恢复传输支持最大 16 GiB 文件，每块最多 1 MiB。参见[分析环境](../../docs/design/cross-platform-environments.zh-CN.md)。
+
+协议 4 增加顶层 `_wukong_telemetry` envelope 扩展。Worker 在 JSON-RPC 校验前移除它，使其不会进入 `params`，只把其中的 W3C trace context 用作 RPC server span 的 remote parent；无效或缺失 context 不改变 dispatch。响应可携带 base64 编码的标准 OTLP `ExportTraceServiceRequest` protobuf，包含 server、dispatch 以及关键 job/session 操作 span。进程队列最多保存 1,024 个 span 和 384 KiB 序列化 protobuf。每批遥测最大 512 KiB，且必须放入 48 MiB RPC 总预算的剩余空间；只按完整 export 保留或有界丢弃，绝不截断业务响应。Worker 没有遥测 HTTP endpoint 或 token，不记录工具参数/结果、目标路径、环境值或秘密。进程退出时仍未返回的遥测按 best effort 丢弃。
+
+控制端使用 jsonrpsee 有界 stdio；RPC 错误保留健康连接，格式/大小错误及超时关闭连接。下次重连不自动重放失败请求。
 
 由中继管理的守护进程使用已有 `filelock` 依赖和内核持有的 `startup.guard` 锁，持锁直到就绪；竞争中继取得锁后再次检查端点。守护进程自身在初始化及服务全程独立持有 `daemon.guard`，启动者崩溃不会允许第二个守护进程竞争状态。进程退出即可释放锁归属，不再通过目录时间戳删除所谓过期锁。共享状态目录的所有中继必须使用同一 worker 部署。守护进程允许 30 秒完成初始化，包含 Windows 启动身份查询。就绪探测另设 1 秒响应超时；子进程若在就绪前退出，错误会指出退出状态，并包含本地 `daemon.log` 最后最多 2048 字节。
 
