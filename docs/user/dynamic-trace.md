@@ -124,7 +124,7 @@ These facts are independent:
 
 A partial JSONL prefix is retained for diagnosis. It cannot produce `match`. Start replay uses the stable worker request identity and does not execute the trace again. Cancellation and timeout close the private debugger and preserve the partial run/events artifacts.
 
-`trace/run.json` keeps source and executed target hashes separate, including patched runtime images. It also records address bindings, LaunchSpec, input and an environment signature covering worker/GDB, launch arguments, environment, loader and non-target files.
+`trace/run.json` keeps source and executed target hashes separate, including patched runtime images. It also records address bindings, LaunchSpec, input and an environment signature covering worker/GDB, launch arguments, environment, loader and non-target files. Target member names and target hashes are not treated as environment differences; source and executed target identity is verified separately.
 
 ## Current limits
 
@@ -141,4 +141,4 @@ Raw captured memory and transcripts can contain sensitive target data. Original 
 
 ## Validation
 
-Protocol and fake-MI tests cover schemas, canonical plan signatures, activation pairing and JSONL bounds. Real Linux Docker/GDB acceptance additionally covers nested and recursive calls, PIE/non-PIE/stripped addresses, call sites, buffer mutation, event limits, unreadable memory, timeout, cancellation, cleanup and replay. Fixture success establishes these mechanisms, not Agent solve rates or whole-program equivalence.
+Protocol and fake-MI tests cover schemas, canonical plan signatures, activation pairing and JSONL bounds. Real Linux Docker/GDB acceptance additionally covers nested and recursive calls, PIE/non-PIE/stripped addresses, call sites, buffer mutation, event limits, unreadable memory, timeout, cancellation, cleanup and replay. Real controller-to-worker acceptance covers LaunchSpec preparation, evidence import, same-target `match` and A/B `mismatch` across different target member names. Fixture success establishes these mechanisms, not Agent solve rates or whole-program equivalence.

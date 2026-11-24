@@ -124,7 +124,7 @@ Capture 规则：
 
 部分 JSONL 前缀会保留用于诊断，但不能产生 `match`。start replay 使用稳定的 worker 请求身份，不会再次执行 trace。取消和超时会关闭私有调试器，并保留部分 run/events 产物。
 
-`trace/run.json` 分开保存 source 与 executed target 哈希，包括 patched runtime 镜像；同时记录地址绑定、LaunchSpec、输入，以及由 worker/GDB、启动参数、环境、loader 和非目标文件组成的环境签名。
+`trace/run.json` 分开保存 source 与 executed target 哈希，包括 patched runtime 镜像；同时记录地址绑定、LaunchSpec、输入，以及由 worker/GDB、启动参数、环境、loader 和非目标文件组成的环境签名。target 成员名和 target 哈希不会被视为环境差异；source 与 executed target 身份会单独验证。
 
 ## 当前限制
 
@@ -141,4 +141,4 @@ Capture 规则：
 
 ## 验证
 
-协议和 fake-MI 测试覆盖 schema、规范化 plan signature、activation 配对和 JSONL 边界。真实 Linux Docker/GDB 验收另外覆盖嵌套与递归、PIE/非 PIE/stripped 地址、调用点、buffer 修改、事件限额、不可读内存、超时、取消、清理和 replay。样本通过只证明这些机制，不代表 Agent 解题率或完整程序等价。
+协议和 fake-MI 测试覆盖 schema、规范化 plan signature、activation 配对和 JSONL 边界。真实 Linux Docker/GDB 验收另外覆盖嵌套与递归、PIE/非 PIE/stripped 地址、调用点、buffer 修改、事件限额、不可读内存、超时、取消、清理和 replay。真实 controller-to-worker 验收覆盖 LaunchSpec 准备、证据导入、相同 target 的 `match`，以及不同 target 成员名下的 A/B `mismatch`。样本通过只证明这些机制，不代表 Agent 解题率或完整程序等价。

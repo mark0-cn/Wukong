@@ -24,6 +24,7 @@ class JobLedger:
         "supervisor.log",
         "ledger.lock",
         "supervisor-start.json",
+        "session.json",
         "processes.json",
     }
 

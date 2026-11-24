@@ -145,6 +145,17 @@ impl Fixture {
         events: Vec<Value>,
         mutate: impl FnOnce(&mut Value),
     ) -> Result<TracePair> {
+        self.add_job_with_target(label, source_sha256, "target.bin", events, mutate)
+    }
+
+    fn add_job_with_target(
+        &self,
+        label: &str,
+        source_sha256: &str,
+        target_member: &str,
+        events: Vec<Value>,
+        mutate: impl FnOnce(&mut Value),
+    ) -> Result<TracePair> {
         let jsonl = events
             .iter()
             .map(|event| {
@@ -156,7 +167,14 @@ impl Fixture {
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-        self.add_job_bytes(label, source_sha256, &jsonl, events.len(), mutate)
+        self.add_job_bytes_with_target(
+            label,
+            source_sha256,
+            target_member,
+            &jsonl,
+            events.len(),
+            mutate,
+        )
     }
 
     fn add_job_bytes(
@@ -167,8 +185,26 @@ impl Fixture {
         events_written: usize,
         mutate: impl FnOnce(&mut Value),
     ) -> Result<TracePair> {
+        self.add_job_bytes_with_target(
+            label,
+            source_sha256,
+            "target.bin",
+            jsonl,
+            events_written,
+            mutate,
+        )
+    }
+
+    fn add_job_bytes_with_target(
+        &self,
+        label: &str,
+        source_sha256: &str,
+        target_member: &str,
+        jsonl: &[u8],
+        events_written: usize,
+        mutate: impl FnOnce(&mut Value),
+    ) -> Result<TracePair> {
         let spec = self.spec(source_sha256);
-        let target_member = "target.bin";
         let base = format!("files/launches/{label}");
         let launch_path = format!("files/manifests/{label}.json");
         let manifest = json!({
@@ -419,6 +455,23 @@ async fn offline_match_ignores_runtime_identities_and_replays_without_duplicate_
         .filter(|evidence| evidence.source == "trace.comparison")
         .count();
     assert_eq!(after_recovery, 1);
+    fixture.service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn target_member_names_do_not_create_non_target_launch_differences() -> Result<()> {
+    let fixture = Fixture::new().await?;
+    let left = fixture.add_job("left", &fixture.run.target_sha256, events(), |_| {})?;
+    let right = fixture.add_job_with_target(
+        "right",
+        &fixture.run.target_sha256,
+        "renamed.bin",
+        events(),
+        |_| {},
+    )?;
+    let outcome = fixture.compare("compare-renamed", &left, &right).await?;
+    assert_verdict(&outcome, "match");
     fixture.service.close().await;
     Ok(())
 }

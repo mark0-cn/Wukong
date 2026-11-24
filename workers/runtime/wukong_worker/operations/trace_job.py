@@ -143,7 +143,6 @@ def execute(root, directory, spec):
         "env": manifest.get("env", {}),
         "input_mode": manifest.get("input_mode"),
         "timeout_secs": manifest.get("timeout_secs"),
-        "target_member": manifest.get("target"),
         "non_target_files": {
             name: digest for name, digest in manifest["files"].items() if name != manifest["target"]
         },

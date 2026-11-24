@@ -593,6 +593,7 @@ fn non_target_launch(document: &TraceRunDocument) -> Value {
         {
             files.remove(&target);
         }
+        object.remove("target");
     }
     manifest
 }
