@@ -27,8 +27,8 @@ rfd = "0.18"
 hex = "0.4"
 object = { version = "0.40", features = ["read", "std"] }
 regex = "1"
-rig = { version = "=0.46.0", features = ["memory", "rmcp"] }
-rig-core = "=0.46.0"
+rig = { version = "=0.47.0", features = ["memory", "rmcp"] }
+rig-core = "=0.47.0"
 rig-ecs = "=0.46.0"
 bevy_ecs = "=0.20.0"
 bevy_tasks = "=0.20.0"
