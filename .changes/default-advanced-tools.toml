@@ -1,0 +1,3 @@
+kind = "breaking"
+en = "Enable raw debugger and Windows Lab tools by default for catalog-permitted child roles and remove separate task-grant checks. Role, VM/environment, ownership and readiness gates remain."
+zh_CN = "对工具目录允许的子角色默认开启原始调试器和 Windows Lab 工具，并移除单独的任务授权检查。角色、VM/环境、资源归属和就绪检查仍然保留。"

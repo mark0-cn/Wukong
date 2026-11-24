@@ -82,6 +82,8 @@ impl Default for ExecutionConfig {
 pub struct WindowsLabConfig {
     pub vms: std::collections::BTreeMap<String, WindowsLabVm>,
 }
+pub const WINDOWS_LAB_BASE_SNAPSHOT: &str = "wukong_base_vm";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WindowsLabVm {
@@ -95,7 +97,11 @@ pub struct WindowsLabVm {
     /// is an actionable error; the controller never assumes a host tool layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offline: Option<WindowsLabOffline>,
-    pub baseline_snapshot: String,
+    /// Finalized, signed worker media used to check for upgrades after each
+    /// restore of the fixed base snapshot. The media must retain this VM's
+    /// installation/environment identity and use a newer enrollment generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_media: Option<PathBuf>,
     pub snapshot_prefix: String,
     /// Upper bound for one VMware host operation (snapshot, revert, start).
     pub operation_timeout_seconds: u64,
@@ -109,7 +115,7 @@ impl Default for WindowsLabVm {
             environment: None,
             admin: None,
             offline: None,
-            baseline_snapshot: "wukong-lab-baseline".into(),
+            worker_media: None,
             snapshot_prefix: "wukong-lab".into(),
             operation_timeout_seconds: 300,
             start_after_restore: false,
@@ -190,13 +196,16 @@ impl AppConfig {
                 "windows_lab VM {id} vmx must name a .vmx file"
             );
             ensure!(
-                valid_snapshot_name(&vm.baseline_snapshot)
-                    && valid_snapshot_name(&vm.snapshot_prefix),
-                "windows_lab VM {id} snapshot names contain unsupported characters"
+                vm.worker_media
+                    .as_ref()
+                    .is_none_or(|path| path.is_absolute()),
+                "windows_lab VM {id} worker_media must be an absolute finalized-media directory"
             );
             ensure!(
-                vm.snapshot_prefix != vm.baseline_snapshot && vm.snapshot_prefix.len() <= 48,
-                "windows_lab VM {id} needs a distinct, short snapshot prefix"
+                valid_snapshot_name(&vm.snapshot_prefix)
+                    && vm.snapshot_prefix != WINDOWS_LAB_BASE_SNAPSHOT
+                    && vm.snapshot_prefix.len() <= 48,
+                "windows_lab VM {id} needs a short snapshot prefix distinct from the fixed base"
             );
             ensure!(
                 (30..=3600).contains(&vm.operation_timeout_seconds),

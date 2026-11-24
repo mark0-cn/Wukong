@@ -2,29 +2,9 @@
 
 English · [简体中文](agent-tools.zh-CN.md)
 
-The [generated catalog](tool-catalog.md) describes registered tools. The model sees the intersection of role, explicit task grants, selected groups and observed backend support. Tool selection cannot grant permissions. `contract.tool_grants` accepts `raw_debugger` and `windows_lab`; root may assign them to a task, and a child may delegate only grants it already has. Skills never grant permissions. Lab operations additionally require the VM to match the assigned environment.
+The [generated catalog](tool-catalog.md) describes registered tools. The model sees the intersection of role, selected groups and observed backend support. Tool selection and Skills never change roles. Raw debugger and Windows Lab operations are enabled by default for roles permitted by the catalog. Lab operations additionally require the VM to match the assigned environment.
 
-`tool_catalog` reports groups and availability in pages. `tool_select` replaces optional groups for the next model request. Core tools and resource observation/cleanup remain available. Initial selection includes static analysis and typed debugging. Fuzzing, symbolic execution and configured MCP tools require selecting `fuzzing`, `symbolic` or `external`; raw debugger and Lab groups also require their task grant. Readiness is rechecked on every invocation.
-
-## Interface migration
-
-Old names and competing input forms are rejected; there are no aliases.
-
-| Removed interface | Current interface |
-|---|---|
-| `fuzz_status` | `job_status` |
-| `runtime_doctor` | `environment_doctor`; environment_id defaults to the task assignment |
-| Native `message` / `wait` | `send_message_to_agent` / `wait_for_agents`; native `task` remains |
-| `notes_list`, `todos_list`, `threat_model_get` | `context_search` then `context_read` |
-| `think` | Save concise shared conclusions with `note_save` |
-| Model `lab_prune` | Operator CLI only |
-| `bundle_stage`, `runtime_prepare` | `launch_prepare` with source.kind=bundle or linux_runtime |
-| `target_evidence_id` | `target_ref={kind:"evidence",evidence_id:"..."}` on every static tool |
-| Bare static address | A target-bound module_relative AddressRef |
-| `artifact_stage.artifact_id` | `evidence_id` |
-| Completion `summary` | `result.answer` in the structured result |
-| Lab vm/lab_id/generation input tuple | The owned `lab_ref` in the completed `lab_prepare` operation result |
-| `interactive_send.data_base64` | Tagged `source`: text, base64 or evidence |
+`tool_catalog` reports groups and availability in pages. `tool_select` replaces optional groups for the next model request. Core tools and resource observation/cleanup remain available. Initial selection includes static analysis and typed debugging. Fuzzing, symbolic execution, raw debugger, Lab and configured MCP tools require selecting `fuzzing`, `symbolic`, `raw_debugger`, `windows_lab` or `external` respectively; this only changes model context. Readiness is rechecked on every invocation.
 
 Only verifier may call `analysis_verify`, `poc_verify` and `verification_record`. Certification and finding promotion also check the verifier role in the business layer.
 

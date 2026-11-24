@@ -11,11 +11,12 @@
 mod platform {
     use crate::application::windows_lab::provision::{
         self, BootTaskEvidence, BootTaskInjection, BootTaskRegistry, BootTaskRemoval,
-        BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, GUEST_SYSTEM_CONFIG,
-        GuestFile, GuestNetwork, GuestObservation, GuestObservationRequest, GuestPaths,
-        GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence, IsoBuilder, MAX_POLICY_BYTES,
-        MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval, ServiceRemovalEvidence,
-        boot_task_cache_state, startup_command_lines, verify_boot_task_values,
+        BootTaskRemovalEvidence, DiskInspection, DiskInspectionRequest, GUEST_SOFTWARE_HIVE,
+        GUEST_SYSTEM_CONFIG, GUEST_SYSTEM_HIVE, GuestFile, GuestNetwork, GuestObservation,
+        GuestObservationRequest, GuestPaths, GuestPolicyFiles, GuestRemoval, GuestRemovalEvidence,
+        IsoBuilder, MAX_POLICY_BYTES, MAX_RECEIPT_BYTES, MEDIA_LABEL, OfflineDisk, ServiceRemoval,
+        ServiceRemovalEvidence, boot_task_cache_state, startup_command_lines,
+        verify_boot_task_values,
     };
     use crate::application::worker_media::{FinalizeMediaRequest, FinalizedMedia, finalize_media};
     use anyhow::{Context, Result, bail, ensure};
@@ -200,6 +201,58 @@ mod platform {
         GuestPaths::guestfish(windows)
     }
 
+    fn valid_guestfish_device(device: &str) -> bool {
+        !device.is_empty()
+            && device.len() <= 256
+            && device.starts_with("/dev/")
+            && device
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"/._-".contains(&byte))
+    }
+
+    fn parse_ntfs_devices(text: &str) -> Result<Vec<String>> {
+        let lines: Vec<&str> = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        ensure!(
+            lines.len() <= 256,
+            "libguestfs returned too many filesystems"
+        );
+        let mut devices = Vec::new();
+        for line in lines {
+            let (device, kind) = line
+                .split_once(':')
+                .with_context(|| format!("unexpected list-filesystems output: {line}"))?;
+            let device = device.trim();
+            ensure!(
+                valid_guestfish_device(device),
+                "libguestfs returned an invalid device path"
+            );
+            if kind.trim() == "ntfs" && !devices.iter().any(|known| known == device) {
+                devices.push(device.to_owned());
+            }
+        }
+        ensure!(
+            devices.len() <= 64,
+            "too many NTFS filesystems were returned"
+        );
+        Ok(devices)
+    }
+
+    fn guestfish_session_script(root: &str, writable: bool, script: &str) -> Result<String> {
+        ensure!(valid_guestfish_device(root), "invalid Windows root device");
+        let mount = if writable { "mount" } else { "mount-ro" };
+        let mut session = format!("run\n{mount} {root} /\n{script}");
+        if writable {
+            // `sync` flushes data but does not clear NTFS-3G's in-use state.
+            // Unmount after the final checksum so a later snapshot/revert does
+            // not inherit a volume that can only be mounted read-only.
+            session.push_str("umount /\n");
+        }
+        Ok(session)
+    }
+
     /// guestfish ends a scripted session at EOF and has no `close` command
     /// (1.46.2 rejects it before running any later line), so the script stops
     /// after the download.
@@ -327,7 +380,7 @@ mod platform {
             }
         }
 
-        async fn guestfish(
+        async fn raw_guestfish(
             &self,
             disk_posix: &str,
             writable: bool,
@@ -342,10 +395,51 @@ mod platform {
                 },
                 "-a".to_owned(),
                 disk_posix.to_owned(),
-                "-i".to_owned(),
             ];
             self.wsl_run(&arguments, Some(script.as_bytes().to_vec()))
                 .await
+        }
+
+        async fn windows_root(&self, disk_posix: &str) -> Result<String> {
+            let output = self
+                .raw_guestfish(disk_posix, false, "run\nlist-filesystems\n")
+                .await?;
+            require_success(&output, "list guest filesystems")?;
+            let candidates = parse_ntfs_devices(&output.stdout_text())?;
+            let config = guestfish_path(GUEST_SYSTEM_CONFIG)?;
+            let system = guestfish_path(GUEST_SYSTEM_HIVE)?;
+            let software = guestfish_path(GUEST_SOFTWARE_HIVE)?;
+            for device in &candidates {
+                let script = guestfish_session_script(
+                    device,
+                    false,
+                    &format!("is-dir {config}\nis-file {system}\nis-file {software}\n"),
+                )?;
+                let output = self.raw_guestfish(disk_posix, false, &script).await?;
+                if output.success && parse_booleans(&output.stdout_text(), 3)? == [true, true, true]
+                {
+                    return Ok(device.clone());
+                }
+            }
+            bail!(
+                "no NTFS filesystem contains the fixed Windows SYSTEM and SOFTWARE hives ({} candidates)",
+                candidates.len()
+            )
+        }
+
+        async fn guestfish(
+            &self,
+            disk_posix: &str,
+            writable: bool,
+            script: &str,
+        ) -> Result<ToolOutput> {
+            // Do not use `-i`: libguestfs inspection resolves registry hives via
+            // case_sensitive_path, which can fail on a written NTFS delta even
+            // when the exact fixed paths remain readable. Select the system
+            // volume by those exact paths, then mount it explicitly.
+            let root = self.windows_root(disk_posix).await?;
+            let script = guestfish_session_script(&root, writable, script)?;
+            self.raw_guestfish(disk_posix, writable, &script).await
         }
 
         async fn hivexsh(&self, hive_posix: &str, script: &str, writable: bool) -> Result<String> {
@@ -1264,7 +1358,20 @@ mod platform {
         /// not one of them, so a script that emits it aborts before the
         /// download runs. The session ends at EOF.
         const SUPPORTED: &[&str] = &[
-            "cat", "checksum", "download", "is-dir", "is-file", "ls", "mkdir-p", "sync", "upload",
+            "cat",
+            "checksum",
+            "download",
+            "is-dir",
+            "is-file",
+            "list-filesystems",
+            "ls",
+            "mkdir-p",
+            "mount",
+            "mount-ro",
+            "run",
+            "sync",
+            "umount",
+            "upload",
         ];
 
         #[test]
@@ -1279,6 +1386,36 @@ mod platform {
                 output.diagnostic(),
                 format!("{}…", "a".repeat(MAX_TOOL_DIAGNOSTIC - 1))
             );
+        }
+
+        #[test]
+        fn ntfs_devices_are_strictly_parsed_and_deduplicated() {
+            let devices = parse_ntfs_devices(
+                "/dev/sda1: vfat\n/dev/sda3: ntfs\n/dev/sdb1: ntfs\n/dev/sda3: ntfs\n",
+            )
+            .unwrap();
+            assert_eq!(devices, ["/dev/sda3", "/dev/sdb1"]);
+            assert!(parse_ntfs_devices("").unwrap().is_empty());
+            assert!(parse_ntfs_devices("/dev/sda3\n").is_err());
+            assert!(parse_ntfs_devices("/dev/sda3 /: ntfs\n").is_err());
+            assert!(parse_ntfs_devices("relative: ntfs\n").is_err());
+        }
+
+        #[test]
+        fn guestfish_sessions_mount_the_verified_windows_root_explicitly() {
+            let read = guestfish_session_script(
+                "/dev/sda3",
+                false,
+                "is-file /Windows/System32/config/SOFTWARE\n",
+            )
+            .unwrap();
+            assert_eq!(
+                read,
+                "run\nmount-ro /dev/sda3 /\nis-file /Windows/System32/config/SOFTWARE\n"
+            );
+            let write = guestfish_session_script("/dev/sda3", true, "sync\n").unwrap();
+            assert_eq!(write, "run\nmount /dev/sda3 /\nsync\numount /\n");
+            assert!(guestfish_session_script("/dev/sda3 /", false, "sync\n").is_err());
         }
 
         #[test]

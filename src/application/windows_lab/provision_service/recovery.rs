@@ -2,11 +2,11 @@
 use super::super::provision::{
     BootTaskRemoval, DiskInspectionRequest, GUEST_SYSTEM_HIVE, GuestPaths, GuestRemoval,
     ServiceRemoval, boot_task_injection, plan_guest_cleanup, require_relative_path,
-    resolve_guest_disk,
+    resolve_guest_disk, restore_vmx_preserving_active_disk, staged_base_snapshot,
 };
 use super::super::{
     LabError, LabPhase, LabProvision, LabState, LabStore, OperationKind, PendingOperation,
-    ProvisionSource, RunStatus, WindowsLab, now,
+    ProvisionSource, ReconcileOutcome, RunStatus, WindowsLab, now,
 };
 use super::execution::{step_error, write_synced};
 use super::{CleanGuestOptions, CleanGuestOutcome, PlannedProvision};
@@ -17,10 +17,12 @@ use std::{fs, io::Write};
 impl WindowsLab {
     pub(super) fn abandon_provision<T>(
         &self,
-        mut state: LabState,
         mut record: LabProvision,
         error: anyhow::Error,
     ) -> Result<T> {
+        // Readiness may have advanced the durable replacement marker after the
+        // caller's original state clone. Never overwrite that marker on failure.
+        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
         let pending = state
             .pending
             .clone()
@@ -288,6 +290,125 @@ impl WindowsLab {
         Ok(())
     }
 
+    /// Resolve only snapshot names owned by this provisioning operation. A
+    /// completed replacement must have passed readiness and identity checks.
+    /// Failed reconciliation is allowed only while the old fixed base still
+    /// exists; after its retirement there is no old state to roll back to.
+    pub(crate) async fn reconcile_provision_snapshots(
+        &self,
+        operation: &PendingOperation,
+        outcome: ReconcileOutcome,
+    ) -> Result<()> {
+        let spec = operation
+            .provision
+            .as_ref()
+            .context("pending provision operation lost its intent")?;
+        ensure!(
+            spec.baseline_snapshot == self.baseline,
+            "pending provision names a different fixed base"
+        );
+        ensure!(
+            !self.host_running().await?,
+            "power off lab VM {} before reconciling provisioning snapshots",
+            self.vm_id
+        );
+        let names = self.step(self.host.snapshots()).await.map_err(step_error)?;
+        let has = |name: &str| names.iter().any(|candidate| candidate == name);
+        let base = &self.baseline;
+        if !spec.replaces_baseline {
+            match outcome {
+                ReconcileOutcome::Completed => ensure!(
+                    has(base),
+                    "cannot complete provisioning without fixed base snapshot '{base}'"
+                ),
+                ReconcileOutcome::Failed => {
+                    if has(base) {
+                        self.step(self.host.delete_snapshot(base))
+                            .await
+                            .map_err(step_error)?;
+                    }
+                }
+                ReconcileOutcome::Unknown => bail!("unknown outcome cannot resolve snapshots"),
+            }
+            return Ok(());
+        }
+
+        let staged = staged_base_snapshot(&spec.provision_id)?;
+        match outcome {
+            ReconcileOutcome::Completed => {
+                ensure!(
+                    spec.base_verified,
+                    "a replacement base cannot be completed before staged worker readiness"
+                );
+                ensure!(
+                    !spec.base_published || spec.base_retired,
+                    "a published replacement must have a durable retirement marker"
+                );
+                if !has(base) {
+                    ensure!(
+                        has(&staged),
+                        "completed replacement has neither fixed nor staged base"
+                    );
+                    if !spec.base_retired {
+                        // The old base was deleted before its marker was saved.
+                        // Record that observed irreversible fact before continuing.
+                        self.mark_base_retired(&spec.provision_id)?;
+                    }
+                    // Recreate the fixed name from the verified staged state,
+                    // never from an unverified disk.
+                    self.step(self.host.revert(&staged))
+                        .await
+                        .map_err(step_error)?;
+                    self.step(self.host.snapshot(base))
+                        .await
+                        .map_err(step_error)?;
+                } else if !spec.base_retired {
+                    ensure!(
+                        has(&staged),
+                        "an unpublished replacement requires its verified staged base"
+                    );
+                    // The operator confirmed completion before the old base was
+                    // retired. Finish the same verified transition explicitly and
+                    // persist each irreversible observation before continuing.
+                    self.step(self.host.revert(&staged))
+                        .await
+                        .map_err(step_error)?;
+                    self.step(self.host.delete_snapshot(base))
+                        .await
+                        .map_err(step_error)?;
+                    self.mark_base_retired(&spec.provision_id)?;
+                    self.step(self.host.snapshot(base))
+                        .await
+                        .map_err(step_error)?;
+                }
+                if !spec.base_published {
+                    self.mark_base_published(&spec.provision_id)?;
+                }
+                if has(&staged) {
+                    self.step(self.host.delete_snapshot(&staged))
+                        .await
+                        .map_err(step_error)?;
+                }
+            }
+            ReconcileOutcome::Failed => {
+                ensure!(
+                    !spec.base_retired && !spec.base_published && has(base),
+                    "the old fixed base has been retired or is missing; failed reconciliation cannot roll back this replacement"
+                );
+                if has(&staged) {
+                    self.step(self.host.delete_snapshot(&staged))
+                        .await
+                        .map_err(step_error)?;
+                }
+                self.step(self.host.revert(base))
+                    .await
+                    .map_err(step_error)?;
+            }
+            ReconcileOutcome::Unknown => bail!("unknown outcome cannot resolve snapshots"),
+        }
+        Ok(())
+    }
+
     /// Deterministic cleanup used by `lab reconcile` before an operation is
     /// completed or failed: restore the VMX from its backup and remove the
     /// generated ISO and template-finalized media.
@@ -311,7 +432,11 @@ impl WindowsLab {
         if spec.vmx_backup.is_file() {
             let original = super::super::provision::read_bounded(&spec.vmx_backup, 4 * 1024 * 1024)
                 .context("read the VMX backup")?;
-            write_synced(&self.vmx, &original)?;
+            let current = super::super::provision::read_bounded(&self.vmx, 4 * 1024 * 1024)
+                .context("read the post-reconciliation VMX")?;
+            let restored = restore_vmx_preserving_active_disk(&original, &current, &self.vmx)
+                .context("restore the VMX without losing VMware's active delta")?;
+            write_synced(&self.vmx, &restored)?;
             // Reconcile is not atomic: a transient sharing violation on the
             // backup or ISO can stop it after the VMX was restored. Retry the
             // removal briefly, and because every step is idempotent a second

@@ -4,6 +4,7 @@ use crate::{
     host::accounts::{self, Role},
     host::authority::{Authority, SignedEnrollment},
     host::deployment::{self, Deployment},
+    host::install_service,
     host::network,
     host::staging,
     isolation::security::{self, AclPolicy},
@@ -66,6 +67,11 @@ impl Plan {
                 controller_version: &setup.controller_version,
             },
         )?;
+
+        ensure!(
+            manifest.manifest().version == setup.controller_version,
+            "offline setup version differs from its signed worker manifest"
+        );
 
         let enrollment = deployment::read_enrollment(&base.join("enrollment"), pinned)?;
         enrollment.bind_payload(&manifest)?;
@@ -142,6 +148,9 @@ fn install(plan: Plan) -> Result<ConnectionReceipt> {
     }
     let root = base.join(&enrollment.installation_id);
     let metadata = root.join("metadata");
+    if metadata.join("deployment.json").exists() {
+        return upgrade(root, plan);
+    }
     let recovering = root.exists();
     if recovering {
         crate::host::recovery::early_account_phase(&root, &plan)?;
@@ -271,5 +280,129 @@ fn install(plan: Plan) -> Result<ConnectionReceipt> {
         production_isolation_verified: false,
     };
     crate::artifacts::io::write_new_json(&root.join("connection.json"), &receipt, &code)?;
+    Ok(receipt)
+}
+
+/// Upgrade an existing verified installation through the offline SYSTEM boot
+/// path. The old VM base is the only rollback boundary: any interrupted mutation
+/// fails this attempt and the controller must restore that base, not resume a
+/// partially updated guest in place.
+fn upgrade(root: PathBuf, plan: Plan) -> Result<ConnectionReceipt> {
+    security::require_system()
+        .context("offline worker upgrade requires the reviewed SYSTEM boot path")?;
+    let metadata = root.join("metadata");
+    let deployment_path = metadata.join("deployment.json");
+    let (current, _) = deployment::load(&deployment_path)?;
+    let previous = current.verify(&root)?;
+    let key = PublicKey::from_hex(&current.controller_public_key)?;
+    let current_enrollment = deployment::read_enrollment(&metadata, &key)?;
+    let authority = Authority::load(&metadata, &AclPolicy::private_vm())?;
+    authority.verify_active(&metadata, &current_enrollment, &AclPolicy::private_vm())?;
+    let highest = authority.highest(&metadata, &AclPolicy::private_vm())?;
+    plan.enrollment.authorize_after(&highest)?;
+    let next_version = semver::Version::parse(&plan.manifest.manifest().version)?;
+    let current_version = semver::Version::parse(&previous.manifest().version)?;
+    ensure!(
+        next_version > current_version,
+        "offline worker upgrade requires a newer signed package version"
+    );
+    let incoming = plan.enrollment.enrollment();
+    let active = current_enrollment.enrollment();
+    ensure!(
+        incoming.management_peer == active.management_peer
+            && incoming.ssh_port == active.ssh_port
+            && incoming.ssh_public_key == active.ssh_public_key,
+        "worker upgrade cannot change the enrolled SSH connection"
+    );
+    let signed = SignedEnrollment::read(&plan.base.join("enrollment"), &key)?;
+    ensure!(
+        signed.enrollment.canonical_bytes()? == incoming.canonical_bytes()?,
+        "upgrade enrollment changed after review"
+    );
+    let next = Deployment {
+        schema: 1,
+        installation_id: current.installation_id.clone(),
+        controller_public_key: current.controller_public_key.clone(),
+        controller_version: plan.setup.controller_version.clone(),
+        active_manifest_sha256: plan.manifest.sha256().into(),
+        accounts: current.accounts.clone(),
+    };
+    let code = current.code_policy()?;
+    staging::stage_payload(
+        &plan.base.join("payload"),
+        &next.package(&root),
+        &key,
+        &Compatibility {
+            runtime_protocol: 3,
+            controller_version: &next.controller_version,
+        },
+        &code,
+    )?;
+
+    // Stage every signed byte before admitting the new generation. From this
+    // point onward a failure requires VM-base rollback because the old active
+    // enrollment is intentionally no longer the accepted high-water mark.
+    let private = AclPolicy::private_vm();
+    crate::artifacts::io::write_new_json(
+        &metadata.join(format!("recovery-accepted-{}.json", incoming.generation)),
+        &signed,
+        &private,
+    )?;
+    install_service::stop_for_upgrade(&root, &current, &previous)?;
+    for name in ["enrollment.json", "enrollment.sig"] {
+        let bytes =
+            crate::artifacts::io::read_bytes(&plan.base.join("enrollment").join(name), 16 * 1024)?;
+        private.replace(&metadata.join(name), &bytes)?;
+    }
+    let worker = next.account(Role::Worker)?;
+    crate::artifacts::io::replace_json_with_parent(
+        &root.join("binding.json"),
+        &json!({"schema":1,"protocol":3,"installation_id":next.installation_id,"package_sha256":plan.manifest.sha256()}),
+        &private.clone().with_account(&worker.sid, false)?,
+        &code,
+    )?;
+    crate::artifacts::io::replace_json(&deployment_path, &next, &private)?;
+    next.verify(&root)
+        .context("verify upgraded worker state before service activation")?;
+
+    // SSH uses a stable ForceCommand path, so replace and hash-check that relay
+    // as well as the SCM service. The program-scoped firewall must move to the
+    // newly verified sshd executable without adopting a foreign rule.
+    let entry = &plan.manifest.manifest().entrypoints;
+    let relay_bytes = crate::artifacts::io::read_bytes(
+        &next.package(&root).join(&entry.worker),
+        64 * 1024 * 1024,
+    )?;
+    ensure!(
+        hex::encode(Sha256::digest(&relay_bytes))
+            == plan.manifest.manifest().files[&entry.worker].sha256,
+        "staged SSH relay differs from its signed worker payload"
+    );
+    code.replace(&root.join("bootstrap/wukong-worker.exe"), &relay_bytes)?;
+    crate::isolation::firewall::replace(
+        &next.installation_id,
+        &current
+            .package(&root)
+            .join(&previous.manifest().entrypoints.sshd),
+        &next.package(&root).join(&entry.sshd),
+        incoming.ssh_port,
+        incoming.management_peer,
+    )?;
+    install_service::activate_upgrade(&root, &next, &plan.manifest)?;
+
+    let mut receipt = ConnectionReceipt::parse(&crate::artifacts::io::read_bytes(
+        &root.join("connection.json"),
+        wukong_worker_package::MAX_RECEIPT_BYTES as u64,
+    )?)?;
+    ensure!(
+        receipt.installation_id == next.installation_id
+            && receipt.environment_id == incoming.environment_id,
+        "installed connection receipt differs from the upgraded identity"
+    );
+    receipt.generation = incoming.generation;
+    receipt.manifest_sha256 = plan.manifest.sha256().into();
+    receipt.candidate_addresses = network::receipt_candidates(&network::SystemAdapters);
+    receipt.validate()?;
+    crate::artifacts::io::replace_json(&root.join("connection.json"), &receipt, &code)?;
     Ok(receipt)
 }

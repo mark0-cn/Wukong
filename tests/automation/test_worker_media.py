@@ -372,7 +372,7 @@ class FinalizeTests(unittest.TestCase):
                 stdout=json.dumps(dict(public_key=PUBLIC_KEY, key_sha256=KEY_SHA256))
             )
         if command[1] == "seal":
-            manifest = b"sealed manifest"
+            manifest = json.dumps(dict(version=command[5])).encode()
             (Path(command[2]) / "manifest.json").write_bytes(manifest)
             (Path(command[2]) / "manifest.sig").write_bytes(b"sealed signature")
             self.manifest_sha = digest(manifest)

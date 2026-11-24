@@ -148,8 +148,8 @@
     "text": "显式追加工作，以新 generation 重开已完成任务并保留历史；用 recipient_generation 拒绝过时代次的派单。"
   },
   "function_decompile": {
-    "source": "Ghidra: decompile using a target-bound module_relative AddressRef (preferred) or legacy byte offset. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
-    "text": "Ghidra：使用绑定目标的 module_relative AddressRef（推荐）或兼容的字节偏移反编译。复制 binary_inspect 返回的地址；链接时 VA 必须减去 image_base。文件偏移、运行时地址和页号不是模块偏移。"
+    "source": "Ghidra: decompile using a target-bound module_relative AddressRef. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
+    "text": "Ghidra：使用绑定目标的 module_relative AddressRef 反编译。复制 binary_inspect 返回的地址；链接时 VA 必须减去 image_base。文件偏移、运行时地址和页号不是模块偏移。"
   },
   "function_instructions": {
     "source": "Ghidra: paginated function instructions and control-flow edges, including calls. Addresses are module-relative and bound to target SHA256. Optional target_ref={kind:evidence,evidence_id:...} selects an in-run baseline binary.",
@@ -200,8 +200,8 @@
     "text": "使用所属 lab_ref 启动安装并返回 operation_id。全程统一采用 1–600 秒时限、固定哈希介质及检查声明文件、服务和账户的客体回执。通过 lab_operation_status 查询；缺少回执保持未知。要求 worker 资源空闲且证据同步完成。"
   },
   "lab_prepare": {
-    "source": "Start preparation of the assigned Windows lab and return operation_id. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Requires the windows_lab task grant. Unsupported execution requirements are rejected at run admission.",
-    "text": "启动指定 Windows Lab 的准备并返回 operation_id。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。需要 windows_lab 任务授权；不支持的执行要求在运行准入时拒绝。"
+    "source": "Start preparation of the assigned Windows lab and return operation_id. Every attempt restores fixed base wukong_base_vm; configured signed worker_media may upgrade, verify and republish that base before a reboot and experiment snapshot. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Available by default to catalog-permitted roles. Unsupported execution requirements are rejected at run admission.",
+    "text": "启动指定 Windows Lab 的准备并返回 operation_id。每次都会恢复固定基线 wukong_base_vm；配置的签名 worker_media 可先升级、验证并重新发布该基线，再重启并创建实验快照。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。对工具目录允许的角色默认开启；不支持的执行要求在运行准入时拒绝。"
   },
   "lab_restore": {
     "source": "Start a fenced baseline restore using the owned lab_ref and return operation_id. Requires idle worker resources and synchronized evidence. Unknown effects become lost only after confirmed restoration; snapshot pruning is reported separately. Query lab_operation_status.",
@@ -292,12 +292,12 @@
     "text": "更新共享待办正文或状态。"
   },
   "tool_catalog": {
-    "source": "Query bounded tool groups, current selection, task permissions and last-observed backend availability. Follow next_cursor with after. Selection never changes role or task grants.",
-    "text": "分页查询工具分组、当前选择、任务权限及最近一次预检的后端可用性。通过 after 继续 next_cursor。选择工具不会改变角色或任务授权。"
+    "source": "Query bounded tool groups, current selection and last-observed backend availability. Follow next_cursor with after. Selection never changes roles.",
+    "text": "分页查询工具分组、当前选择及最近一次预检的后端可用性。通过 after 继续 next_cursor。选择工具不会改变角色。"
   },
   "tool_select": {
-    "source": "Replace optional tool groups for subsequent model requests. Core and resource lifecycle tools stay available. Raw debugger and Windows lab require explicit task grants; external selects configured MCP tools.",
-    "text": "替换后续模型请求的可选工具分组。核心及资源生命周期工具始终保留。原始调试器和 Windows Lab 需要明确的任务授权；external 分组选择已配置的 MCP 工具。"
+    "source": "Replace optional tool groups for subsequent model requests. Core and resource lifecycle tools stay available; external selects configured MCP tools.",
+    "text": "替换后续模型请求的可选工具分组。核心及资源生命周期工具始终保留；external 分组选择已配置的 MCP 工具。"
   },
   "verification_record": {
     "source": "Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior.",
@@ -312,8 +312,8 @@
     "text": "按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。"
   },
   "xrefs_query": {
-    "source": "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
-    "text": "Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。"
+    "source": "Ghidra: references to/from a target-bound module_relative AddressRef. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
+    "text": "Ghidra：查询绑定目标的 module_relative AddressRef 的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。"
   },
   "lab_list": {
     "source": "List configured Windows lab VM aliases and assigned environments without connecting or changing state.",

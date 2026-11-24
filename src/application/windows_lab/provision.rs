@@ -1027,8 +1027,8 @@ pub trait MediaFinalizer: Send + Sync {
     async fn finalize(&self, request: &FinalizeMediaRequest) -> Result<FinalizedMedia>;
 }
 
-/// Controller-side environment registration and doctor entry used only by
-/// `lab provision --register/--verify-environment`.
+/// Controller-side environment registration and doctor entry used by
+/// `lab provision --register/--verify-environment` and `lab register`.
 #[async_trait]
 pub trait ProvisionEnvironment: Send + Sync {
     /// Persist the verified connection as a managed-SSH environment.
@@ -1133,14 +1133,14 @@ pub enum SnapshotPlan {
     /// No snapshots exist; provisioning starts from the powered-off base disk
     /// and creates the baseline after the guest receipt verifies.
     Pristine,
-    /// Only the configured baseline exists and `--replace-baseline` was passed.
-    /// The caller persists its intent and backs up the VMX, deletes exactly that
-    /// snapshot, and only then resolves and validates the committed boot disk.
+    /// Only the fixed base exists and replacement was requested. Its delta is
+    /// updated in place, while the old base remains a rollback point until the
+    /// staged worker has booted and passed readiness.
     ReplaceBaseline,
 }
 
 /// A provisioned VM must be powered off with no snapshot chain. The only
-/// tolerated snapshot is the configured baseline when it is being replaced;
+/// tolerated snapshot is the fixed base when it is being replaced;
 /// no other snapshot is ever deleted.
 ///
 /// `--replace-baseline` is explicitly a no-op when no snapshot exists: the
@@ -1156,13 +1156,20 @@ pub fn plan_snapshot(
     }
     ensure!(
         snapshots.len() == 1 && snapshots[0] == baseline,
-        "lab VM must have no snapshots before provisioning; found {snapshots:?} (only the configured baseline {baseline} may be replaced with --replace-baseline)"
+        "lab VM must have no snapshots before provisioning; found {snapshots:?} (only the fixed base {baseline} may be replaced with --replace-baseline)"
     );
     ensure!(
         replace_baseline,
-        "baseline snapshot {baseline} already exists; pass --replace-baseline to delete and recreate it"
+        "fixed base snapshot {baseline} already exists; pass --replace-baseline to stage and verify its replacement"
     );
     Ok(SnapshotPlan::ReplaceBaseline)
+}
+
+/// Temporary name of a verified replacement. It carries the operation ID so
+/// interrupted transitions can be reconciled without touching other snapshots.
+pub fn staged_base_snapshot(provision_id: &str) -> Result<String> {
+    GuestPaths::for_provision(provision_id)?;
+    Ok(format!("{}-next-{provision_id}", super::BASELINE_SNAPSHOT))
 }
 
 /// Finalized media identity re-verified before the guest disk is touched.
@@ -1255,6 +1262,10 @@ pub fn verify_media(root: &Path) -> Result<MediaIdentity> {
     let payload =
         wukong_worker_package::VerifiedManifest::verify(&manifest_bytes, &manifest_signature, &key)
             .context("offline media payload signature is invalid")?;
+    ensure!(
+        payload.manifest().version == record.version,
+        "offline media version differs from its signed payload manifest"
+    );
     verified
         .bind_payload(&payload)
         .context("offline media enrollment and payload differ")?;
@@ -1345,8 +1356,10 @@ pub struct GuestDisk {
     pub device: String,
 }
 
-/// Resolve the boot disk from the VMX. Delta, linked, foreign or non-local
-/// disks are rejected: offline injection must address exactly one full disk.
+/// Resolve the boot disk from the registered VMX. Initial provisioning requires
+/// a snapshot-free full disk; base replacement deliberately addresses its
+/// restored delta while preserving the old base as a rollback point. Linked,
+/// foreign or non-local disks are rejected in both cases.
 pub fn resolve_guest_disk(vmx: &str, vmx_path: &Path) -> Result<GuestDisk> {
     ensure!(
         vmx_path.is_absolute() && vmx_path.is_file(),
@@ -1396,10 +1409,6 @@ pub fn resolve_guest_disk(vmx: &str, vmx_path: &Path) -> Result<GuestDisk> {
             file_name.ends_with(".vmdk"),
             "guest disk must be a VMDK file"
         );
-        ensure!(
-            !delta_disk(&file_name),
-            "guest disk is a snapshot delta; provisioning requires a VM with no snapshot chain"
-        );
         return Ok(GuestDisk {
             path: candidate,
             device: device.into(),
@@ -1408,13 +1417,35 @@ pub fn resolve_guest_disk(vmx: &str, vmx_path: &Path) -> Result<GuestDisk> {
     bail!("VMX declares no boot disk on nvme0:0, scsi0:0 or sata0:0")
 }
 
-fn delta_disk(name: &str) -> bool {
-    let Some(stem) = name.strip_suffix(".vmdk") else {
-        return false;
-    };
-    stem.rsplit_once('-').is_some_and(|(_, suffix)| {
-        suffix.len() == 6 && suffix.bytes().all(|byte| byte.is_ascii_digit())
-    })
+/// Restore the operator's pre-provision VMX after snapshot reconciliation while
+/// retaining the fresh delta filename written by VMware's revert operation.
+/// Every other byte comes from the original backup; the active disk value is
+/// accepted only after the normal local-VMDK containment and file checks.
+pub fn restore_vmx_preserving_active_disk(
+    original: &[u8],
+    current: &[u8],
+    vmx_path: &Path,
+) -> Result<Vec<u8>> {
+    let original = std::str::from_utf8(original).context("VMX backup is not valid UTF-8")?;
+    let current = std::str::from_utf8(current).context("current VMX is not valid UTF-8")?;
+    let active = resolve_guest_disk(current, vmx_path)?;
+    let key = format!("{}.fileName", active.device);
+    let value = vmx_entry(current, &key).context("active VMX lost its boot disk entry")?;
+    let mut matched = false;
+    let mut restored = String::with_capacity(original.len());
+    for line in original.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\r', '\n']);
+        let terminator = &line[body.len()..];
+        if vmx_entry_key(body) == Some(key.as_str()) {
+            ensure!(!matched, "VMX backup contains duplicate boot disk entries");
+            restored.push_str(&format!("{key} = {value}{terminator}"));
+            matched = true;
+        } else {
+            restored.push_str(line);
+        }
+    }
+    ensure!(matched, "VMX backup lost its original boot disk entry");
+    Ok(restored.into_bytes())
 }
 
 /// Result of a planned VMX device edit; `text` is the complete replacement file.
@@ -2317,10 +2348,9 @@ pub struct ProvisionArtifactPaths {
     pub record: PathBuf,
 }
 
-/// Durable provision intent. `guest_disk` is unknown only when
-/// `replaces_baseline` is set: the intent must be persisted before the baseline
-/// deletion, and the boot disk can only be resolved after the snapshot delta is
-/// committed. The service re-records the resolved path once it is known.
+/// Durable provision intent persisted before the first offline mutation. The
+/// guest disk, base replacement and readiness marker identify every snapshot
+/// effect that explicit reconciliation may finish or roll back.
 #[allow(
     clippy::too_many_arguments,
     reason = "a provisioning intent binds every fixed identity at once"
@@ -2350,6 +2380,9 @@ pub fn provisioning_spec(
         guest_root: guest.root.clone(),
         baseline_snapshot: baseline.into(),
         replaces_baseline,
+        base_verified: false,
+        base_retired: false,
+        base_published: false,
         identity_file,
         injected,
     }
