@@ -41,6 +41,9 @@ pub trait LabWorker: Send + Sync {
     async fn doctor(&self) -> Result<Value> {
         anyhow::bail!("worker readiness probe is not configured")
     }
+    async fn refresh(&self) -> Result<Value> {
+        self.doctor().await
+    }
     async fn maintenance(&self) -> Result<Box<dyn LabMaintenance>> {
         Ok(Box::new(()))
     }

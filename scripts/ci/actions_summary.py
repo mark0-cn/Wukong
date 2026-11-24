@@ -129,17 +129,33 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
                 f"- {name}: {cell(scope.get(name, 'unknown'))}"
                 for name in ("rust", "frontend", "linux", "apt", "uninstall", "release_clients")
             ],
+            f"- reuse: {cell(scope.get('reuse', 'unknown'))}",
+            f"- reuse_reason: {cell(scope.get('reuse_reason', 'unknown'))}",
             "",
         ]
+        if scope.get("reuse_source_run"):
+            source = scope["reuse_source_run"]
+            lines += [
+                f"复用来源: [Checks run #{cell(source)}](https://github.com/{context['repository']}/actions/runs/{source})",
+                "",
+            ]
         cache_hit = needs.get("windows", {}).get("outputs", {}).get("rust_cache_hit", "")
+        worker_cache_hit = (
+            needs.get("windows-worker", {}).get("outputs", {}).get("rust_cache_hit", "")
+        )
         cache_state = {
             "true": "精确命中",
             "false": "未精确命中（回退恢复或无缓存，详见 Rust cache 日志）",
         }.get(cache_hit, "未执行或无结果")
+        worker_cache_state = {
+            "true": "精确命中",
+            "false": "未精确命中（回退恢复或无缓存，详见 Rust cache 日志）",
+        }.get(worker_cache_hit, "未执行或无结果")
         lines += [
             "### Rust 缓存与步骤耗时",
             "",
             f"- Rust cache: {cache_state}",
+            f"- Worker Rust cache: {worker_cache_state}",
             "",
             "| Job | 步骤 | 结果 | 耗时 |",
             "| --- | --- | --- | --- |",
@@ -150,9 +166,15 @@ def render(kind, needs, context, directory, jobs=(), artifacts=(), warnings=()):
             "Rust formatting",
             "Rust Clippy",
             "Rust tests",
+            "Cold native dependency preflight",
+            "Standalone Windows worker bootstrap",
             "Frontend",
             "Version and release tooling tests",
             "Python runtime and release tests",
+            "Linux desktop feature tests",
+            "Offline worker package format",
+            "Linux bilingual interface tests",
+            "Verify replay between sibling containers",
         }
         for job in jobs:
             for step in job.get("steps", []):

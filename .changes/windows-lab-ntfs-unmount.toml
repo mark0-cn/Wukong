@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Keep Windows Lab offline NTFS writes recoverable by using a bounded soft shutdown before upgrades, disabling guest hibernation/Fast Startup during provisioning, and explicitly unmounting writable guestfish sessions."
+zh_CN = "通过升级前有界软关机、部署时禁用客体休眠/Fast Startup，以及显式卸载可写 guestfish 会话，保持 Windows Lab 离线 NTFS 写入可恢复。"

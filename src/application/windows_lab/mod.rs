@@ -56,6 +56,8 @@ pub trait VmHost: Send + Sync {
     async fn start(&self) -> Result<()>;
     /// Power off only after the persisted lab intent fences other execution.
     async fn stop(&self) -> Result<()>;
+    /// Shut down cleanly before offline disk writes; never fall back to a hard stop.
+    async fn stop_clean(&self) -> Result<()>;
     async fn delete_snapshot(&self, name: &str) -> Result<()>;
 }
 
@@ -501,7 +503,7 @@ impl WindowsLab {
             Err(error) => return self.mark_failed(state, pending, error, false),
         };
         if let Some(media) = upgrade {
-            if let Err(failure) = self.step(self.host.stop()).await {
+            if let Err(failure) = self.step(self.host.stop_clean()).await {
                 return match failure {
                     StepFailure::Timeout => self.mark_unknown(state, pending),
                     StepFailure::Failed(error) => self.mark_failed(state, pending, error, true),
@@ -922,6 +924,18 @@ impl WindowsLab {
     /// Poll the read-only doctor through guest boot. Only after it succeeds do
     /// we acquire the single exclusive maintenance lease used around snapshots.
     async fn worker_readiness(&self, timeout: Duration) -> Result<serde_json::Value> {
+        self.worker_readiness_inner(timeout, false).await
+    }
+
+    async fn worker_upgrade_readiness(&self, timeout: Duration) -> Result<serde_json::Value> {
+        self.worker_readiness_inner(timeout, true).await
+    }
+
+    async fn worker_readiness_inner(
+        &self,
+        timeout: Duration,
+        refresh: bool,
+    ) -> Result<serde_json::Value> {
         let worker = self
             .worker
             .as_ref()
@@ -933,7 +947,14 @@ impl WindowsLab {
             if remaining.is_zero() {
                 break;
             }
-            match tokio::time::timeout(remaining, worker.doctor()).await {
+            let attempt = async {
+                if refresh {
+                    worker.refresh().await
+                } else {
+                    worker.doctor().await
+                }
+            };
+            match tokio::time::timeout(remaining, attempt).await {
                 Ok(Ok(observation)) => return Ok(observation),
                 Ok(Err(error)) => last_error = Some(error),
                 Err(_) => break,

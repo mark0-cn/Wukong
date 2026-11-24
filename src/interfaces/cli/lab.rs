@@ -73,6 +73,20 @@ pub enum Command {
         #[arg(long, default_value_t = 1800)]
         timeout: u64,
     },
+    /// Retry managed-SSH registration and doctor from the settled installation receipt.
+    Register {
+        #[arg(long)]
+        vm: String,
+        /// Explicit guest IPv4 address when VMware Tools cannot report one.
+        #[arg(long)]
+        guest_ip: Option<std::net::Ipv4Addr>,
+        /// Replace an existing different environment registration.
+        #[arg(long)]
+        force: bool,
+        /// Registration and doctor deadline in seconds.
+        #[arg(long, default_value_t = 300)]
+        timeout: u64,
+    },
     /// Remove one failed provisioning attempt's leftovers from the powered-off guest disk.
     CleanGuest {
         #[arg(long)]
@@ -237,6 +251,31 @@ async fn run_with_registry(
                 })
                 .await?;
             let mut value = serde_json::to_value(&outcome)?;
+            if let Some(object) = value.as_object_mut() {
+                object.insert("vm_id".into(), json!(vm));
+            }
+            Ok(value)
+        }
+        Command::Register {
+            vm,
+            guest_ip,
+            force,
+            timeout,
+        } => {
+            ensure_registered(config, &vm)?;
+            let configuration = selected_configuration_path()
+                .map(|path| absolute(&path))
+                .transpose()?
+                .context(
+                    "lab register cannot determine the active configuration file; pass the global --config option or run where wukong.toml is discoverable",
+                )?;
+            let lab = open(&vm)?.with_environment_registrar(Arc::new(CliEnvironment::new(
+                config,
+                Some(configuration),
+                force,
+            )));
+            let outcome = lab.register_environment(guest_ip, timeout).await?;
+            let mut value = serde_json::to_value(outcome)?;
             if let Some(object) = value.as_object_mut() {
                 object.insert("vm_id".into(), json!(vm));
             }

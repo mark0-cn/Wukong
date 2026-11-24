@@ -19,6 +19,7 @@ Repository: `mark0-cn/Wukong`. Public image: `hlmark0/wukong`. Distributions: Wi
 | Secret | DOCKERHUB_TOKEN | Docker Hub repository Read/Write PAT; Delete is unnecessary |
 | Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri updater private key, only for trusted release workflows |
 | Variable | RELEASE_APP_ID | Dedicated release GitHub App ID |
+| Variable | RELEASE_APP_SLUG | Dedicated release App URL slug, without the `[bot]` suffix |
 | Secret | RELEASE_APP_PRIVATE_KEY | Full PEM private key generated for that App |
 
 Replace expired Docker PATs in Secrets. Never put PATs in source, packages, command arguments or release notes. Clients pull public images anonymously; publishing credentials are CI-only.
@@ -28,9 +29,11 @@ One-time App setup:
 1. Create an App in [GitHub Apps settings](https://github.com/settings/apps/new), use the repository URL as Homepage, disable Webhook, and restrict installation to your account.
 2. Repository permissions: **Contents: Read and write**, **Pull requests: Read and write**. Administration, Actions write and Workflows write are unnecessary.
 3. **Install App → Only select repositories → `mark0-cn/Wukong`**.
-4. Save App ID in the variable above and the complete generated PEM in the secret. Never commit/send the private key in chat.
+4. Save the App ID and URL slug in the variables above and the complete generated PEM in the secret. Never commit/send the private key in chat.
 
 Workflows issue short-lived repository installation tokens and revoke them afterward. PR creation requests Contents/PR write; tagging requests only Contents write. App-created PRs trigger native `pull_request` CI; App-pushed tags trigger publishing, with no extra branch CI dispatch. This avoids built-in `GITHUB_TOKEN` PR-approval restrictions and its push events not triggering subsequent workflows. See [GitHub trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+Server-side publication controls are required: configure an active `v*` tag ruleset that restricts creation, updates and deletion to the release App, and a `release-publication` Environment with a designated maintainer as required reviewer and administrator bypass disabled. The workflow independently rejects tag pushes whose actor is not `<RELEASE_APP_SLUG>[bot]`; the final publication job also waits for Environment approval. Reviewers cannot approve their own official or recovery publication deployment. The separate `workbench-publication` Environment allows the designated maintainer to approve their own manually dispatched Workbench deployment, but also disables administrator bypass. Manual tag pushes are not an alternative release path.
 
 Defaults are standard GitHub-hosted `ubuntu-24.04` / `windows-2025`. Image build and acceptance are separate jobs exchanging only digests/small files, not image tars. Disk preparation is restricted to hosted Linux VMs, removes unneeded preinstalled SDKs, prints space and preflights capacity. If necessary, set optional `WORKBENCH_LINUX_RUNNER` to an already-configured larger **GitHub-hosted** runner label; no paid resources are provisioned automatically.
 
@@ -56,7 +59,7 @@ Independent launcher formatting: `cargo fmt --manifest-path xtask/Cargo.toml -- 
 
 ## Everyday CI
 
-`Checks` (`ci.yml`) runs on master pushes, PRs targeting master and manual dispatch. Both PR/master select checks by scope; version PRs, master version increases, manual Checks and release calls run full checks plus APT/uninstall acceptance. Windows runs selected Rust fmt/clippy/test, frontend tests/build and online-package validation. Its native Cargo commands use the shared MSVC entry point, and a cold `aws-lc-sys`/`ring`/`libsqlite3-sys` preflight runs outside restored Rust caches; only bounded build-script diagnostics for those packages are retained on preflight failure. Linux runs selected runtime/evaluation and real replay checks. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md#actions-entry-points) for scope, gates and the six operator/three internal workflows.
+`Checks` (`ci.yml`) runs on master pushes, PRs targeting master and manual dispatch. Both PR/master select checks by scope; version PRs, master version increases, manual Checks and release calls run full checks plus APT/uninstall acceptance. Windows runs selected Rust fmt/clippy/test, frontend tests/build and online-package validation. A separate parallel `windows-worker` job builds and checks native Worker/offline media when Rust changes are selected. Its native Cargo commands use the shared MSVC entry point, and a cold `aws-lc-sys`/`ring`/`libsqlite3-sys` preflight runs outside restored Rust caches; only bounded build-script diagnostics for those packages are retained on preflight failure. Linux runs selected runtime/evaluation and real replay checks. External PRs receive no Docker Hub secret. See [GitHub maintenance](github-maintenance.md#actions-entry-points) for scope, gates and the six operator/three internal workflows.
 
 `rust-toolchain.toml` pins Rust; Cargo/npm use lockfiles. Debian/Python transitive dependencies are not fully locked. Released image digests are authoritative; rebuilding is not guaranteed byte-for-byte reproducible.
 
@@ -80,12 +83,12 @@ Preparation creates no tag/image/Release. Version must increase; existing tags a
 
 Tags must be `vMAJOR.MINOR.PATCH`, e.g. `v0.1.0`, `v12.3.45`. Components are ASCII digits, allowing standalone zero but no leading zeros. Reject `1.2.3`, `V1.2.3`, `v1.2`, `v01.2.3`, `v1.2.3-rc.1`, `v1.2.3+build`. Tags must match source versions and point to commits included in default branch master.
 
-The workflow listens to all tags and validates metadata before image build/package/publication. Workflow validation does not itself reject invalid Git pushes; server-side enforcement requires an applicable tag Ruleset. Historical-commit tags execute that commit's workflow. Check current repository Rulesets separately rather than assuming workflow filtering is server enforcement.
+The workflow listens to all tags and validates metadata before image build/package/publication. The App-only `v*` tag ruleset rejects unauthorized Git pushes before they start this workflow; actor validation is defense in depth, not a replacement for server-side enforcement. Historical-commit tags execute that commit's workflow. Check current repository Rulesets separately rather than assuming workflow filtering is server enforcement.
 
 `release.yml` performs:
 
 1. Validate version/origin. Reuse successful same-repository/same-SHA master push CI only after checking current-attempt changes/windows/linux/summary. Otherwise, including API failure, run full CI.
-2. Find trusted same-SHA CI/release clients or build them. Before execution/packaging, verify platform, version, full commit, recipe and binary SHA256/size. Bake stable toolchain/workbench together; verify external assets against `workers/toolchain.lock.json`, even on cache hits. Publish candidate `build-<fullcommit>` with SBOM/provenance.
+2. Find trusted same-SHA CI/release clients or build them. Before execution/packaging, verify platform, version, full commit, recipe and binary SHA256/size. Only after the required checks succeed, bake stable toolchain/workbench together; verify external assets against `workers/toolchain.lock.json`, even on cache hits. Publish candidate `build-<fullcommit>` with SBOM/provenance.
 3. On a fresh runner pull by digest and run network isolation, fixed-target relay, LaunchSpec/archive tests, and host-CLI doctor, challenge import/build/extract/start/connect, GDB attach, update/rollback.
 4. Package both platforms' validated desktop binaries directly into NSIS/AppImage without recompiling; reuse Linux acceptance CLI separately. Sign and run native install/start checks. Combine platform files into signed `latest.json`, `release.json`, SHA256SUMS and acceptance reports; Rust verifies every installer signature/hash.
 5. On `windows-2025`, build the offline Windows worker media template without controller keys, check it with an ephemeral key, pack the deterministic zip and stage it into the release asset set, where the signed desktop catalog records it for desktop download.
@@ -154,7 +157,7 @@ See [desktop updates](desktop-updates.md) for check/prepare/switch/confirm rules
 
 ## Recover publication of accepted artifacts
 
-If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Release (`operation=recover`)** manually on master with the original tag `release_run_id`. Invoking it authorizes publishing that existing version. The separate recovery job obtains Contents write permission without building or using a signing private key.
+If a tag run completed builds, native installer checks, container acceptance and package, but publish was skipped/transiently failed, run **Release (`operation=recover`)** manually on master with the original tag `release_run_id`. Invoking it authorizes publishing that existing version, and the recovery job must receive the same `release-publication` Environment approval as ordinary publication; a skipped or rejected original publish never bypasses this approval. The separate recovery job obtains Contents write permission without building or using a signing private key.
 
 It accepts only completed same-repository tag-push runs, requires each acceptance job success, pins that attempt's online-release artifact ID and checks unmoved tag/master ancestry. Download original installers/signatures/acceptance manifests; use the original commit's publisher to validate/publish identical bytes/digest. It neither compiles, resigns nor moves/creates tags, and needs no signing private key. Different existing attachments/fixed images remain protected. Missing/expired artifacts cannot use this path.
 

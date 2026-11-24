@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow operators to retry managed-SSH registration and doctor from a settled Windows Lab installation receipt without reinstalling, including an explicit guest IPv4 when VMware Tools cannot report one."
+zh_CN = "允许操作者从已稳定的 Windows Lab 安装回执重试 managed-SSH 登记和 doctor，无需重新安装；VMware Tools 无法报告地址时可显式指定客体 IPv4。"

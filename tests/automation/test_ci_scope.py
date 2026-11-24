@@ -17,7 +17,7 @@ class ScopeTests(unittest.TestCase):
         )
         self.assertTrue(selected["frontend"])
         self.assertFalse(selected["rust"])
-        self.assertFalse(selected["linux"])
+        self.assertTrue(selected["linux"])
         self.assertTrue(select_scope([".changes/executable.py"], "pull_request")["rust"])
 
     def test_clients_only_for_master_version_increase_or_explicit_prewarm(self):
@@ -46,12 +46,14 @@ class ScopeTests(unittest.TestCase):
                     apt="false",
                     uninstall="false",
                     release_clients="true",
+                    reuse="false",
                 ),
             },
             **{
                 name: {"result": "success"}
                 for name in (
                     "windows",
+                    "windows-worker",
                     "linux",
                     "windows-client",
                     "linux-client",
@@ -61,6 +63,9 @@ class ScopeTests(unittest.TestCase):
         }
         needs["acceptance"] = {"result": "skipped"}
         self.assertTrue(checks_passed(needs))
+        needs["windows-worker"]["result"] = "failure"
+        self.assertFalse(checks_passed(needs))
+        needs["windows-worker"]["result"] = "success"
         needs["linux-client"]["result"] = "skipped"
         self.assertFalse(checks_passed(needs))
         needs["changes"]["outputs"]["release_clients"] = "false"
@@ -88,7 +93,7 @@ class ScopeTests(unittest.TestCase):
                 ],
                 (False, False, False),
             ),
-            (["ui/src/app/App.tsx"], (False, True, False)),
+            (["ui/src/app/App.tsx"], (False, True, True)),
             (["workers/runtime/requirements.txt"], (False, False, True)),
             (["workers/tests/unit/test_profile.py"], (False, False, True)),
             (["evals/analysis/score.py", "fixtures/src/benign.c"], (False, False, True)),
@@ -128,6 +133,7 @@ class ScopeTests(unittest.TestCase):
                         apt="false",
                         uninstall="false",
                         release_clients="false",
+                        reuse="false",
                     ),
                 },
                 "windows": {"result": "success" if linux == "true" else "skipped"},
@@ -135,6 +141,7 @@ class ScopeTests(unittest.TestCase):
                     name: {"result": "skipped"}
                     for name in (
                         "acceptance",
+                        "windows-worker",
                         "windows-client",
                         "linux-client",
                         "linux-desktop-client",
@@ -203,9 +210,13 @@ class ScopeTests(unittest.TestCase):
                     apt="true",
                     uninstall="true",
                     release_clients="false",
+                    reuse="false",
                 ),
             },
-            **{name: {"result": "success"} for name in ("windows", "linux", "acceptance")},
+            **{
+                name: {"result": "success"}
+                for name in ("windows", "windows-worker", "linux", "acceptance")
+            },
             **{
                 name: {"result": "skipped"}
                 for name in ("windows-client", "linux-client", "linux-desktop-client")

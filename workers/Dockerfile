@@ -35,32 +35,24 @@ ENV WUKONG_GHIDRA_HEADLESS=/opt/ghidra/support/analyzeHeadless
 
 # Ghidra 11.3+ no longer auto-detects java on PATH; the headless launcher
 # requires JAVA_HOME or it tries an interactive JDK prompt and fails.
-ARG TEMURIN_SHA256=68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb
+ARG TEMURIN_SHA256=760f91b22c3efc9bd1b64ff950598231be82928cc807e30691a0e7a2995a62c0
 RUN --mount=type=bind,source=workers/deps/temurin25.tar.gz,target=/deps/temurin25.tar.gz,ro \
     printf '%s  /deps/temurin25.tar.gz\n' "$TEMURIN_SHA256" | sha256sum --check - \
     && mkdir -p /opt/jdk-25 && tar -xzf /deps/temurin25.tar.gz -C /opt/jdk-25 --strip-components=1
 ENV JAVA_HOME=/opt/jdk-25
 
-# Python analysis toolchain used by the typed tools and by agent scripts
-# running through job_start: pwntools (pwn plumbing), z3-solver (constraint
-# solving), angr (symbolic execution, backing angr.solve) and ropper (gadget
-# hunting). angr 9.2.78 is the self-contained release: its libc hook library
-# is bundled (angr 10 splits it into angr-data, which arrives broken in the
-# AFL base venv) and it pins pycparser<2.22, which Python 3.12's
-# "CLexer object is not callable" breakage makes mandatory.
+# Complete Linux/Python 3.12 analysis and runtime dependency lock. angr 9.2.78
+# is the self-contained release (before angr-data); pycparser 2.21 avoids the
+# Python 3.12 CLexer breakage. The mixed angr component versions are intentional,
+# so the complete set is installed without re-resolving metadata. Hashes also
+# cover packages supplied by the AFL base (notably unicorn) by force-reinstalling
+# their exact distributions.
+COPY workers/requirements.txt /tmp/wukong-image-requirements.txt
 ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --force-reinstall --no-deps --break-system-packages \
-    -i "$PIP_INDEX_URL" \
-    "angr==9.2.78" "pyvex==9.2.131" "archinfo==9.2.102" "cle==9.2.78" \
-    "claripy==9.2.101" "ailment==9.2.78" "pycparser==2.21" "bitstring==3.1.9" \
-    "z3-solver==4.13.4.0" "ply==3.11" "unicorn==2.1.4" "itanium_demangler==1.1" \
-    "protobuf==5.29.4" "capstone==5.0.6" "nampa" "cxxheaderparser" "dpkt" "mulpyplexer" "pypcode" "pefile" "networkx" \
-    "cachetools" "sortedcontainers" "pyelftools" "psutil" "requests" "future" "packaging" \
-    && pip3 install --break-system-packages -i "$PIP_INDEX_URL" \
-    pwntools ropper \
-    && pip3 install --break-system-packages -i "$PIP_INDEX_URL" \
-    cffi progressbar2 rich sqlalchemy sympy
+    pip3 install --force-reinstall --no-deps --no-build-isolation \
+    --require-hashes --break-system-packages -i "$PIP_INDEX_URL" \
+    -r /tmp/wukong-image-requirements.txt
 
 ENV PATH="/opt/jdk-25/bin:/AFLplusplus:/usr/local/bin:${PATH}"
 # Bake the experiment-UID passwd range and its once-marker at build time: the
@@ -87,9 +79,6 @@ ENTRYPOINT ["sleep", "infinity"]
 # Standalone worker keeps its original runtime layout. Workbench inherits the
 # stable toolchain stage instead, so runtime edits cannot invalidate its tools.
 FROM toolchain AS worker
-COPY workers/runtime/requirements.txt /tmp/wukong-runtime-requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip3 install --break-system-packages -i "$PIP_INDEX_URL" -r /tmp/wukong-runtime-requirements.txt
 COPY workers/analysis /opt/wukong/analysis
 RUN pip3 install --break-system-packages --no-deps --no-build-isolation /opt/wukong/analysis
 COPY workers/runtime /opt/wukong/runtime

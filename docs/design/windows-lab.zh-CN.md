@@ -32,7 +32,7 @@ Schema-3 状态位于 `<state_dir>/windows-lab/<vm_id>.json`，绑定规范化 V
 
 评估 worker 绑定在规范化 VMX 旁持有共享锁（`.wukong-environment.lock`）；prepare/install/restore 要求独占准入。维护前，调用者只能在所有任务证据同步后释放本评估的空闲租约。新的原生 worker 租约阻止在遗留任务或调试/交互资源存活时接管。离线部署不需要 worker 连接；实验准备会显式处理客体启动和就绪。Lab 工具不会关闭其他评估的连接和租约。基线恢复后，旧评估的 worker 身份仍保持固定；若启动身份变化，后续执行需要新建评估。
 
-- `prepare` 只接受 `idle` 或 `failed`，校验并准备输入、推进代际并持久化意图。即使 VMware 报告 VM 正在运行，也必须存在并回退 `wukong_base_vm`；随后启动已停止的客体，轮询只读环境 doctor，直到 worker/SSH 路径就绪或截止时间到期。配置 `worker_media` 时，会把经过认证的 Worker 身份和已稳定部署凭据与签名候选比较：升级必须保持安装、控制器信任方、环境和 SSH 绑定不变，并具有更高的登记代际与语义版本。候选通过离线 SYSTEM 路径安装；暂存基线只有在重新启动且 doctor 通过后才发布，随后再次恢复并启动，才创建实验快照。未配置 `worker_media` 时，prepare 仍执行强制恢复/就绪检查，但没有升级来源。就绪或校验失败不会发布 `ready` 租约或实验快照。
+- `prepare` 只接受 `idle` 或 `failed`，校验并准备输入、推进代际并持久化意图。即使 VMware 报告 VM 正在运行，也必须存在并回退 `wukong_base_vm`；随后启动已停止的客体，轮询只读环境 doctor，直到 worker/SSH 路径就绪或截止时间到期。配置 `worker_media` 时，会把经过认证的 Worker 身份和已稳定部署凭据与签名候选比较：升级必须保持安装、控制器信任方、环境和 SSH 绑定不变，并具有更高的登记代际与语义版本。离线升级写入前，prepare 使用有界软关机，不会回退到用于隔离不可信实验的强制停止。候选通过离线 SYSTEM 路径安装；暂存基线只有在重新启动且 doctor 通过后才发布，随后再次恢复并启动，才创建实验快照。未配置 `worker_media` 时，prepare 仍执行强制恢复/就绪检查，但没有升级来源。就绪或校验失败不会发布 `ready` 租约或实验快照。
 - `restore` 在恢复写入前校验调用者、活动 lab ID 和代际；回滚前使旧代际失效。只有确认恢复成功后，未知运行/安装记录才变为 `lost`。失败或超时保留不确定性。恢复成功后尝试清理该实验快照，并单独报告清理失败。随后重新读取当前 VM 电源状态；若 VM 正在运行且已配置 worker，再获取新的 doctor 观测。结果包含 `vm_running`、`worker_readiness`（`ready`、`unavailable`、`not_running`、`not_configured` 或 `unknown`）以及对应的 `next_action`；就绪探测失败不会把已经成功恢复的干净基线改写为恢复失败。
 - `prune` 拒绝待恢复状态，保留固定基线、活动实验以及所有未知或待定快照。它删除配置实验前缀下的闲置快照；对于 `wukong_base_vm-next-<operation>`，只有本 VM 存在匹配的、已完成且已稳定的替换回执时才删除。
 - `status` 读取快照，不调和或重写状态；有时限的宿主探测只是观测。其他操作持有修改锁时仍可查询。
@@ -82,7 +82,7 @@ CLI `lab run` 等待结果，每 15 秒续期独立租约，只释放自己的�
 - `--template` 模式不需要 Python 解释器或源码检出：Windows 上由控制器内置的 Rust finalizer 用控制器密钥目录密封模板、调用模板载荷内打包的 `ssh-keygen.exe` 生成控制器管理的 SSH 身份并装配介质。`python -m scripts.worker.media finalize` 模块仍可用于脚本工作流；`--media` 部署不使用 finalizer。
 - 控制器 `state_dir`（以及最终介质输出目录）应保持足够短：Windows `MAX_PATH` 同样约束暂存的离线介质，其载荷包含 131 个字符的相对路径。finalize 会在较短的临时工作区暂存，并在配置目录过深时以明确错误指出越界路径；应把该目录移到更短的绝对路径，而不是依赖长路径开关。
 - 已登记且关机的实验 VM，且不存在快照链。只允许存在 `wukong_base_vm`，并且仅当传入 `--replace-baseline`；任何其他快照都会拒绝命令且永不被删除。不存在快照时，`--replace-baseline` 是明确记录的空操作。首次安装要求启动盘是 VMX 目录内的完整本地 VMDK，位于 `nvme0:0`、`scsi0:0` 或 `sata0:0`；链接盘与外部盘会被拒绝。替换会先恢复固定基线，并有意检查其本地差异盘。VMX 必须启用 SATA 控制器并有空闲 CD 槽位。
-- 请求 `--register` 时需要 VMware Tools：控制器在写入环境前用 `vmrun getGuestIPAddress` 发现客体 IPv4。
+- 自动 `--register` 地址发现需要 VMware Tools：控制器在写入环境前用 `vmrun getGuestIPAddress` 发现客体 IPv4。已稳定安装的登记/doctor 失败后，`lab register --vm <alias> --guest-ip <IPv4>` 可从保留的回执重试而不重新安装；显式地址仍必须通过固定主机密钥和 doctor 校验。
 - finalize 规格中的 `management_peer` 必须是客体视角的控制器 IPv4 源地址。安装后的 Worker 把 SSH 精确固定到该地址（授权键 `from=`、`AllowUsers user@address`、自有防火墙规则），其他地址会导致环境 doctor 无法连通。
 - `--register` 需要一个活动配置文件：传入全局 `--config`，或在可发现 `wukong.toml` 的位置运行。
 
@@ -116,9 +116,9 @@ timeout_seconds = 600
 
 在任何变更之前，命令校验来源介质/模板与规格、VM 电源状态、快照规则以及 VMX CD 设备规划。无快照的原始 VM 还会在持久化任何内容之前预检关机系统卷（Windows 卷、SYSTEM 与 SOFTWARE 配置单元、当前 control set、不存在固定计划任务文件/TaskCache 注册/启动器、无部署目录、无退役的本地组策略启动条目/备份或 CLI 创建的 `gpt.ini`、且无旧版一次性服务键）。检测到遗留状态会以精确的显式清理命令（`wukong lab clean-guest --vm <alias> --operation <id>`）拒绝命令，而不是静默在其上重试。传入 `--replace-baseline` 时，命令先恢复 `wukong_base_vm`，备份由此得到的 VMX 并持久化意图，然后解析和预检已恢复基线的差异盘。在整个客体变更与安装期间，旧固定基线始终保留。意图持久化之后的每次失败都可恢复而不会被重放。
 
-变更顺序固定：替换时在保留固定基线的前提下先恢复它；备份当前 VMX 字节并在任何客体变更之前持久化意图；解析并预检恢复后的差异盘；用 `-V WUKONG_OFFLINE` 构建 ISO；把 ISO 挂到空闲的 SATA CD 设备；把包装脚本、计划、按操作生成的启动器与固定任务 XML 写入固定客体路径；通过创建客体 SOFTWARE 配置单元中的 `Tree`/`Tasks`/`Boot` TaskCache 键注册固定开机任务；启动 VM 并在 `--timeout` 内等待客体关机（60–7200 秒，默认 1800；单条工具命令使用 `offline.timeout_seconds`）。任务计划程序服务在无需登录的情况下以 SYSTEM 启动任务，启动器运行该操作的包装脚本，包装脚本的 `finally` 先写回执，再用 `schtasks /Delete` 注销固定任务（删除任务 XML 文件与三个 TaskCache 键），删除固定启动器，安排删除包装脚本与计划，并始终让客体关机，升级失败也是如此。控制器恢复挂载前的 VMX，离线确认任务文件、TaskCache 注册、启动器、包装脚本与计划均已消失、退役本地组策略产物不存在且回执身份匹配。首次安装随后创建 `wukong_base_vm`；替换创建 `wukong_base_vm-next-<provision_id>` 并保留旧基线。该路径不写 SYSTEM 服务键、本地组策略文件或服务值。持久的部署记录保存该操作写入的每个客体文件，并记录它是由本操作创建还是保留了原有内容，因此待定意图解除后，清理可以删除创建的文件并按字节精确恢复保留的文件。
+变更顺序固定：替换时在保留固定基线的前提下先恢复它；备份当前 VMX 字节并在任何客体变更之前持久化意图；解析并预检恢复后的差异盘；用 `-V WUKONG_OFFLINE` 构建 ISO；把 ISO 挂到空闲的 SATA CD 设备；把包装脚本、计划、按操作生成的启动器与固定任务 XML 写入固定客体路径；通过创建客体 SOFTWARE 配置单元中的 `Tree`/`Tasks`/`Boot` TaskCache 键注册固定开机任务；启动 VM 并在 `--timeout` 内等待客体关机（60–7200 秒，默认 1800；单条工具命令使用 `offline.timeout_seconds`）。任务计划程序服务在无需登录的情况下以 SYSTEM 启动任务，启动器运行该操作的包装脚本。包装脚本在安装前禁用休眠和 Fast Startup，使后续离线写入从完全关闭的 NTFS 卷开始；可写 guestfish 会话会同步数据、核对最终校验和并显式卸载卷。包装脚本的 `finally` 先写回执，再用 `schtasks /Delete` 注销固定任务（删除任务 XML 文件与三个 TaskCache 键），删除固定启动器，安排删除包装脚本与计划，并始终让客体关机，升级失败也是如此。控制器恢复挂载前的 VMX，离线确认任务文件、TaskCache 注册、启动器、包装脚本与计划均已消失、退役本地组策略产物不存在且回执身份匹配。首次安装随后创建 `wukong_base_vm`；替换创建 `wukong_base_vm-next-<provision_id>` 并保留旧基线。该路径不写 SYSTEM 服务键、本地组策略文件或服务值。持久的部署记录保存该操作写入的每个客体文件，并记录它是由本操作创建还是保留了原有内容，因此待定意图解除后，清理可以删除创建的文件并按字节精确恢复保留的文件。
 
-首次部署完成后，VM 在 `wukong_base_vm` 上关机。每次 `lab prepare` 都先恢复该固定基线，再检查就绪状态和版本。无需升级时，在取得 Worker 维护租约后创建一个实验快照。需要升级时，prepare 停止已恢复的客体，执行离线替换，启动暂存 Worker 并要求新的 doctor 通过，且 doctor 身份中的安装 ID 和包哈希必须匹配签名替换介质，再恢复暂存快照以去除运行期变化并停止 VM。只有这时才删除旧固定基线，持久化退役标记，从当前已验证的暂存状态创建 `wukong_base_vm`，持久化发布标记并删除暂存快照；不需要也不使用 VMware 快照改名。第二次 prepare 会恢复并启动新发布的基线，然后才签发租约。`last_provision` 处于 running 或 unknown 时，`lab prepare` 会拒绝。`--register` 只写入 `[environments.<id>]`，不会修改 `[windows_lab.vms.<alias>]`；在运行打包测试程序前，需要把该 VM 的 `environment` 设为登记的环境 id。成功的 `--register` 还会把实验室已持久化的配置标识重新绑定到它写入的环境条目，因此之后的 `lab status`/`prepare`/`run`/dry-run 命令可以正常打开；在该操作之外对 VM 或环境所做的更改仍会被状态守卫拒绝。
+首次部署完成后，VM 在 `wukong_base_vm` 上关机。每次 `lab prepare` 都先恢复该固定基线，再检查就绪状态和版本。无需升级时，在取得 Worker 维护租约后创建一个实验快照。需要升级时，prepare 对恢复的客体执行软关机，执行离线替换，启动暂存 Worker，并建立经过校验的新环境连接，以替换缓存的旧包身份。新的 doctor 必须通过，且其安装 ID 和包哈希必须匹配签名替换介质，再恢复暂存快照以去除运行期变化并停止 VM。只有这时才删除旧固定基线，持久化退役标记，从当前已验证的暂存状态创建 `wukong_base_vm`，持久化发布标记并删除暂存快照；不需要也不使用 VMware 快照改名。第二次 prepare 会恢复并启动新发布的基线，使用刷新后的环境连接，然后才签发租约。`last_provision` 处于 running 或 unknown 时，`lab prepare` 会拒绝。`--register` 只写入 `[environments.<id>]`，不会修改 `[windows_lab.vms.<alias>]`；在运行打包测试程序前，需要把该 VM 的 `environment` 设为登记的环境 id。成功的 `--register` 还会把实验室已持久化的配置标识重新绑定到它写入的环境条目，因此之后的 `lab status`/`prepare`/`run`/dry-run 命令可以正常打开；在该操作之外对 VM 或环境所做的更改仍会被状态守卫拒绝。
 
 只有当 `wukong_base_vm` 已存在时才需要 `--replace-baseline`；不存在快照时它是明确记录的空操作（无快照流程会在客体回执通过校验后创建固定基线）。替换要求配置 Lab Worker，绝不会在客体校验和身份匹配的升级 Worker doctor 通过之前删除旧基线。退役前失败会保留旧基线及该操作拥有的暂存快照供诊断，操作保持 `recovery_required`；以 `failed` 调和时只删除该暂存快照并恢复旧基线。升级前已稳定的部署回执会单独保留，使回滚后的 Worker 仍可验证身份并重试升级。旧固定基线一旦删除，`failed` 调和会被拒绝并保留剩余快照：旧状态已不存在，操作者必须检查，然后对已验证替换确认 `completed`，或执行外部恢复。操作者确认的完成使用暂存名称及持久的校验/退役/发布标记完成已确认的切换，并在已稳定部署回执中记录固定基线。快照状态含义不明确时绝不猜测。
 
@@ -129,6 +129,8 @@ timeout_seconds = 600
 `--register` 必须搭配 `--template` 模式。只有当 finalize 规格省略 `ssh_public_key` 时，finalize 才会在控制器状态目录的本次部署目录下生成控制器管理的 SSH 密钥对（`--generate-ssh-key`）；介质模式部署无法提供该身份，携带 `ssh_public_key` 的规格也不能登记。该登记密钥是控制器的 SSH **客户端** 身份：其公钥被授权写入 Worker 的 `authorized_keys`，私钥保留在控制器状态目录，配置只引用其路径；它绝不会进入介质、回执或客体。Windows Worker 安装程序会另外在客体上生成 sshd **主机** 密钥；控制器事先没有该密钥，只能从客体回执得知它。
 
 客体启动后，命令等待 `vmrun` 报告的客体 IPv4，写入 `[environments.<environment_id>]` 作为 managed-SSH Windows 环境（installation id、`wkgm...` 用户、SSH 端口、控制器客户端身份文件路径，以及包含来自已校验回执的安装程序生成 Worker 主机密钥的公开 known-hosts 固定项；该项以控制器本地别名 `wukong-worker-<installation_id>` 为键，managed SSH 通过 `HostKeyAlias` 使用该别名），先写出旧配置的时间戳备份，不带 `--force` 时拒绝替换不同的环境，在未设置时写入 `default_environment`，并在替换时撤回旧的主机固定项。已校验回执必须携带规范的 Ed25519 主机公钥，且其上报指纹必须等于重新计算的 SHA-256 指纹；主机密钥为空、缺失或格式错误，或指纹不匹配，都会使部署失败且绝不会被登记。该固定项把控制器 SSH 的服务端认证绑定到安装程序生成的主机密钥（针对管理对端与端口）；登记介质中的客户端密钥不再与它比较。`--verify-environment` 要求环境已配置（由 `--register` 或手工写入），并在启动后运行 `EnvironmentRegistry::doctor`，按截止时间重试；它对两种介质模式都有效，也可与 `--register` 组合。成功后 VM 会回滚到新基线。登记或 doctor 失败会单独报告：命令会尝试回滚 VM，基线保留，部署记录显示 `environment_verified: false`。重写完成前的失败会从时间戳备份恢复配置并保留被替换的公开固定项，因此旧的环境映射以及为它持久化的实验室配置标识仍然有效；只有完全发布的登记才会撤回被替换的固定项。
+
+`wukong lab register --vm <alias> [--guest-ip <IPv4>] [--force]` 从现有固定基线的最新稳定回执重试登记和强制 doctor，不会重跑安装器、修改客体磁盘或替换快照。未显式给出地址时使用同样有界的 VMware Tools 发现；显式地址是 Tools 不可用时的操作者观测，不是 doctor 绕过。命令要求 VM 空闲且没有活动/待定工作，校验回执连接与介质身份及控制器身份文件的绑定，只采纳本次写入的环境配置，并在验证后恢复同一固定基线。
 
 ### 试运行、失败与调和
 
@@ -155,6 +157,9 @@ wukong --config wukong.toml lab provision --vm lab `
   --template D:/release/wukong-windows-worker-media-<version> `
   --keys D:/wukong-controller-keys --spec enrollment-spec.json `
   --replace-baseline --register --verify-environment
+
+# Tools 无法报告地址时，从稳定回执重试登记/doctor。
+wukong --config wukong.toml lab register --vm lab --guest-ip 192.168.199.128 --force
 
 # 校验并打印计划动作，不 finalize 介质、不改动 VM。
 wukong --config wukong.toml lab provision --vm lab --media D:/media/windows-worker --dry-run

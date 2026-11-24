@@ -930,6 +930,12 @@ fn wrapper_removes_the_boot_task_and_launcher_before_shutdown() {
     assert!(wrapper.contains("launcher_deleted"));
     assert!(wrapper.contains("Remove-BootTask"));
     assert!(
+        wrapper.contains("powercfg.exe /hibernate off")
+            && wrapper.find("powercfg.exe /hibernate off").unwrap()
+                < wrapper.find("install-reviewed").unwrap(),
+        "offline lifecycle guests disable Fast Startup before worker installation"
+    );
+    assert!(
         wrapper.contains("$installText = (& $setup install-reviewed")
             && wrapper.contains("$plan.enrollment_sha256) 2>&1 | Out-String).Trim()")
             && wrapper.contains("+ ': ' + $installText)"),

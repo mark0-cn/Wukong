@@ -19,6 +19,7 @@ Settings → Secrets and variables → Actions：
 | Secret | DOCKERHUB_TOKEN | Docker Hub 仓库 Read/Write PAT，不需要 Delete |
 | Secret | TAURI_SIGNING_PRIVATE_KEY | Tauri 更新签名私钥内容，仅可信发布工作流使用 |
 | Variable | RELEASE_APP_ID | 专用发布 GitHub App 的 App ID |
+| Variable | RELEASE_APP_SLUG | 专用发布 App 的 URL slug，不包含 `[bot]` 后缀 |
 | Secret | RELEASE_APP_PRIVATE_KEY | 该 App 生成的 PEM 私钥全文 |
 
 PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源码、包、命令参数或发布说明。公开镜像允许客户端匿名拉取；发布凭据只用于 CI。
@@ -28,12 +29,14 @@ PAT 到期后在 Docker 重新创建并替换 Secret。不要将 PAT 写入源�
 1. 在 [GitHub Apps 设置](https://github.com/settings/apps/new) 创建 App，Homepage 填仓库 URL，关闭 Webhook；仅允许安装到自己的账号即可。
 2. Repository permissions 设置 **Contents: Read and write**、**Pull requests: Read and write**；不需要 Administration、Actions write 或 Workflows write。
 3. Install App → Only select repositories → `mark0-cn/Wukong`。
-4. 将 App ID 保存到上述仓库 Variable，Generate a private key 后将 PEM 全文保存到上述 Secret；不要把私钥提交到仓库或聊天。
+4. 将 App ID 和 URL slug 保存到上述仓库 Variables，Generate a private key 后将 PEM 全文保存到上述 Secret；不要把私钥提交到仓库或聊天。
 
 工作流按当前仓库签发短期 installation token，结束后撤销。创建 PR 时请求 Contents/PR 写权限；打 tag 时只请求 Contents 写权限。
 App 创建的 PR 会触发原生 `pull_request` CI，App 推送的 tag 会触发发布工作流；不再额外 dispatch 一套分支 CI。
 这是为避免内置 `GITHUB_TOKEN` 创建 PR 时的工作流批准要求，以及该 token 的 push 事件不触发后续工作流的限制。
 参考 [GitHub 触发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)。
+
+必须配置服务器端发布限制：启用 `v*` tag ruleset，仅允许发布 App 创建、更新或删除 tag；配置 `release-publication` Environment，指定维护者为必需审核人并禁止管理员绕过。工作流还会独立拒绝 actor 不是 `<RELEASE_APP_SLUG>[bot]` 的 tag push，最终发布 job 也必须等待 Environment 审批。审核人不能批准自己发起的正式或恢复发布部署。独立的 `workbench-publication` Environment 允许指定维护者批准自己手动发起的 Workbench 部署，但同样禁止管理员绕过。手工推送 tag 不是替代发布路径。
 
 默认使用 GitHub 标准托管 `ubuntu-24.04` / `windows-2025`。镜像构建和验收是不同 job，彼此只传 digest 与小文件，不传镜像 tar。磁盘准备脚本仅允许在 GitHub 托管 Linux VM 上运行，删除该 job 不需要的预装 SDK，打印空间并做预检。若空间不足，可以把可选 Variable `WORKBENCH_LINUX_RUNNER` 设置为已配置的大规格 **GitHub 托管** runner 标签；不会自动开通付费资源。
 
@@ -68,7 +71,7 @@ Linux 正式 AppImage 在 Ubuntu 22.04 构建并进行真实 WebView 启动检�
 
 ## 日常 CI
 
-`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；原生 Cargo 命令使用共享 MSVC 入口，并在恢复的 Rust 缓存之外冷构建 `aws-lc-sys`/`ring`/`libsqlite3-sys` 预检，失败时只保留这三个包的有界 build script 诊断。Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
+`Checks`（`ci.yml`）在 master push、面向 master 的 PR 和手动触发时运行。PR/master 均按改动范围选择检查；版本 PR、master 版本递增、手动 Checks 和发布调用执行完整检查与 APT/卸载验收。Windows 执行所选 Rust fmt/clippy/test、前端测试与构建、在线包校验；选中 Rust 改动时，独立的并行 `windows-worker` job 构建并检查原生 Worker/离线媒体。原生 Cargo 命令使用共享 MSVC 入口，并在恢复的 Rust 缓存之外冷构建 `aws-lc-sys`/`ring`/`libsqlite3-sys` 预检，失败时只保留这三个包的有界 build script 诊断。Linux 执行所选 runtime、评测及真实重放。外部 PR 不获取 Docker Hub Secret。范围、门禁、六个操作入口与三个内部工作流见 [GitHub 维护功能](github-maintenance.zh-CN.md#actions-entry-points)。
 
 Rust 版本由 `rust-toolchain.toml` 固定；Cargo 与 npm 使用锁文件。上游 Debian/Python 的全部传递依赖并未完全锁死；已发布镜像以 digest 为准，不能把重新构建视为逐位可复现。
 
@@ -100,13 +103,13 @@ tag 只允许 `v主版本.次版本.补丁版本`，例如 `v0.1.0`、`v12.3.45`
 tag 必须同时匹配源码版本，并且 commit 已包含在默认分支 `master`。
 
 工作流监听所有 tag，在 metadata 阶段先校验格式和版本，不通过就不会构建、打包或发布。
-工作流校验本身不会拒绝非法 Git push；服务器端强制要求需要适用的 tag Ruleset。
+仅允许发布 App 的 `v*` tag ruleset 会在未授权 Git push 触发工作流前将其拒绝；actor 校验是纵深防御，不能替代服务器端强制规则。
 历史提交的 tag 使用该提交中的工作流。仓库当前 Rulesets 应另行核对，不能把工作流过滤当作服务器强制规则。
 
 `release.yml` 自动执行：
 
 1. 校验版本与来源；查询同仓库、同 SHA 的成功 master push CI，核对当前尝试的 changes/windows/linux/summary 后复用结果。无合格记录或 API 查询失败时执行完整 CI。
-2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
+2. 查找同 SHA 的可信 CI/发布客户端产物；无合格产物就构建。下载后必须核对平台、版本、完整提交、构建配方及二进制 SHA256/大小，再执行或打包。必需检查成功后才使用 Bake 联合构建稳定 toolchain 和 workbench；外部附件按 `workers/toolchain.lock.json` 校验，包括缓存命中。发布候选标签 `build-<完整commit>`，附 SBOM 和 provenance。
 3. 新 runner 按 digest 拉取候选，运行网络隔离、固定目标转发、LaunchSpec、归档测试，以及 host CLI 的 doctor、题目导入/构建/提取/启动/连接、GDB 附加、更新回滚。
 4. Windows/Linux 均使用已校验桌面客户端直接打包 NSIS EXE/AppImage，不重复编译；Linux 验收 CLI 单独复用；签名并执行原生安装/启动检查。汇总两个平台文件，生成签名 `latest.json`、`release.json`、SHA256SUMS 与验收报告，再用 Rust 验证全部安装文件签名与哈希。
 5. 在 `windows-2025` 上构建离线 Windows Worker 介质模板（不接触控制器密钥），用临时密钥执行检查，打包确定性 zip 并加入发布附件；签名桌面目录会记录该附件供桌面下载。
@@ -182,7 +185,7 @@ Windows runner 编译嵌入前端的正式客户端，校验安装包与篡改�
 
 ## 已验收产物的发布恢复
 
-如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Release (`operation=recover`)**，填写原始 tag 发布 `release_run_id`。执行此入口表示批准发布该已有版本；恢复 job 独立取得 Contents 写权限，不运行构建、不需要签名私钥。
+如果 tag 发布已完成构建、原生安装器检查、容器验收及 package，但 publish 被跳过或发布操作临时失败，可以在 master 手动执行 **Release (`operation=recover`)**，填写原始 tag 发布 `release_run_id`。执行此入口表示批准发布该已有版本，恢复 job 还必须获得与正式发布相同的 `release-publication` Environment 审批；原 publish 被跳过或拒绝不会绕过此审批。恢复 job 独立取得 Contents 写权限，不运行构建、不需要签名私钥。
 入口只接受同仓库 tag push 的已结束运行，逐项要求验收 job 成功，固定该尝试上传的 online-release artifact ID，并核对 tag 未移动、提交仍属于 master。下载原始安装文件、签名和验收清单后，使用原提交的发布逻辑校验并发布原始字节和镜像 digest。
 此入口不编译、不重新签名、不移动或新建 tag，不需要更新签名私钥。已发布且内容不同的附件或固定镜像仍拒绝覆盖。产物过期或缺失时不能使用此入口。
 

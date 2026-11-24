@@ -1027,8 +1027,8 @@ pub trait MediaFinalizer: Send + Sync {
     async fn finalize(&self, request: &FinalizeMediaRequest) -> Result<FinalizedMedia>;
 }
 
-/// Controller-side environment registration and doctor entry used only by
-/// `lab provision --register/--verify-environment`.
+/// Controller-side environment registration and doctor entry used by
+/// `lab provision --register/--verify-environment` and `lab register`.
 #[async_trait]
 pub trait ProvisionEnvironment: Send + Sync {
     /// Persist the verified connection as a managed-SSH environment.

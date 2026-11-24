@@ -1,8 +1,8 @@
 """Guard the manual workbench-image workflow's trigger, repository and tag rules.
 
 The workflow publishes the separate `<namespace>/wukong-workbench` repository
-only: it must never push the official release image, move a `latest` tag or
-require administrator-only gating.
+only: it must never push the official release image or move a `latest` tag.
+Publication requires reviewed, master-contained source and immutable-tag checks.
 """
 
 from pathlib import Path
@@ -63,7 +63,8 @@ class WorkbenchImageWorkflowTests(unittest.TestCase):
     def test_publishes_an_immutable_version_tag_without_latest(self):
         self.assertIn("local-$VERSION", self.workflow)
         self.assertNotRegex(self.workflow, r":latest\b")
-        self.assertIn("imagetools inspect", self.workflow)
+        self.assertIn("python -m scripts.release.publish_release --inspect-image", self.workflow)
+        self.assertIn("remote_digest", self.workflow)
         self.assertIn("version tags are immutable", self.workflow)
 
     def test_reuses_the_release_image_docker_hub_credentials(self):
@@ -75,12 +76,15 @@ class WorkbenchImageWorkflowTests(unittest.TestCase):
             self.assertIn(credential, self.workflow)
             self.assertIn(credential, self.release)
 
-    def test_has_no_administrator_only_gating(self):
-        self.assertNotIn("environment:", self.workflow)
+    def test_requires_publication_approval_without_actor_allowlist(self):
+        self.assertIn("environment: workbench-publication", self.workflow)
         for marker in ("github.actor ==", "triggering_actor ==", "author_association", "ADMIN"):
             self.assertNotIn(marker, self.workflow)
         self.assertNotIn("permissions: write", self.workflow)
         self.assertIn("permissions:\n  contents: read", self.workflow)
+
+    def test_requires_master_contained_source(self):
+        self.assertIn('git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"', self.workflow)
 
     def test_builds_and_verifies_the_workbench_target_before_publishing(self):
         self.assertIn("python -m scripts.release.cli check", self.workflow)
@@ -90,6 +94,7 @@ class WorkbenchImageWorkflowTests(unittest.TestCase):
         self.assertIn("linux/amd64", self.workflow)
         self.assertIn("docker image inspect", self.workflow)
         self.assertIn("docker run --rm", self.workflow)
+        self.assertIn("tests/acceptance/check_workbench.py", self.workflow)
 
     def test_run_summary_records_digest_size_and_source(self):
         summary = self.workflow[self.workflow.index("## Workbench image published") :]

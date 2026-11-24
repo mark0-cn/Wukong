@@ -355,10 +355,11 @@ fn upgrade(root: PathBuf, plan: Plan) -> Result<ConnectionReceipt> {
         private.replace(&metadata.join(name), &bytes)?;
     }
     let worker = next.account(Role::Worker)?;
-    crate::artifacts::io::replace_json(
+    crate::artifacts::io::replace_json_with_parent(
         &root.join("binding.json"),
         &json!({"schema":1,"protocol":4,"installation_id":next.installation_id,"package_sha256":plan.manifest.sha256()}),
         &private.clone().with_account(&worker.sid, false)?,
+        &code,
     )?;
     crate::artifacts::io::replace_json(&deployment_path, &next, &private)?;
     next.verify(&root)
