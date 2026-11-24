@@ -597,6 +597,8 @@ export interface Messages {
   'tool-tool-search': undefined;
   'tool-tool-select': undefined;
   'tool-tools-load': undefined;
+  'tool-trace-compare': undefined;
+  'tool-trace-run': undefined;
   'tool-verification-record': undefined;
   'tool-view-agent-graph': undefined;
   'tool-wait': undefined;
