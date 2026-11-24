@@ -45,7 +45,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `findings_list` | 全部 | 否 | controller | 按 agent、stage 或 severity 分页列出发现摘要；通过 after 继续 next_cursor，完整详情使用 finding_get。 |
 | `finish_scan` | root | 是 | controller | 仅 root：子任务和覆盖项处理完毕后结束分析。 |
 | `follow_up_agent` | 全部 | 是 | controller | 显式追加工作，以新 generation 重开已完成任务并保留历史；用 recipient_generation 拒绝过时代次的派单。 |
-| `function_decompile` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：使用绑定目标的 module_relative AddressRef（推荐）或兼容的字节偏移反编译。复制 binary_inspect 返回的地址；链接时 VA 必须减去 image_base。文件偏移、运行时地址和页号不是模块偏移。 |
+| `function_decompile` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：使用绑定目标的 module_relative AddressRef 反编译。复制 binary_inspect 返回的地址；链接时 VA 必须减去 image_base。文件偏移、运行时地址和页号不是模块偏移。 |
 | `function_instructions` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：分页返回函数指令及控制流边，包括调用。地址为绑定目标 SHA256 的模块相对地址；可通过 target_ref={kind:evidence,evidence_id:...} 选择本次运行的基线二进制。 |
 | `functions_search` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：分页搜索已分析函数。 |
 | `fuzz_start` | analyst / verifier | 是 | fuzz.start | 暂存目标和非空种子后启动 AFL++ QEMU fuzz。 |
@@ -61,7 +61,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `lab_list` | analyst / verifier | 否 | controller | 列出已配置的 Windows 实验 VM 别名及分配的环境，不连接或修改状态。 |
 | `lab_operation_cancel` | analyst / verifier | 是 | controller | 请求中断自己拥有的实验宿主操作。取消后客体影响可能仍未知；再次修改前须检查并调和原操作。 |
 | `lab_operation_status` | analyst / verifier | 否 | controller | 按 operation_id 读取持久化实验宿主操作的结果和证据。控制器归属丢失时保留结果未知，不重放操作。 |
-| `lab_prepare` | analyst / verifier | 是 | controller | 启动指定 Windows Lab 的准备并返回 operation_id。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。需要 windows_lab 任务授权；不支持的执行要求在运行准入时拒绝。 |
+| `lab_prepare` | analyst / verifier | 是 | controller | 启动指定 Windows Lab 的准备并返回 operation_id。每次都会恢复固定基线 wukong_base_vm；配置的签名 worker_media 可先升级、验证并重新发布该基线，再重启并创建实验快照。通过 lab_operation_status 获取所属 lab_ref 和租约。控制器从评估证据推导归属和包哈希，spec 为类型化参数。对工具目录允许的角色默认开启；不支持的执行要求在运行准入时拒绝。 |
 | `lab_restore` | analyst / verifier | 是 | controller | 使用所属 lab_ref 启动带隔离保护的基线恢复并返回 operation_id。要求 worker 资源空闲且证据同步完成。未知影响只有在确认恢复后才标记 lost，快照清理单独报告。通过 lab_operation_status 查询。 |
 | `lab_run` | analyst / verifier | 是 | job.start + file.put + job.status + job.cancel | 用所属 lab_ref 将已验证的 exe/user harness 作为普通持久化评估作业启动，返回 run.job_id。通过该句柄调用 job_status、job_cancel 和 job_artifacts。支持 stdin 证据或空 argv，目标哈希必须匹配。保留共享评估租约和完成条件。 |
 | `lab_status` | analyst / verifier | 否 | controller | 读取指定 Windows 实验 VM 的持久状态及有时限的宿主观测。必须提供 vm；发现配置请使用 lab_list。不执行调和或状态修改，长操作期间仍可查询。 |
@@ -84,9 +84,9 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `threat_model_save` | 全部 | 是 | controller | 创建稳定文档 ID 的共享威胁模型。 |
 | `todo_save` | 全部 | 是 | controller | 创建共享待办，默认 pending。 |
 | `todo_update` | 全部 | 是 | controller | 更新共享待办正文或状态。 |
-| `tool_catalog` | 全部 | 否 | controller | 分页查询工具分组、当前选择、任务权限及最近一次预检的后端可用性。通过 after 继续 next_cursor。选择工具不会改变角色或任务授权。 |
-| `tool_select` | 全部 | 是 | controller | 替换后续模型请求的可选工具分组。核心及资源生命周期工具始终保留。原始调试器和 Windows Lab 需要明确的任务授权；external 分组选择已配置的 MCP 工具。 |
+| `tool_catalog` | 全部 | 否 | controller | 分页查询工具分组、当前选择及最近一次预检的后端可用性。通过 after 继续 next_cursor。选择工具不会改变角色。 |
+| `tool_select` | 全部 | 是 | controller | 替换后续模型请求的可选工具分组。核心及资源生命周期工具始终保留；external 分组选择已配置的 MCP 工具。 |
 | `verification_record` | verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。 |
 | `view_agent_graph` | 全部 | 否 | controller | 查询紧凑分页的代理状态及完整 ID（默认每页 8 条，使用 next_offset 翻页）。指定 agent_id 获取单个代理完整任务、契约和结果。同一 run 内接受至少 8 字符的唯一前缀；后续协调使用返回的完整 ID。 |
 | `wait_for_agents` | 全部 | 是 | controller | 按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。 |
-| `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询绑定目标的 module_relative AddressRef 或兼容字节偏移的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。 |
+| `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询绑定目标的 module_relative AddressRef 的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。 |

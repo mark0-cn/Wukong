@@ -1,7 +1,8 @@
 //! Apply the recorded plan, verify guest readback, and finish optional registration.
 use super::super::provision::{
     BOOT_TASK_NAME, GuestFile, GuestNetwork, GuestObservationRequest, OfflineDisk,
-    ReceiptExpectation, provisioning_spec, sha256, sha256_file, verify_guest_receipt,
+    ReceiptExpectation, provisioning_spec, sha256, sha256_file, staged_base_snapshot,
+    verify_guest_receipt,
 };
 use super::super::{
     LabPhase, LabProvision, LabState, MediaIdentity, OperationKind, PendingOperation, RunStatus,
@@ -10,7 +11,7 @@ use super::super::{
 use super::planning::injected_name;
 use super::{
     EnvironmentFinish, EnvironmentFinished, PlannedProvision, ProvisionArtifactPaths,
-    ProvisionDiskPlan, ProvisionEvidence, ProvisionIntent,
+    ProvisionEvidence, ProvisionIntent,
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
@@ -20,11 +21,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Copy)]
+enum BaseTransition {
+    Verified,
+    Retired,
+    Published,
+}
+
 impl WindowsLab {
     /// Persist the provisioning intent and publish its receipt before the first
-    /// VM or guest mutation. `guest_disk` and `vmx_before` are absent only when
-    /// the intent precedes the forced baseline deletion; the boot task is a fixed
-    /// constant and is not part of the persisted artifacts.
+    /// VM or guest mutation. The fixed boot task is a constant and is not part of
+    /// the persisted artifacts.
     pub(super) fn persist_provision_intent(
         &self,
         state: &mut LabState,
@@ -101,76 +108,21 @@ impl WindowsLab {
         state.pending = Some(pending.clone());
         state.active = None;
         state.last_error = None;
+        if replaces_baseline {
+            if let Some(previous) = state.last_provision.as_ref().filter(|record| {
+                record.status == RunStatus::Completed
+                    && record.settled
+                    && record.baseline_snapshot.as_deref() == Some(self.baseline.as_str())
+            }) {
+                state.rollback_provision = Some(previous.clone());
+            }
+        } else {
+            state.rollback_provision = None;
+        }
         state.last_provision = Some(record.clone());
         self.store.save(state)?;
         let _ = self.write_provision_receipt(&record);
         Ok((pending, record))
-    }
-
-    /// Delete exactly the configured baseline snapshot on a powered-off VM and
-    /// validate the committed boot disk. The caller has already backed up the
-    /// VMX and persisted the intent; every failure here stays recoverable and
-    /// names the VMX backup.
-    pub(super) async fn replace_baseline_snapshot(
-        &self,
-        intent: &ProvisionIntent,
-        offline: &dyn OfflineDisk,
-    ) -> Result<(Vec<u8>, ProvisionDiskPlan)> {
-        let backup = intent.paths.vmx_backup.display();
-        self.step(self.host.delete_snapshot(&self.baseline))
-            .await
-            .map_err(step_error)
-            .with_context(|| {
-                format!(
-                    "delete the configured baseline snapshot '{}'; the VMX backup is {backup}",
-                    self.baseline
-                )
-            })?;
-        let vmx_bytes = self.read_vmx_bytes().with_context(|| {
-            format!(
-                "re-read the VMX after deleting the configured baseline snapshot '{}'; the VMX backup is {backup}",
-                self.baseline
-            )
-        })?;
-        // Replacing the backup with the committed VMX keeps reconciliation able
-        // to restore a bootable VMX even though the snapshot delta is gone.
-        write_synced(&intent.paths.vmx_backup, &vmx_bytes).with_context(|| {
-            format!(
-                "refresh the VMX backup after deleting the configured baseline snapshot '{}'",
-                self.baseline
-            )
-        })?;
-        self.plan_guest_disk(&vmx_bytes, intent, offline)
-            .await
-            .with_context(|| {
-                format!(
-                    "the configured baseline snapshot '{}' was deleted and the VMX backup is {backup}; inspect the powered-off VM",
-                    self.baseline
-                )
-            })
-            .map(|disk| (vmx_bytes, disk))
-    }
-
-    /// Record the boot disk and VMX hash that only become known after the forced
-    /// baseline deletion. A failure here keeps the persisted intent and is
-    /// resolved through recovery.
-    pub(super) fn record_resolved_boot_disk(
-        &self,
-        state: &mut LabState,
-        record: &mut LabProvision,
-        plan: &PlannedProvision,
-    ) -> Result<()> {
-        let spec = state
-            .pending
-            .as_mut()
-            .and_then(|pending| pending.provision.as_mut())
-            .context("provisioning intent was lost after the baseline deletion")?;
-        spec.guest_disk = Some(plan.guest_disk.path.clone());
-        record.vmx_sha256_before = Some(sha256(&plan.vmx_bytes));
-        state.last_provision = Some(record.clone());
-        self.store.save(state)?;
-        let _ = self.write_provision_receipt(record);
-        Ok(())
     }
 
     pub(super) async fn execute_provision(
@@ -250,9 +202,17 @@ impl WindowsLab {
         )
         .context("parse the guest provisioning receipt for the record")?;
         fs::write(plan.paths.root.join("guest-receipt.json"), &receipt_bytes)?;
-        self.step(self.host.snapshot(&plan.baseline))
+        let snapshot = if plan.replaces_baseline {
+            staged_base_snapshot(&plan.provision_id)?
+        } else {
+            plan.baseline.clone()
+        };
+        self.step(self.host.snapshot(&snapshot))
             .await
             .map_err(step_error)?;
+        if plan.replaces_baseline {
+            self.publish_verified_base(plan, &snapshot).await?;
+        }
         Ok(ProvisionEvidence {
             iso_sha256,
             iso_size,
@@ -269,6 +229,109 @@ impl WindowsLab {
             guest_receipt,
             connection,
         })
+    }
+
+    /// Boot the staged replacement before retiring the last known-good base.
+    /// Reverting the powered-off staging snapshot after doctor removes runtime
+    /// changes. VMware has no snapshot-rename operation: delete the old fixed
+    /// base only after verification, record that irreversible transition, then
+    /// capture the verified staged state under the fixed name.
+    async fn publish_verified_base(&self, plan: &PlannedProvision, staged: &str) -> Result<()> {
+        let worker = self
+            .worker
+            .as_ref()
+            .context("base replacement requires a configured lab worker for post-install doctor")?;
+        if !self.host_running().await? {
+            self.step(self.host.start()).await.map_err(step_error)?;
+        }
+        let observation = self
+            .worker_upgrade_readiness(plan.timeout)
+            .await
+            .context("upgraded worker did not become ready before base replacement")?;
+        let identity = observation
+            .get("observation")
+            .and_then(|observation| observation.get("identity"))
+            .context("upgraded worker doctor has no identity")?;
+        let installation = identity
+            .get("installation_id")
+            .and_then(Value::as_str)
+            .context("upgraded worker identity has no installation ID")?;
+        let package = identity
+            .get("package_sha256")
+            .and_then(Value::as_str)
+            .context("upgraded worker identity has no package hash")?;
+        ensure!(
+            installation == plan.media.installation_id && package == plan.media.manifest_sha256,
+            "upgraded worker doctor identity differs from the signed replacement media"
+        );
+        let maintenance = worker.maintenance().await?;
+        self.mark_base_verified(&plan.provision_id)?;
+        self.step(self.host.revert(staged))
+            .await
+            .map_err(step_error)?;
+        if self.host_running().await? {
+            self.step(self.host.stop()).await.map_err(step_error)?;
+        }
+        self.step(self.host.delete_snapshot(&plan.baseline))
+            .await
+            .map_err(step_error)?;
+        self.mark_base_retired(&plan.provision_id)?;
+        self.step(self.host.snapshot(&plan.baseline))
+            .await
+            .map_err(step_error)?;
+        self.mark_base_published(&plan.provision_id)?;
+        self.step(self.host.delete_snapshot(staged))
+            .await
+            .map_err(step_error)?;
+        maintenance.finish().await?;
+        Ok(())
+    }
+
+    /// Make readiness durable before the first irreversible base transition. If
+    /// any later host effect is interrupted, reconcile can distinguish a verified
+    /// replacement from a staging snapshot that must not become the base.
+    fn mark_base_verified(&self, provision_id: &str) -> Result<()> {
+        self.mark_base_transition(provision_id, BaseTransition::Verified)
+    }
+
+    pub(super) fn mark_base_retired(&self, provision_id: &str) -> Result<()> {
+        self.mark_base_transition(provision_id, BaseTransition::Retired)
+    }
+
+    pub(super) fn mark_base_published(&self, provision_id: &str) -> Result<()> {
+        self.mark_base_transition(provision_id, BaseTransition::Published)
+    }
+
+    fn mark_base_transition(&self, provision_id: &str, transition: BaseTransition) -> Result<()> {
+        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
+        let pending = state
+            .pending
+            .as_mut()
+            .context("replacement provisioning intent is missing")?;
+        ensure!(
+            pending.kind == OperationKind::Provision && pending.operation_id == provision_id,
+            "replacement provisioning operation changed before verification"
+        );
+        let spec = pending
+            .provision
+            .as_mut()
+            .context("replacement provisioning spec is missing")?;
+        ensure!(spec.replaces_baseline);
+        match transition {
+            BaseTransition::Verified => {
+                ensure!(!spec.base_verified && !spec.base_retired && !spec.base_published);
+                spec.base_verified = true;
+            }
+            BaseTransition::Retired => {
+                ensure!(spec.base_verified && !spec.base_retired && !spec.base_published);
+                spec.base_retired = true;
+            }
+            BaseTransition::Published => {
+                ensure!(spec.base_verified && spec.base_retired && !spec.base_published);
+                spec.base_published = true;
+            }
+        }
+        self.store.save(&state)
     }
 
     async fn wait_power_off(&self, timeout: Duration) -> Result<()> {
@@ -303,7 +366,7 @@ impl WindowsLab {
         finish: &EnvironmentFinish,
         media: &MediaIdentity,
         baseline: &str,
-        guest_network: Arc<dyn GuestNetwork>,
+        guest_network: Option<Arc<dyn GuestNetwork>>,
     ) -> EnvironmentFinished {
         let mut finished = EnvironmentFinished {
             registration: None,
@@ -324,7 +387,18 @@ impl WindowsLab {
                 let identity = finish.identity_file.as_deref().context(
                     "registered environment requires the controller-managed SSH identity key",
                 )?;
-                let guest_ip = self.wait_guest_ip(guest_network.as_ref(), deadline).await?;
+                let guest_ip = match finish.guest_ip {
+                    Some(address) => address.to_string(),
+                    None => {
+                        self.wait_guest_ip(
+                            guest_network.as_deref().context(
+                                "guest address discovery requires the vmrun adapter; configure [windows_lab.vms.<alias>.offline] or pass an explicit guest IPv4 address",
+                            )?,
+                            deadline,
+                        )
+                        .await?
+                    },
+                };
                 let registered = finish
                     .registrar
                     .register(&finish.connection, media, &guest_ip, identity)

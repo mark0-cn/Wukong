@@ -623,12 +623,30 @@ fn guest_disk_is_resolved_from_the_registered_vmx() {
     assert!(resolve_guest_disk("sata0:0.present = \"TRUE\"\n", &vmx).is_err());
     assert!(resolve_guest_disk("nvme0:0.fileName = \"../escape.vmdk\"\n", &vmx).is_err());
     fs::write(directory.path().join("base-000001.vmdk"), b"delta").unwrap();
-    assert!(
-        resolve_guest_disk("nvme0:0.fileName = \"base-000001.vmdk\"\n", &vmx)
-            .unwrap_err()
-            .to_string()
-            .contains("delta")
+    let restored = resolve_guest_disk("nvme0:0.fileName = \"base-000001.vmdk\"\n", &vmx).unwrap();
+    assert_eq!(
+        restored.path,
+        fs::canonicalize(directory.path().join("base-000001.vmdk")).unwrap()
     );
+}
+
+#[test]
+fn vmx_restoration_preserves_the_post_revert_active_delta() {
+    let directory = tempfile::tempdir().unwrap();
+    let vmx = directory.path().join("vm.vmx");
+    let active = directory.path().join("base-000002.vmdk");
+    fs::write(&active, b"delta").unwrap();
+    let current = b"displayName = \"reverted\"\r\nnvme0:0.fileName = \"base-000002.vmdk\"\r\n";
+    fs::write(&vmx, current).unwrap();
+    let original = b"displayName = \"original\"\r\nnvme0:0.fileName = \"base-000001.vmdk\"\r\nsata0:0.fileName = \"original.iso\"\r\n";
+    let restored = restore_vmx_preserving_active_disk(original, current, &vmx).unwrap();
+    assert_eq!(
+        restored,
+        b"displayName = \"original\"\r\nnvme0:0.fileName = \"base-000002.vmdk\"\r\nsata0:0.fileName = \"original.iso\"\r\n"
+    );
+
+    fs::remove_file(&active).unwrap();
+    assert!(restore_vmx_preserving_active_disk(original, current, &vmx).is_err());
 }
 
 #[test]
@@ -911,6 +929,31 @@ fn wrapper_removes_the_boot_task_and_launcher_before_shutdown() {
     assert!(wrapper.contains("boot_task_removed"));
     assert!(wrapper.contains("launcher_deleted"));
     assert!(wrapper.contains("Remove-BootTask"));
+    assert!(
+        wrapper.contains("powercfg.exe /hibernate off")
+            && wrapper.find("powercfg.exe /hibernate off").unwrap()
+                < wrapper.find("install-reviewed").unwrap(),
+        "offline lifecycle guests disable Fast Startup before worker installation"
+    );
+    assert!(
+        wrapper.contains("$installText = (& $setup install-reviewed")
+            && wrapper.contains("$plan.enrollment_sha256) 2>&1 | Out-String).Trim()")
+            && wrapper.contains("+ ': ' + $installText)"),
+        "failed native upgrades retain bounded stdout and stderr diagnostics"
+    );
+    assert!(
+        wrapper
+            .matches("$ErrorActionPreference = 'Continue'")
+            .count()
+            == 2
+            && wrapper
+                .matches("$ErrorActionPreference = $previousErrorActionPreference")
+                .count()
+                == 2
+            && wrapper.contains("$verifyExitCode = $LASTEXITCODE")
+            && wrapper.contains("$exitCode = $LASTEXITCODE"),
+        "native stderr cannot bypass exit-code capture under Windows PowerShell 5.1"
+    );
     // The retired mechanisms must not reappear in the guest wrapper.
     assert!(!wrapper.contains("scripts.ini"));
     assert!(!wrapper.contains("gpt.ini"));

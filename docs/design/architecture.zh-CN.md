@@ -227,7 +227,7 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 共享资料按需装配：每次新模型请求按作者、父任务、前驱、scope 和任务关键词选择最多 6 条笔记、待办或可选 threat model 的有界预览。选择属于启发式提示，不保证覆盖全部相关资料；提示词明确提供遗漏数量和检索入口。`context_search` 支持文本、kind、作者 scope、agent_id 和分页，`context_read` 按 Unicode 字符位置读取原始文档 JSON（含 amendments）。两者按工具输出字节限额自动缩小页面，并保留下一页位置。所有读取限于当前 run；原始证据继续通过 `evidence_read` 读取。会话压缩只保存同样的有界预览、账本计数和完整会话证据引用，不重新注入全部文档或任务树。计划和约束仍来自任务契约，筛选不会替代验收。
 
-`src/application/tools/catalog.rs` 统一定义工具 schema、角色边界和后端要求。每次模型请求前，环境预检将实际能力与任务授权及持久化的可选分组选择取交集；root 保持延迟连接。`tool_catalog` 报告可用性，`tool_select` 只改变工具展示，不授予权限。核心和资源生命周期工具始终可见；配置的 MCP 工具需选择 external 分组。Rig 只向模型暴露 `task`；消息与等待使用 `send_message_to_agent` 和 `wait_for_agents`。root 通过 `finish_scan`、子任务通过 `agent_finish` 完成，两者都只接受一个结构化 result。调用时再次校验角色、授权、目标身份、证据、资源归属和后端能力。只有 verifier 可以认证独立分析或影响。通过仅供开发使用的 `cargo run --example export_catalogs -- tool-catalog` 生成[工具目录](../reference/tool-catalog.zh-CN.md)，`--json` 导出 schema。
+`src/application/tools/catalog.rs` 统一定义工具 schema、角色边界和后端要求。每次模型请求前，环境预检将实际能力与持久化的可选分组选择取交集；root 保持延迟连接。`tool_catalog` 报告可用性，`tool_select` 只改变工具展示，不改变角色。核心和资源生命周期工具始终可见；配置的 MCP 工具需选择 external 分组。Rig 只向模型暴露 `task`；消息与等待使用 `send_message_to_agent` 和 `wait_for_agents`。root 通过 `finish_scan`、子任务通过 `agent_finish` 完成，两者都只接受一个结构化 result。调用时再次校验角色、目标身份、证据、资源归属和后端能力。只有 verifier 可以认证独立分析或影响。通过仅供开发使用的 `cargo run --example export_catalogs -- tool-catalog` 生成[工具目录](../reference/tool-catalog.zh-CN.md)，`--json` 导出 schema。
 
 内置方法的来源、相关工具和机制夹具由 `prompts/coverage.json` 关联到现有 `SkillManifest`，通过仅供开发使用的 `cargo run --example export_catalogs -- skill-catalog` 生成[覆盖清单](../reference/skill-coverage.zh-CN.md)。这些维护信息不改变角色权限、工具可用性或完成门槛。
 

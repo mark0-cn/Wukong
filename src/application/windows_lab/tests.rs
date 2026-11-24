@@ -24,7 +24,10 @@ struct FakeHost {
 impl FakeHost {
     fn new() -> Self {
         Self {
-            state: Mutex::new(FakeState::default()),
+            state: Mutex::new(FakeState {
+                snapshots: vec![BASELINE_SNAPSHOT.into()],
+                ..FakeState::default()
+            }),
         }
     }
     fn with_delay(delay: Duration) -> Self {
@@ -89,12 +92,23 @@ impl VmHost for FakeHost {
             .push(format!("revert {name}"));
         self.wait().await;
         ensure!(!self.state.lock().unwrap().fail_revert, "revert failed");
+        self.state.lock().unwrap().running = false;
         Ok(())
     }
     async fn start(&self) -> Result<()> {
         self.state.lock().unwrap().calls.push("start".into());
         self.wait().await;
         self.state.lock().unwrap().running = true;
+        Ok(())
+    }
+    async fn stop(&self) -> Result<()> {
+        self.state.lock().unwrap().calls.push("stop".into());
+        self.state.lock().unwrap().running = false;
+        Ok(())
+    }
+    async fn stop_clean(&self) -> Result<()> {
+        self.state.lock().unwrap().calls.push("stop_clean".into());
+        self.state.lock().unwrap().running = false;
         Ok(())
     }
     async fn delete_snapshot(&self, name: &str) -> Result<()> {
@@ -119,7 +133,7 @@ fn config(dir: &Path) -> WindowsLabVm {
         environment: None,
         admin: None,
         offline: None,
-        baseline_snapshot: "baseline".into(),
+        worker_media: None,
         snapshot_prefix: "lab".into(),
         operation_timeout_seconds: 30,
         start_after_restore: false,
@@ -169,11 +183,11 @@ fn lab(dir: &Path, host: Arc<FakeHost>) -> WindowsLab {
 }
 
 fn state(dir: &Path) -> LabState {
-    LabStore::new(dir).load("labvm", "baseline").unwrap()
+    LabStore::new(dir).load("labvm", BASELINE_SNAPSHOT).unwrap()
 }
 
 #[tokio::test]
-async fn prepare_creates_baseline_and_experiment_snapshot() {
+async fn prepare_restores_fixed_base_before_experiment_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let host = Arc::new(FakeHost::new());
     let lab = lab(dir.path(), host.clone());
@@ -183,15 +197,48 @@ async fn prepare_creates_baseline_and_experiment_snapshot() {
         .unwrap();
     assert_eq!(lease.generation, 1);
     let calls = host.calls();
-    assert_eq!(calls[0], "running");
-    assert_eq!(calls[1], "start");
-    assert_eq!(calls[2], "snapshots");
-    assert_eq!(calls[3], "snapshot baseline");
+    assert_eq!(calls[0], "snapshots");
+    assert_eq!(calls[1], format!("revert {BASELINE_SNAPSHOT}"));
+    assert_eq!(calls[2], "running");
+    assert_eq!(calls[3], "start");
     assert_eq!(calls[4], format!("snapshot {}", lease.snapshot));
     let state = state(dir.path());
     assert_eq!(state.phase, LabPhase::Ready);
     assert_eq!(state.generation, 1);
     assert_eq!(state.active.unwrap().lab_id, lease.lab_id);
+}
+
+#[tokio::test]
+async fn prepare_refuses_to_invent_a_missing_fixed_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    host.state.lock().unwrap().snapshots.clear();
+    let error = lab(dir.path(), host.clone())
+        .prepare("analyst", "missing base", spec())
+        .await
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("fixed base snapshot 'wukong_base_vm' is missing"));
+    assert_eq!(host.calls(), ["snapshots"]);
+    assert_eq!(state(dir.path()).phase, LabPhase::Failed);
+}
+
+#[tokio::test]
+async fn prepare_reverts_a_running_guest_before_requesting_readiness() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    host.set_running(true);
+    let lab = lab(dir.path(), host.clone()).with_worker(Arc::new(ReadinessWorker::new(0)));
+    lab.prepare("analyst", "recover guest", spec())
+        .await
+        .unwrap();
+    assert_eq!(
+        &host.calls()[..3],
+        [
+            "snapshots".to_string(),
+            format!("revert {BASELINE_SNAPSHOT}"),
+            "running".into(),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -232,7 +279,7 @@ async fn restore_fences_the_old_lease_and_returns_to_idle() {
     assert_eq!(state.phase, LabPhase::Idle);
     assert_eq!(state.generation, 2);
     assert!(state.active.is_none());
-    assert!(host.calls().contains(&"revert baseline".into()));
+    assert!(host.calls().contains(&"revert wukong_base_vm".into()));
     let error = lab
         .restore(&lease.lab_id, lease.generation)
         .await
@@ -244,7 +291,7 @@ async fn restore_fences_the_old_lease_and_returns_to_idle() {
 }
 
 #[tokio::test]
-async fn restore_starts_the_vm_only_when_needed() {
+async fn restore_reverts_before_starting_the_vm() {
     let dir = tempfile::tempdir().unwrap();
     let host = Arc::new(FakeHost::new());
     let mut config = config(dir.path());
@@ -266,7 +313,8 @@ async fn restore_starts_the_vm_only_when_needed() {
     host.set_running(true);
     let before = host.calls().len();
     lab.restore(&lease.lab_id, lease.generation).await.unwrap();
-    assert!(!host.calls()[before..].contains(&"start".into()));
+    assert!(host.calls()[before..].contains(&"start".into()));
+    assert!(host.calls()[before..].contains(&format!("revert {BASELINE_SNAPSHOT}")));
 }
 
 #[tokio::test]
@@ -563,9 +611,17 @@ async fn prepare_cold_starts_and_waits_for_worker_readiness() {
         .prepare("analyst", "cold start", spec())
         .await
         .unwrap();
-    assert_eq!(worker.attempts.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert_eq!(worker.attempts.load(std::sync::atomic::Ordering::SeqCst), 4);
     let calls = host.calls();
-    assert!(calls.windows(2).any(|call| call == ["start", "snapshots"]));
+    assert_eq!(
+        &calls[..4],
+        [
+            "snapshots".to_string(),
+            format!("revert {BASELINE_SNAPSHOT}"),
+            "running".into(),
+            "start".into(),
+        ]
+    );
     assert_eq!(state(dir.path()).phase, LabPhase::Ready);
     assert_eq!(lease.generation, 1);
 }
@@ -585,7 +641,12 @@ async fn prepare_does_not_publish_a_lease_when_worker_readiness_times_out() {
         .unwrap_err();
     assert!(format!("{error:#}").contains("worker did not become ready"));
     assert_eq!(state(dir.path()).phase, LabPhase::Failed);
-    assert!(!host.calls().iter().any(|call| call.starts_with("snapshot")));
+    assert!(
+        !host
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("snapshot wukong-lab-"))
+    );
 }
 
 #[tokio::test]
@@ -756,7 +817,7 @@ async fn prune_removes_only_unused_lab_snapshots() {
     assert_eq!(result["deleted"], serde_json::json!(["lab-orphan"]));
     assert_eq!(
         result["kept"],
-        serde_json::json!(["baseline", lease.snapshot.clone()])
+        serde_json::json!([BASELINE_SNAPSHOT, lease.snapshot.clone()])
     );
     assert!(
         !host
@@ -883,9 +944,10 @@ async fn assessment_connection_blocks_vm_mutations_but_not_status() {
         crate::adapters::environments::lab_guard::LockMode::Shared,
     )
     .unwrap();
+    let before_guard = host.calls();
     assert!(lab.restore(&lease.lab_id, lease.generation).await.is_err());
+    assert_eq!(host.calls(), before_guard);
     assert_eq!(lab.status().await.unwrap()["state"]["phase"], "ready");
-    assert!(!host.calls().iter().any(|call| call.starts_with("revert")));
 }
 
 #[tokio::test]
@@ -950,4 +1012,147 @@ async fn current_lab_state_rejects_incomplete_records_without_repairing_them() {
     fs::write(&path, &bytes).unwrap();
     assert!(lab.status().await.is_err());
     assert_eq!(fs::read(path).unwrap(), bytes);
+}
+
+fn provisioning_provenance(media: &MediaIdentity) -> LabState {
+    let mut state = LabState::fresh("labvm", BASELINE_SNAPSHOT);
+    state.last_provision = Some(LabProvision {
+        provision_id: "a".repeat(32),
+        operation_id: "a".repeat(32),
+        generation: 1,
+        status: RunStatus::Completed,
+        source: ProvisionSource::Media {
+            directory: media.media_root.clone(),
+        },
+        media: media.clone(),
+        iso_sha256: None,
+        iso_size: None,
+        vmx_sha256_before: None,
+        vmx_sha256_after: None,
+        hive_sha256_before: None,
+        hive_sha256_after: None,
+        injected: vec![],
+        boot_task_sha256: None,
+        launcher_sha256: None,
+        scripts_ini_sha256: None,
+        gpt_ini_sha256: None,
+        identity_file: None,
+        guest_receipt: None,
+        connection: None,
+        environment_verified: None,
+        verification: None,
+        baseline_snapshot: Some(BASELINE_SNAPSHOT.into()),
+        settled: true,
+        started_at: now(),
+        ended_at: Some(now()),
+        error: None,
+    });
+    state
+}
+
+#[tokio::test]
+async fn prune_removes_only_receipt_proven_base_transition_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = Arc::new(FakeHost::new());
+    let lab = lab(dir.path(), host.clone());
+    let fixture = provision::fixture::media();
+    let operation = "e".repeat(32);
+    let staged = provision::staged_base_snapshot(&operation).unwrap();
+    host.add_snapshot(&staged);
+    host.add_snapshot("wukong_base_vm-next-not-an-operation");
+    host.add_snapshot("user-snapshot");
+
+    let mut record = provisioning_provenance(&fixture.identity)
+        .last_provision
+        .unwrap();
+    record.provision_id = operation.clone();
+    record.operation_id = operation.clone();
+    let receipts = dir.path().join("windows-lab/provisions");
+    fs::create_dir_all(&receipts).unwrap();
+    fs::write(
+        receipts.join(format!("{operation}.json")),
+        serde_json::to_vec(&record).unwrap(),
+    )
+    .unwrap();
+
+    let result = lab.prune().await.unwrap();
+    assert_eq!(result["deleted"], serde_json::json!([staged]));
+    let remaining = &host.state.lock().unwrap().snapshots;
+    assert!(remaining.contains(&"wukong_base_vm-next-not-an-operation".into()));
+    assert!(remaining.contains(&"user-snapshot".into()));
+    assert!(remaining.contains(&BASELINE_SNAPSHOT.into()));
+}
+
+#[test]
+fn worker_upgrade_requires_same_identity_newer_signed_version_and_generation() {
+    let fixture = provision::fixture::media();
+    let current = fixture.identity.clone();
+    let state = provisioning_provenance(&current);
+    let observation = serde_json::json!({"observation": {"identity": {
+        "installation_id": current.installation_id,
+        "package_sha256": current.manifest_sha256,
+    }}});
+    assert!(
+        worker_upgrade(&state, &observation, current.clone())
+            .unwrap()
+            .is_none()
+    );
+    let mut unproven = LabState::fresh("labvm", BASELINE_SNAPSHOT);
+    unproven.last_provision = None;
+    assert!(worker_upgrade(&unproven, &observation, current.clone()).is_err());
+
+    let mut candidate = current.clone();
+    candidate.manifest_sha256 = "b".repeat(64);
+    candidate.controller_version = "1.0.1".into();
+    candidate.generation += 1;
+    assert_eq!(
+        worker_upgrade(&state, &observation, candidate.clone())
+            .unwrap()
+            .unwrap()
+            .controller_version,
+        "1.0.1"
+    );
+
+    let mut downgrade = candidate.clone();
+    downgrade.controller_version = current.controller_version.clone();
+    assert!(worker_upgrade(&state, &observation, downgrade).is_err());
+    let mut old_generation = candidate.clone();
+    old_generation.generation = current.generation;
+    assert!(worker_upgrade(&state, &observation, old_generation).is_err());
+    let mut foreign = candidate.clone();
+    foreign.installation_id = "c".repeat(32);
+    assert!(worker_upgrade(&state, &observation, foreign).is_err());
+    let mut changed_ssh = candidate.clone();
+    changed_ssh.ssh_port += 1;
+    assert!(worker_upgrade(&state, &observation, changed_ssh).is_err());
+
+    let mut failed_retry = state.clone();
+    failed_retry.rollback_provision = failed_retry.last_provision.clone();
+    failed_retry.last_provision.as_mut().unwrap().status = RunStatus::Failed;
+    failed_retry.last_provision.as_mut().unwrap().settled = false;
+    failed_retry
+        .last_provision
+        .as_mut()
+        .unwrap()
+        .baseline_snapshot = None;
+    assert!(
+        worker_upgrade(&failed_retry, &observation, candidate.clone())
+            .unwrap()
+            .is_some(),
+        "a failed replacement must retain the old base's settled provenance"
+    );
+    assert!(
+        worker_upgrade(&failed_retry, &observation, current.clone())
+            .unwrap()
+            .is_none()
+    );
+
+    let mut stale_state = state.clone();
+    stale_state
+        .last_provision
+        .as_mut()
+        .unwrap()
+        .media
+        .manifest_sha256 = "d".repeat(64);
+    assert!(worker_upgrade(&stale_state, &observation, candidate).is_err());
 }

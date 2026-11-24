@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Accept Windows Firewall's equivalent single-host subnet-mask readback when verifying an installed Worker's enrolled SSH peer during upgrades."
+zh_CN = "原生 Worker 升级校验已登记的 SSH 对端时，接受 Windows Firewall 返回的等价单主机子网掩码形式。"

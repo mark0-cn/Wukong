@@ -24,12 +24,12 @@ mod recovery;
 
 use crate::application::windows_lab::provision::ProvisionArtifactPaths;
 use anyhow::{Context, Result, ensure};
-use execution::{step_error, write_synced};
+use execution::step_error;
 use planning::planned_actions;
 use recovery::remove_provision_working_files;
 use serde::Serialize;
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 use wukong_worker_package::ConnectionReceipt;
 
 pub struct ProvisionOptions {
@@ -81,9 +81,8 @@ pub struct CleanGuestOutcome {
     pub service_key_removed: Option<String>,
 }
 
-/// Durable facts for one provisioning attempt that do not depend on the guest
-/// disk. They are persisted before the configured baseline is replaced, because
-/// the committed boot disk can only be resolved after that deletion.
+/// Durable facts for one provisioning attempt, including the resolved boot disk.
+/// Replacement keeps the old base until the staged worker passes readiness.
 struct ProvisionIntent {
     provision_id: String,
     paths: ProvisionArtifactPaths,
@@ -114,6 +113,7 @@ struct PlannedProvision {
     guest_files: Vec<GuestFile>,
     boot_task: BootTaskInjection,
     baseline: String,
+    replaces_baseline: bool,
     iso_builder: Arc<dyn IsoBuilder>,
     timeout: Duration,
 }
@@ -129,6 +129,7 @@ impl PlannedProvision {
         disk: ProvisionDiskPlan,
         boot_task: BootTaskInjection,
         baseline: String,
+        replaces_baseline: bool,
         iso_builder: Arc<dyn IsoBuilder>,
         timeout: Duration,
     ) -> Self {
@@ -145,6 +146,7 @@ impl PlannedProvision {
             guest_files: intent.guest_files,
             boot_task,
             baseline,
+            replaces_baseline,
             iso_builder,
             timeout,
         }
@@ -168,6 +170,7 @@ struct EnvironmentFinish {
     environment_id: String,
     connection: ConnectionReceipt,
     identity_file: Option<PathBuf>,
+    guest_ip: Option<Ipv4Addr>,
     register: bool,
     verify: bool,
     timeout: Duration,
@@ -283,38 +286,11 @@ impl WindowsLab {
             source,
             identity_file,
         )?;
-        let (plan, mut record) = if replaces_baseline {
-            // The powered-off VM still boots the configured baseline snapshot's
-            // delta, so the committed boot disk cannot be resolved yet. Back up
-            // the VMX and persist the intent before deleting exactly the
-            // configured baseline, then resolve and validate the committed disk.
-            let vmx_before = self.read_vmx_bytes()?;
-            write_synced(&intent.paths.vmx_backup, &vmx_before)?;
-            let (_, mut record) =
-                self.persist_provision_intent(&mut state, &intent, None, true, None)?;
-            match self
-                .replace_baseline_snapshot(&intent, offline.as_ref())
-                .await
-            {
-                Ok((vmx_bytes, disk)) => {
-                    let boot_task = boot_task_injection()?;
-                    let plan = PlannedProvision::assemble(
-                        intent,
-                        vmx_bytes,
-                        disk,
-                        boot_task,
-                        self.baseline.clone(),
-                        effective_builder,
-                        timeout,
-                    );
-                    match self.record_resolved_boot_disk(&mut state, &mut record, &plan) {
-                        Ok(()) => (plan, record),
-                        Err(error) => return self.abandon_provision(state, record, error),
-                    }
-                }
-                Err(error) => return self.abandon_provision(state, record, error),
-            }
-        } else {
+        let (plan, mut record) = {
+            // Replacement writes the restored base's current delta while the
+            // known-good base remains available. The staged replacement is
+            // published under the fixed name only after installation and a fresh
+            // worker readiness check have succeeded.
             let vmx_bytes = self.read_vmx_bytes()?;
             let disk = self
                 .plan_guest_disk(&vmx_bytes, &intent, offline.as_ref())
@@ -323,7 +299,7 @@ impl WindowsLab {
                 &mut state,
                 &intent,
                 Some(&disk.guest_disk.path),
-                false,
+                replaces_baseline,
                 Some(&vmx_bytes),
             )?;
             let boot_task = boot_task_injection()?;
@@ -333,6 +309,7 @@ impl WindowsLab {
                 disk,
                 boot_task,
                 self.baseline.clone(),
+                replaces_baseline,
                 effective_builder,
                 timeout,
             );
@@ -343,14 +320,14 @@ impl WindowsLab {
             actions.insert(
                 0,
                 format!(
-                    "replace the configured baseline snapshot '{}' before validating the guest disk",
+                    "stage and verify replacement '{}', then publish it as the fixed base snapshot",
                     plan.baseline
                 ),
             );
         }
         let evidence = match self.execute_provision(&plan, offline).await {
             Ok(evidence) => evidence,
-            Err(error) => return self.abandon_provision(state, record, error),
+            Err(error) => return self.abandon_provision(record, error),
         };
         record.status = RunStatus::Completed;
         record.iso_sha256 = Some(evidence.iso_sha256);
@@ -394,13 +371,11 @@ impl WindowsLab {
                 environment_id: plan.media.environment_id.clone(),
                 connection: evidence.connection,
                 identity_file: plan.identity_file.clone(),
+                guest_ip: None,
                 register: options.register,
                 verify: options.verify_environment,
                 timeout: Duration::from_secs(options.timeout_seconds),
             };
-            let guest_network = guest_network.context(
-                "guest address discovery requires the vmrun adapter; configure [windows_lab.vms.<alias>.offline]",
-            )?;
             let finished = self
                 .finish_environment(&finish, &plan.media, &plan.baseline, guest_network)
                 .await;
@@ -448,6 +423,127 @@ impl WindowsLab {
             environment_block,
             registration,
             verification,
+        })
+    }
+
+    /// Retry registration and doctor from a settled installation receipt without
+    /// repeating the native installer or replacing its fixed base. An explicit
+    /// address supports guests whose VMware Tools cannot report one; the pinned
+    /// host key and identity-matched doctor still prove the selected endpoint.
+    pub async fn register_environment(
+        &self,
+        guest_ip: Option<Ipv4Addr>,
+        timeout_seconds: u64,
+    ) -> Result<ProvisionOutcome> {
+        ensure!(
+            (60..=7200).contains(&timeout_seconds),
+            "registration timeout must be 60–7200 seconds"
+        );
+        let registrar = self
+            .environment_registrar
+            .clone()
+            .context("environment registration requires the controller environment registrar")?;
+        let _gate = self.gate.lock().await;
+        let _lock = self.store.lock(&self.vm_id)?;
+        let _environment_guard = crate::adapters::environments::lab_guard::acquire(
+            &crate::adapters::environments::lab_guard::path(&self.vmx)?,
+            crate::adapters::environments::lab_guard::LockMode::Exclusive,
+        )?;
+        let mut state = self.store.load(&self.vm_id, &self.baseline)?;
+        self.mark_restart_recovery(&mut state)?;
+        ensure!(
+            matches!(state.phase, LabPhase::Idle | LabPhase::Failed),
+            "lab VM {} is {:?}; restore or reconcile it before registration",
+            self.vm_id,
+            state.phase
+        );
+        ensure!(
+            state.pending.is_none() && state.active.is_none(),
+            "lab VM has an active or pending operation; reconcile or restore it before registration"
+        );
+        let mut record = state
+            .last_provision
+            .clone()
+            .context("lab VM has no provisioning receipt to register")?;
+        ensure!(
+            record.status == RunStatus::Completed
+                && record.settled
+                && record.baseline_snapshot.as_deref() == Some(self.baseline.as_str()),
+            "the last provisioning receipt did not settle the current fixed base"
+        );
+        let snapshots = self.step(self.host.snapshots()).await.map_err(step_error)?;
+        ensure!(
+            snapshots.iter().any(|name| name == &self.baseline),
+            "fixed base snapshot '{}' is missing",
+            self.baseline
+        );
+        let connection: ConnectionReceipt = serde_json::from_value(
+            record
+                .connection
+                .clone()
+                .context("the provisioning receipt has no worker connection")?,
+        )
+        .context("parse the provisioned worker connection")?;
+        super::provision::validate_connection(&connection, &record.media)?;
+        let finish = EnvironmentFinish {
+            registrar,
+            environment_id: record.media.environment_id.clone(),
+            connection,
+            identity_file: record.identity_file.clone(),
+            guest_ip,
+            register: true,
+            verify: true,
+            timeout: Duration::from_secs(timeout_seconds),
+        };
+        let finished = self
+            .finish_environment(
+                &finish,
+                &record.media,
+                &self.baseline,
+                self.guest_network.clone(),
+            )
+            .await;
+        let adoption = match &finished.registered {
+            Some(registered) => self.adopt_registered_configuration(&mut state, registered),
+            None => Ok(()),
+        };
+        let failure = match (finished.failure, adoption) {
+            (Some(error), _) | (None, Err(error)) => Some(error),
+            (None, Ok(())) => None,
+        };
+        record.ended_at = Some(now());
+        if let Some(error) = failure {
+            let _ = self.step(self.host.revert(&self.baseline)).await;
+            record.environment_verified = Some(false);
+            record.error = Some(format!("{error:#}"));
+            state.last_provision = Some(record.clone());
+            state.last_error = Some(format!("{error:#}"));
+            self.store.save(&state)?;
+            let _ = self.write_provision_receipt(&record);
+            return Err(error.context(
+                "environment registration/doctor failed; the installed fixed base was retained",
+            ));
+        }
+        record.verification = finished.verification.clone();
+        record.environment_verified = Some(true);
+        record.error = None;
+        state.phase = LabPhase::Idle;
+        state.last_error = None;
+        state.last_provision = Some(record.clone());
+        self.store.save(&state)?;
+        let receipt = self.write_provision_receipt(&record)?;
+        Ok(ProvisionOutcome {
+            dry_run: false,
+            planned_actions: vec![
+                "register the settled worker receipt at the selected guest IPv4 address".into(),
+                "run the managed-SSH environment doctor".into(),
+                format!("restore fixed base '{}'", self.baseline),
+            ],
+            provision: Some(record),
+            receipt: Some(receipt),
+            environment_block: None,
+            registration: finished.registration,
+            verification: finished.verification,
         })
     }
 }

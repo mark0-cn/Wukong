@@ -1,6 +1,7 @@
 //! Public offline-provisioning planning surface: configuration validation, VMX
 //! disk/CD planning and finalize-spec parsing. No VMware, WSL or VM is used.
 use std::path::PathBuf;
+use wukong::application::windows_lab::BASELINE_SNAPSHOT;
 use wukong::application::windows_lab::provision::{
     SnapshotPlan, attach_offline_iso, plan_snapshot, read_finalize_spec, resolve_guest_disk,
 };
@@ -74,15 +75,15 @@ fn provisioning_plans_a_dedicated_cd_device_from_the_vmx() {
 }
 
 #[test]
-fn snapshot_planning_replaces_only_the_configured_baseline() {
+fn snapshot_planning_replaces_only_the_fixed_base() {
     assert_eq!(
-        plan_snapshot(&[], "wukong-lab-baseline", false).unwrap(),
+        plan_snapshot(&[], BASELINE_SNAPSHOT, false).unwrap(),
         SnapshotPlan::Pristine
     );
-    let baseline = vec!["wukong-lab-baseline".to_string()];
-    assert!(plan_snapshot(&baseline, "wukong-lab-baseline", false).is_err());
+    let baseline = vec![BASELINE_SNAPSHOT.to_string()];
+    assert!(plan_snapshot(&baseline, BASELINE_SNAPSHOT, false).is_err());
     assert_eq!(
-        plan_snapshot(&baseline, "wukong-lab-baseline", true).unwrap(),
+        plan_snapshot(&baseline, BASELINE_SNAPSHOT, true).unwrap(),
         SnapshotPlan::ReplaceBaseline
     );
 }

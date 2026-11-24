@@ -118,7 +118,9 @@ cpus = 2
 # vmx = "D:/vm/win10/Windows 10 x64.vmx"
 # vmrun = "D:/VMware/VMware Workstation/vmrun.exe"
 # environment = "windows"
-# baseline_snapshot = "wukong-lab-baseline"
+# Optional finalized signed media checked for a newer worker after every restore.
+# worker_media = "D:/wukong/media/windows-worker"
+# The fixed base snapshot is always named wukong_base_vm and is not configurable.
 # snapshot_prefix = "wukong-lab"
 # operation_timeout_seconds = 300
 # start_after_restore = true

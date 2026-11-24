@@ -216,17 +216,21 @@ pub struct ProvisioningSpec {
     pub iso: PathBuf,
     /// Original VMX bytes written here before the CD device edit.
     pub vmx_backup: PathBuf,
-    /// Boot disk resolved before the offline writes. Absent only while
-    /// `--replace-baseline` has persisted the intent but not yet deleted the
-    /// configured baseline: the powered-off VM still points at the snapshot
-    /// delta, so the committed disk cannot be resolved before that deletion.
-    #[serde(default)]
+    /// Boot disk resolved before offline writes, including the restored base's
+    /// delta during replacement.
     pub guest_disk: Option<PathBuf>,
     pub service_name: String,
     pub guest_root: String,
     pub baseline_snapshot: String,
-    /// The configured baseline snapshot was deleted and will be recreated.
+    /// Replace the fixed base through an operation-owned staged snapshot.
     pub replaces_baseline: bool,
+    /// Set only after the staged worker passes a fresh post-install readiness check.
+    pub base_verified: bool,
+    /// Set immediately after the old fixed base is deleted. Once set, failed
+    /// reconciliation must not pretend that the old base can be restored.
+    pub base_retired: bool,
+    /// Set after the verified staged state is captured under the fixed name.
+    pub base_published: bool,
     /// Controller-managed SSH identity generated for this provisioning.
     pub identity_file: Option<PathBuf>,
     pub injected: Vec<InjectedFile>,
@@ -424,6 +428,11 @@ pub struct LabState {
     pub last_install: Option<LabInstall>,
     #[serde(default)]
     pub last_provision: Option<LabProvision>,
+    /// Last settled receipt for the retained old base while a replacement is
+    /// attempted. A failed attempt must not erase the identity needed to verify
+    /// and retry from that base.
+    #[serde(default)]
+    pub rollback_provision: Option<LabProvision>,
     pub last_error: Option<String>,
     pub updated_at: String,
 }
@@ -442,6 +451,7 @@ impl LabState {
             last_run: None,
             last_install: None,
             last_provision: None,
+            rollback_provision: None,
             last_error: None,
             updated_at: now(),
         }

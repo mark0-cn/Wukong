@@ -1,4 +1,4 @@
-//! Task grants authorize advanced tools; selection only controls model context size.
+//! Tool groups control model context size; role checks remain in the catalog.
 use super::*;
 
 pub(super) fn group(name: &str) -> &'static str {
@@ -13,15 +13,6 @@ pub(super) fn group(name: &str) -> &'static str {
         }
         _ => "core",
     }
-}
-
-pub(super) fn authorized(agent: &AgentMetadata, name: &str) -> bool {
-    let grant = match name {
-        "debug_command" => ToolGrant::RawDebugger,
-        "lab_prepare" | "lab_run" | "lab_install" | "lab_restore" => ToolGrant::WindowsLab,
-        _ => return true,
-    };
-    agent.contract.tool_grants.contains(&grant)
 }
 
 pub(super) fn selected(store: &Store, agent: &AgentMetadata, name: &str) -> bool {
@@ -65,20 +56,9 @@ impl coordination::CoordinationService {
         args: Value,
     ) -> Result<Value> {
         let groups = args["groups"].as_array().context("groups required")?;
-        for group in groups {
-            let required = match group.as_str() {
-                Some("raw_debugger") => Some(ToolGrant::RawDebugger),
-                Some("windows_lab") => Some(ToolGrant::WindowsLab),
-                _ => None,
-            };
-            ensure!(
-                required.is_none_or(|grant| agent.contract.tool_grants.contains(&grant)),
-                "group requires an explicit task grant from an authorized ancestor; selection cannot grant permissions"
-            );
-        }
         self.effect(agent,call,|tx| {
             tx.put("tool_selection", &agent.id, &agent.run_id, &args)?;
-            Ok(json!({"selected_groups":groups,"always_available":"core and owned-resource lifecycle tools","effective":"next model request; backend readiness and task grants still apply"}))
+            Ok(json!({"selected_groups":groups,"always_available":"core and owned-resource lifecycle tools","effective":"next model request; backend readiness still applies"}))
         })
     }
     pub(super) fn tool_catalog(&self, agent: &AgentMetadata, args: &Value) -> Result<Value> {
@@ -91,7 +71,6 @@ impl coordination::CoordinationService {
             .map(|spec| {
                 let name = spec.definition.name.as_str();
                 let reason = if !spec.allows(agent.role) { "role denied" }
-                    else if !authorized(agent,name) { "task grant required" }
                     else if !selected(&self.store,agent,name) { "group not selected" }
                     else if snapshot["available"].as_array().is_some_and(|names|names.iter().any(|n|n==name)) { "available at last preflight; rechecked on invocation" }
                     else { "backend unavailable or not yet observed" };

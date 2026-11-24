@@ -333,7 +333,7 @@ fn controller_sealing_checks_payloads_before_signing_and_never_overwrites() -> a
     }
     let expected = Compatibility {
         runtime_protocol: 3,
-        controller_version: "1.0.0",
+        controller_version: "1.1.0",
     };
     fs::write(root.join("worker.exe"), b"changed")?;
     assert!(seal_package(&root, &manifest, &signer, &expected).is_err());
@@ -343,6 +343,7 @@ fn controller_sealing_checks_payloads_before_signing_and_never_overwrites() -> a
     assert!(seal_package(&root, &manifest, &signer, &expected).is_err());
     fs::remove_file(root.join("unlisted-file"))?;
     let sealed = seal_package(&root, &manifest, &signer, &expected)?;
+    assert_eq!(sealed.manifest().version, "1.1.0");
     assert_eq!(
         sealed.signer_fingerprint(),
         signer.public_key().fingerprint()

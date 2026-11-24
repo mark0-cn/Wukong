@@ -392,6 +392,57 @@ impl AclPolicy {
         check(unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) })?;
         self.verify(path, false)
     }
+    /// Atomically replace an existing protected mutable record. Execution
+    /// authority admissions and other immutable records continue to use `publish`.
+    pub(crate) fn replace(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        self.replace_with_parent(path, bytes, self)
+    }
+    /// Replace a record whose parent has a different, independently enforced
+    /// policy (for example a worker-readable binding in the code root).
+    pub(crate) fn replace_with_parent(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        parent_policy: &AclPolicy,
+    ) -> Result<()> {
+        use std::io::Write;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        let parent = path.parent().context("native replacement has no parent")?;
+        parent_policy.verify(parent, true)?;
+        ensure!(
+            path.exists(),
+            "protected replacement destination is missing"
+        );
+        self.verify(path, false)?;
+        let temporary = parent.join(format!(
+            "{}.tmp",
+            hex::encode(crate::host::accounts::random_bytes::<16>()?)
+        ));
+        let result = (|| -> Result<()> {
+            let mut file = self.create_file(&temporary)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            let from = wide(temporary.as_os_str())?;
+            let to = wide(path.as_os_str())?;
+            // SAFETY: both live buffers are NUL-terminated and contain no embedded
+            // NUL; MoveFileExW only reads them and reports failure through `check`.
+            check(unsafe {
+                MoveFileExW(
+                    from.as_ptr(),
+                    to.as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            })?;
+            self.verify(path, false)
+        })();
+        if temporary.exists() {
+            let _ = fs::remove_file(temporary);
+        }
+        result
+    }
     pub fn private_vm() -> Self {
         Self {
             owner: "S-1-5-32-544".into(),
@@ -702,5 +753,30 @@ mod tests {
             }
         }
         Ok(())
+    }
+
+    #[test]
+    fn replacement_verifies_distinct_parent_and_file_policies() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let root = temporary.path().join("code");
+        let owner = current_user_sid()?;
+        let file_policy = AclPolicy {
+            owner: owner.clone(),
+            grants: [(owner, FILE_ALL_ACCESS)].into_iter().collect(),
+        };
+        let parent_policy = file_policy
+            .clone()
+            .with_account("S-1-5-21-111-222-333-444", true)?;
+        parent_policy.create_directory(&root)?;
+        let path = root.join("binding.json");
+        file_policy.create_file(&path)?.sync_all()?;
+        assert!(
+            file_policy.replace(&path, b"wrong parent").is_err(),
+            "the file policy must not be reused for a differently protected parent"
+        );
+        file_policy.replace_with_parent(&path, b"new binding", &parent_policy)?;
+        assert_eq!(fs::read(&path)?, b"new binding");
+        parent_policy.verify(&root, true)?;
+        file_policy.verify(&path, false)
     }
 }
