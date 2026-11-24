@@ -56,9 +56,11 @@ Workbench image 工作流复用 Release 的 Docker Hub 命名空间/用户名变
 安全更新另行分组。漏洞提醒和自动安全更新在仓库设置中启用，PR 仍需通过 CI 并人工合并。
 
 apt/gem、AFL 基础镜像和自定义工具锁文件不属于这份 Dependabot 配置的覆盖范围。
-审查镜像锁中有意保留的 angr/AFL 兼容约束，不能把每个 Python 更新建议都视为可以独立升级。
-Rust 编译器也不单独自动升级：`rust-toolchain.toml` 与 `Cargo.toml` 的 `rust-version`
-必须一起修改。Tauri 的 Rust crates 与 npm 包升级需要检查双方兼容性。
+普通 `compatible-image-python` 分组排除镜像锁中由测试明确固定的 angr/AFL 兼容组件；
+`image-python-security` 仍会提出这些组件的安全修复。相关更新必须按兼容集进行审查和验收，
+不能把每个 Python 更新建议都视为可以独立升级。Rust 编译器也不单独自动升级：
+`rust-toolchain.toml` 与 `Cargo.toml` 的 `rust-version` 必须一起修改。
+Tauri 的 Rust crates 与 npm 包升级需要检查双方兼容性。
 
 Dependabot 的 PR 使用普通 CI，不提供 Docker Hub 或模型密钥。
 配置文件不能约束其他 PR 合并方式，也不能替代私有仓库套餐所限制的 Rulesets。

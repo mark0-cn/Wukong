@@ -44,6 +44,19 @@ updates:
     groups:
       compatible-image-python:
         patterns: ['*']
+        exclude-patterns:
+          - 'angr'
+          - 'ailment'
+          - 'archinfo'
+          - 'bitstring'
+          - 'capstone'
+          - 'claripy'
+          - 'cle'
+          - 'protobuf'
+          - 'pycparser'
+          - 'pyvex'
+          - 'unicorn'
+          - 'z3-solver'
         update-types: [minor, patch]
       image-python-security:
         applies-to: security-updates
