@@ -18,6 +18,7 @@ Load the relevant method when its detailed workflow is needed:
 | Transformation/checksum/numeric routine | `algorithms` | pseudocode and discriminating test vectors |
 | Command/session lifecycle | `state_machine` | transition table and tested sequences |
 | Changes between versions | `binary_diff` | matched scopes and before/after evidence |
+| Function entry/return, buffers and call sequences | `dynamic_trace` | normalized trace observations and bounded offline differences |
 
 1. `functions_search` with a pattern matching the interesting logic
    (bounded pages; default page is 25 entries, paginate with `offset`).

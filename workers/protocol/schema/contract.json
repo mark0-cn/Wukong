@@ -167,6 +167,9 @@
       "seccomp.analyze": {
         "$ref": "#/$defs/MethodAvailability"
       },
+      "trace.start": {
+        "$ref": "#/$defs/MethodAvailability"
+      },
       "worker.shutdown": {
         "$ref": "#/$defs/MethodAvailability"
       }
@@ -1598,6 +1601,9 @@
                 "$ref": "#/$defs/MethodAvailability"
               },
               "seccomp.analyze": {
+                "$ref": "#/$defs/MethodAvailability"
+              },
+              "trace.start": {
                 "$ref": "#/$defs/MethodAvailability"
               },
               "worker.shutdown": {
@@ -5395,6 +5401,505 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": true,
         "title": "Map_of_AnyValue",
+        "type": "object"
+      }
+    },
+    "trace.start": {
+      "effect": "reconcile",
+      "params": {
+        "$defs": {
+          "ArgumentCapture": {
+            "additionalProperties": false,
+            "properties": {
+              "index": {
+                "format": "uint8",
+                "maximum": 5,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "name": {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              "value_type": {
+                "$ref": "#/$defs/IntegerType"
+              }
+            },
+            "required": [
+              "name",
+              "index",
+              "value_type"
+            ],
+            "type": "object"
+          },
+          "BufferCapture": {
+            "additionalProperties": false,
+            "properties": {
+              "address_argument": {
+                "format": "uint8",
+                "maximum": 5,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "length": {
+                "$ref": "#/$defs/BufferLength"
+              },
+              "name": {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "address_argument",
+              "length"
+            ],
+            "type": "object"
+          },
+          "BufferLength": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "bytes": {
+                    "format": "uint64",
+                    "maximum": 1048576,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "kind": {
+                    "const": "constant",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "bytes"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "index": {
+                    "format": "uint8",
+                    "maximum": 5,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "kind": {
+                    "const": "argument",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "index"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "FunctionPhase": {
+            "enum": [
+              "entry",
+              "return"
+            ],
+            "type": "string"
+          },
+          "IntegerType": {
+            "enum": [
+              "u8",
+              "u16",
+              "u32",
+              "u64",
+              "i8",
+              "i16",
+              "i32",
+              "i64",
+              "pointer"
+            ],
+            "type": "string"
+          },
+          "TraceAbi": {
+            "enum": [
+              "sysv_amd64"
+            ],
+            "type": "string"
+          },
+          "TraceCapture": {
+            "additionalProperties": false,
+            "properties": {
+              "arguments": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ArgumentCapture"
+                },
+                "type": "array"
+              },
+              "buffers": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/BufferCapture"
+                },
+                "type": "array"
+              },
+              "return_value": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/IntegerType"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "TraceLimits": {
+            "additionalProperties": false,
+            "properties": {
+              "max_buffer_bytes": {
+                "default": 4096,
+                "format": "uint64",
+                "maximum": 65536,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "max_event_bytes": {
+                "default": 65536,
+                "format": "uint64",
+                "maximum": 262144,
+                "minimum": 1024,
+                "type": "integer"
+              },
+              "max_events": {
+                "default": 1024,
+                "format": "uint64",
+                "maximum": 4096,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "max_events_bytes": {
+                "default": 8388608,
+                "format": "uint64",
+                "maximum": 16777216,
+                "minimum": 4096,
+                "type": "integer"
+              },
+              "max_point_hits": {
+                "default": 256,
+                "format": "uint64",
+                "maximum": 1024,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "stop_wait_ms": {
+                "default": 10000,
+                "format": "uint64",
+                "maximum": 30000,
+                "minimum": 100,
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "TraceLocation": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "symbol",
+                    "type": "string"
+                  },
+                  "module_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "symbol": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "module_sha256",
+                  "symbol"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "module_offset",
+                    "type": "string"
+                  },
+                  "module_sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "offset": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "module_sha256",
+                  "offset"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "TracePoint": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "capture": {
+                    "$ref": "#/$defs/TraceCapture"
+                  },
+                  "kind": {
+                    "const": "function",
+                    "type": "string"
+                  },
+                  "location": {
+                    "$ref": "#/$defs/TraceLocation"
+                  },
+                  "phases": {
+                    "items": {
+                      "$ref": "#/$defs/FunctionPhase"
+                    },
+                    "maxItems": 2,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "point_id": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "point_id",
+                  "location",
+                  "phases",
+                  "capture"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "capture": {
+                    "$ref": "#/$defs/TraceCapture"
+                  },
+                  "kind": {
+                    "const": "call_site",
+                    "type": "string"
+                  },
+                  "location": {
+                    "$ref": "#/$defs/TraceLocation"
+                  },
+                  "point_id": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "point_id",
+                  "location",
+                  "capture"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "TraceSpec": {
+            "additionalProperties": false,
+            "properties": {
+              "abi": {
+                "$ref": "#/$defs/TraceAbi",
+                "default": "sysv_amd64"
+              },
+              "limits": {
+                "$ref": "#/$defs/TraceLimits",
+                "default": {
+                  "max_buffer_bytes": 4096,
+                  "max_event_bytes": 65536,
+                  "max_events": 1024,
+                  "max_events_bytes": 8388608,
+                  "max_point_hits": 256,
+                  "stop_wait_ms": 10000
+                }
+              },
+              "points": {
+                "items": {
+                  "$ref": "#/$defs/TracePoint"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "schema_version": {
+                "default": 1,
+                "format": "uint32",
+                "maximum": 1,
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "points"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "launch_spec": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/$defs/TraceSpec"
+          }
+        },
+        "required": [
+          "launch_spec",
+          "input",
+          "spec"
+        ],
+        "title": "TraceStartArgs",
+        "type": "object"
+      },
+      "resources": "execution",
+      "result": {
+        "$defs": {
+          "JobResult": {
+            "additionalProperties": true,
+            "properties": {
+              "exit_code": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "jobs_empty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/OutcomeCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "profiles_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "scratch_removed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "JobState": {
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "timed_out",
+              "lost"
+            ],
+            "type": "string"
+          },
+          "OutcomeCertainty": {
+            "enum": [
+              "known",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": true,
+        "properties": {
+          "cleanup_pending": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "job_id": {
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/JobResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/JobState"
+          },
+          "stderr": {
+            "default": "",
+            "type": "string"
+          },
+          "stdout": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "state"
+        ],
+        "title": "JobStatus",
         "type": "object"
       }
     },

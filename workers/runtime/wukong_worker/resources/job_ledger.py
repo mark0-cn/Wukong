@@ -24,6 +24,7 @@ class JobLedger:
         "supervisor.log",
         "ledger.lock",
         "supervisor-start.json",
+        "session.json",
         "processes.json",
     }
 
@@ -148,6 +149,15 @@ class JobLedger:
             meta.update(result, state=state, finished_at=time.time())
             ledger["phase"] = "finished"
             meta.pop("runner_token", None)
+            self._write(meta)
+            return True
+
+    def confirm_cleanup(self):
+        with self.lock:
+            meta = load_json(self.path)
+            if meta["state"] not in TERMINAL or meta.get("cleanup_pending") is not True:
+                return False
+            meta.update(cleanup_pending=False, cleanup_confirmed=True)
             self._write(meta)
             return True
 

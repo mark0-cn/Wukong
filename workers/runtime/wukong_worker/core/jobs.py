@@ -15,6 +15,7 @@ class JobPlan:
 class JobOutcome:
     state: JobState
     result: dict[str, Any]
+    cleanup_pending: bool = False
 
     def __post_init__(self):
         object.__setattr__(self, "state", JobState(self.state))

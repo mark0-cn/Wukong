@@ -8,6 +8,8 @@ mod lifecycle;
 pub use lifecycle::*;
 mod responses;
 pub use responses::*;
+mod trace;
+pub use trace::*;
 mod methods;
 pub mod params;
 pub use methods::*;

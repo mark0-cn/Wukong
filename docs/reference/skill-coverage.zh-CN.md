@@ -9,6 +9,7 @@
 | `algorithms` | 未登记 | 未登记 | 未登记 |
 | `binary_diff` | 未登记 | 未登记 | 未登记 |
 | `crash` | 未登记 | 未登记 | 未登记 |
+| `dynamic_trace` | `launch_prepare`, `trace_run`, `trace_compare`, `job_status`, `job_artifacts`, `function_decompile`, `analysis_verify` | [docs/user/dynamic-trace.md](../../docs/user/dynamic-trace.zh-CN.md) | [pwn/trace-function-boundaries](../../fixtures/pwn/tasks.json) |
 | `elf_recovery` | 未登记 | 未登记 | 未登记 |
 | `exec_sinks` | 未登记 | 未登记 | 未登记 |
 | `exit_handlers` | `runtime_profile`, `debug_command`, `poc_verify`, `verification_record` | [docs/reference/pwn-knowledge.md](../../docs/reference/pwn-knowledge.zh-CN.md) | [pwn/exit-consumer](../../fixtures/pwn/tasks.json) |

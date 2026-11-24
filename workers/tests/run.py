@@ -16,7 +16,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "suite",
-        choices=["unit", "integration", "isolation", "ghidra", "launch"],
+        choices=["unit", "integration", "isolation", "ghidra", "launch", "trace"],
     )
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -38,6 +38,7 @@ def main():
         "isolation": "isolation",
         "ghidra": "ghidra",
         "launch": "launch",
+        "trace": "trace",
     }[args.suite]
     sys.argv = [str(ROOT / "integration" / (module + ".py")), *remaining]
     runpy.run_module("integration." + module, run_name="__main__")

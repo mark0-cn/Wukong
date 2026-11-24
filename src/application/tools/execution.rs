@@ -10,6 +10,10 @@ pub(super) struct ExecutionService {
     pub(super) verification: verification::VerificationService,
     pub(super) sessions: SessionsService,
 }
+
+struct CheckedLaunchSpec {
+    source_target_sha256: String,
+}
 impl ExecutionService {
     pub(super) fn new(
         store: Store,
@@ -72,6 +76,9 @@ impl ExecutionService {
             if let Some(timeout) = input.read_timeout_secs {
                 args["read_timeout_secs"] = json!(timeout);
             }
+        }
+        if name == "trace_run" {
+            return self.trace_run(agent, call_id, args).await;
         }
         match name {
             "job_status" => {
@@ -147,50 +154,11 @@ impl ExecutionService {
                     for input in string_list(&args, "executable_inputs")? {
                         self.files.known_file(agent, &input, false)?;
                     }
-                    if let Some(launch) = args["launch_spec"].as_str() {
-                        let manifest_file = self.files.known_file(agent, launch, false)?;
-                        ensure!(manifest_file.size <= 65536, "LaunchSpec exceeds 64 KiB");
-                        let imported = self
-                            .files
-                            .file_get(
-                                agent,
-                                &format!("{call_id}:launch-identity"),
-                                &json!({"path":launch,"max_bytes":65536}),
-                            )
-                            .await?;
-                        let bytes = self.store.read_evidence(
-                            &agent.run_id,
-                            text(&imported, "content_evidence_id")?,
-                        )?;
-                        ensure!(
-                            hex::encode(Sha256::digest(&bytes)) == manifest_file.sha256,
-                            "LaunchSpec changed since registration"
-                        );
-                        let manifest: Value = serde_json::from_slice(&bytes)?;
-                        let target_name = text(&manifest, "target")?;
-                        let declared = text(&manifest, "base")?;
-                        let member = self.files.known_file(
-                            agent,
-                            &format!("{declared}/{target_name}"),
-                            false,
-                        )?;
-                        ensure!(
-                            manifest["files"][target_name] == member.sha256,
-                            "LaunchSpec target identity mismatch"
-                        );
-                        execution_target_sha256 = member.sha256;
-                        ensure!(
-                            string_list(&args, "argv")?.is_empty(),
-                            "LaunchSpec owns job argv"
-                        );
-                        ensure!(
-                            args.get("timeout_secs").is_none(),
-                            "LaunchSpec owns its execution timeout; omit timeout_secs"
-                        );
-                        ensure!(
-                            args.get("cwd").is_none() && args.get("env").is_none(),
-                            "LaunchSpec owns cwd and environment; omit those overrides"
-                        );
+                    if args["launch_spec"].is_string() {
+                        execution_target_sha256 = self
+                            .checked_launch_spec(agent, call_id, &args)
+                            .await?
+                            .source_target_sha256;
                     } else {
                         ensure!(
                             !string_list(&args, "argv")?.is_empty(),
@@ -279,5 +247,139 @@ impl ExecutionService {
             }
             _ => bail!("unsupported runtime tool {name}"),
         }
+    }
+
+    async fn checked_launch_spec(
+        &self,
+        agent: &AgentMetadata,
+        call_id: &str,
+        args: &Value,
+    ) -> Result<CheckedLaunchSpec> {
+        let launch = text(args, "launch_spec")?;
+        let manifest_file = self.files.known_file(agent, launch, false)?;
+        ensure!(manifest_file.size <= 65536, "LaunchSpec exceeds 64 KiB");
+        let imported = self
+            .files
+            .file_get(
+                agent,
+                &format!("{call_id}:launch-identity"),
+                &json!({"path":launch,"max_bytes":65536}),
+            )
+            .await?;
+        let bytes = self
+            .store
+            .read_evidence(&agent.run_id, text(&imported, "content_evidence_id")?)?;
+        ensure!(
+            hex::encode(Sha256::digest(&bytes)) == manifest_file.sha256,
+            "LaunchSpec changed since registration"
+        );
+        let manifest: Value = serde_json::from_slice(&bytes)?;
+        let target_name = text(&manifest, "target")?;
+        let declared = text(&manifest, "base")?;
+        let member = self
+            .files
+            .known_file(agent, &format!("{declared}/{target_name}"), false)?;
+        ensure!(
+            manifest["files"][target_name] == member.sha256,
+            "LaunchSpec target identity mismatch"
+        );
+        ensure!(
+            string_list(args, "argv")?.is_empty(),
+            "LaunchSpec owns job argv"
+        );
+        ensure!(
+            args.get("timeout_secs").is_none(),
+            "LaunchSpec owns its execution timeout; omit timeout_secs"
+        );
+        ensure!(
+            args.get("cwd").is_none() && args.get("env").is_none(),
+            "LaunchSpec owns cwd and environment; omit those overrides"
+        );
+        Ok(CheckedLaunchSpec {
+            source_target_sha256: member.sha256,
+        })
+    }
+
+    async fn trace_run(&self, agent: &AgentMetadata, call_id: &str, args: Value) -> Result<Value> {
+        let input: args::TraceStartArgs = serde_json::from_value(args)?;
+        input.spec.validate()?;
+        let params = serde_json::to_value(&input)?;
+        let launch = self.checked_launch_spec(agent, call_id, &params).await?;
+        for point in &input.spec.points {
+            let module = match point.location() {
+                wukong_worker_protocol::TraceLocation::Symbol { module_sha256, .. }
+                | wukong_worker_protocol::TraceLocation::ModuleOffset { module_sha256, .. } => {
+                    module_sha256
+                }
+            };
+            ensure!(
+                module == &launch.source_target_sha256,
+                "trace point module does not match the LaunchSpec source target"
+            );
+        }
+        let input_file = self.files.known_file(agent, &input.input, false)?;
+        let input_evidence_id = input_file
+            .evidence_id
+            .as_deref()
+            .context("trace input must be bound to same-run content evidence")?;
+        let input_evidence: Evidence =
+            require_in_run(&self.store, input_evidence_id, &agent.run_id)?;
+        ensure!(
+            input_evidence.sha256 == input_file.sha256 && input_evidence.size == input_file.size,
+            "trace input evidence identity mismatch"
+        );
+        self.store
+            .verified_evidence_path(&agent.run_id, input_evidence_id)?;
+
+        let mut raw = self
+            .gateway
+            .worker_call(agent, call_id, Request::TraceStart(input.clone()))
+            .await?;
+        raw["trace_spec"] = json!({
+            "schema_version":input.spec.schema_version,
+            "abi":input.spec.abi,
+            "plan_signature":input.spec.plan_signature(),
+            "source_target_sha256":launch.source_target_sha256,
+        });
+        let status: JobStatus = serde_json::from_value(raw.clone())?;
+        let worker_id = self.gateway.worker_identity()?;
+        let job_id = stable("job", &format!("{worker_id}:{}", status.job_id));
+        let record = JobRecord {
+            id: job_id.clone(),
+            worker_resource_id: status.job_id.clone(),
+            run_id: agent.run_id.clone(),
+            agent_id: agent.id.clone(),
+            worker_id,
+            owner_generation: agent.generation,
+            tool_name: "trace_run".into(),
+            finding_id: None,
+            call_id: call_id.into(),
+            worker_request_id: self.gateway.request_identity(agent, call_id),
+            parameters: params,
+            target_sha256: launch.source_target_sha256,
+            status,
+            status_evidence_id: None,
+            imported_artifacts: None,
+            notification_message_id: None,
+            execution_notification_message_id: None,
+            execution_status_evidence_id: None,
+            evidence_sync: Default::default(),
+            cleanup_intent: None,
+            created_at: now(),
+            updated_at: now(),
+        };
+        self.store.write(|tx| {
+            if let Some(previous) = tx.get_record::<JobRecord>(&job_id)? {
+                ensure!(
+                    previous.run_id == agent.run_id
+                        && previous.agent_id == agent.id
+                        && previous.call_id == call_id,
+                    "worker job identity is already bound to another request"
+                );
+                return Ok(());
+            }
+            tx.save_record(&record)
+        })?;
+        self.jobs.present(&record, raw)
     }
 }

@@ -26,8 +26,11 @@ python -m evals.tests.test_pwn
 | utf8 | Actual Rust from_utf8_lossy Cow type/bytes for valid, NUL and invalid input |
 | float | C scanf binary64 bit patterns for finite values, negative zero and NaN payloads |
 | musl-printf | Actual static-musl output for one valid positional format |
+| trace-a / trace-b | Declarative entry/return, nested/recursive activation, buffer mutation and A/B trace differences |
 
-Heap/LZ/GC retain vulnerable/fixed variants. Others deliberately supply primitives or normal mechanism controls, not vulnerability-discovery positives. GC models logical handles, not full moving GC. FILE has no forged vtable; exit does not corrupt libc lists. See evaluator-only [ground truth](manifest.json).
+Heap/LZ/GC retain vulnerable/fixed variants. Others deliberately supply primitives or normal mechanism controls, not vulnerability-discovery positives. GC models logical handles, not full moving GC. FILE has no forged vtable; exit does not corrupt libc lists. The trace fixture exercises generic entry/return, nested/recursive and buffer mechanisms, not a specific vulnerability or article. See evaluator-only [ground truth](manifest.json).
+
+The dynamic trace backend has an additional live acceptance entry inside the configured Linux worker image: `python workers/tests/run.py trace --state /state/acceptance-trace`. It covers symbols, PIE/non-PIE/stripped addresses, call sites, recursion, limits, unreadable memory, timeout, cancellation, cleanup and replay. Unit/fake-MI tests do not replace this live run.
 
 Build output records build.json/results.json, raw inputs, source/binary/input hashes, compile commands, runtime-file hashes, actual stdout/stderr bytes, expectations, skips and failures. Every behavior check links real execution; agent_accuracy remains null. Report buffer effects, logical state changes and native code execution separately. These results do not replace real Docker/GDB/challenge acceptance.
 

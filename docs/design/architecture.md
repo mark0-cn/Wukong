@@ -73,6 +73,12 @@ Windows has one native worker authority. The controller owns business tasks/evid
 | `interfaces/report`, `interfaces/cli` | Export, CLI, operator queries/intervention |
 | `interfaces/desktop`, `ui/src` | Tauri commands/workspace services, presentation adapters and React lifecycle |
 
+<a id="动态追踪与差分"></a>
+
+### Dynamic tracing and comparison
+
+`workers/protocol` owns the declarative TraceSpec and raw trace event contract. `trace_run` is an ordinary durable job with the existing LaunchSpec, WorkerGateway, observation, cancellation, artifact synchronization and recovery semantics; the Linux worker privately owns its GDB session inside that job rather than exposing a second controller session. `trace_compare` is a controller-only offline comparison of authenticated run/events evidence and does not contact a worker. Original JSONL, launch/address bindings, source/executed identities and comparison artifacts remain hashed evidence with bounded model-facing summaries. The current implementation supports Linux x86_64 SysV AMD64; Windows does not register `trace.start`.
+
 <a id="worker-resource-boundaries"></a>
 
 ### Worker resource boundaries

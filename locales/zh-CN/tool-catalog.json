@@ -291,6 +291,14 @@
     "source": "Update the body or status of an existing shared to-do.",
     "text": "更新共享待办正文或状态。"
   },
+  "trace_compare": {
+    "source": "Compare two caller-owned trace_run evidence pairs entirely offline. Both run.json and events.jsonl must be imported from distinct jobs. Compatible, complete nonzero traces return match/mismatch with typed integer, buffer, event-order and semantic process differences; incompatible or incomplete inputs never return match. Full bounded comparison details are retained as trace.comparison evidence.",
+    "text": "完全离线比较调用者拥有的两组 trace_run 证据。run.json 和 events.jsonl 必须已从不同 job 导入。兼容、完整且非空的追踪返回 match/mismatch，包含有类型整数、缓冲区、事件顺序和进程语义差异；不兼容或不完整时绝不返回 match。完整有界比较详情保存为 trace.comparison 证据。"
+  },
+  "trace_run": {
+    "source": "Start a declarative dynamic trace from an immutable LaunchSpec and same-run input evidence. Trace points must bind the LaunchSpec source target. Returns an ordinary owned job immediately; observe it with job_status and import run.json/events.jsonl with job_artifacts. No debugger session is created.",
+    "text": "使用不可变 LaunchSpec 和同 run 输入证据启动声明式动态追踪。追踪点必须绑定 LaunchSpec 源目标。立即返回普通所属 job；通过 job_status 观察，并用 job_artifacts 导入 run.json/events.jsonl。不创建调试会话。"
+  },
   "tool_catalog": {
     "source": "Query bounded tool groups, current selection and last-observed backend availability. Follow next_cursor with after. Selection never changes roles.",
     "text": "分页查询工具分组、当前选择及最近一次预检的后端可用性。通过 after 继续 next_cursor。选择工具不会改变角色。"

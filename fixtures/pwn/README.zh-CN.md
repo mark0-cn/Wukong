@@ -29,11 +29,15 @@ python -m evals.tests.test_pwn
 | utf8 | Rust from_utf8_lossy 对合法、NUL、非法字节的真实 Cow 类型与结果字节 |
 | float | C scanf binary64 对有限值、负零和 NaN payload 的位模式观察 |
 | musl-printf | 静态 musl 对一个合法定位参数格式的实际输出 |
+| trace-a / trace-b | 声明式 entry/return、嵌套/递归 activation、buffer 修改和 A/B trace 差异 |
 
 heap/LZ/GC 保留漏洞与修复版本。其余是故意提供前置原语或正常机制的控制实验，
 不能作为漏洞发现正例。GC 样本只涉及逻辑 handle，不模拟完整移动式 GC；FILE
-样本不提供伪 vtable，exit 样本不破坏 libc 链表。范围详见 evaluator 专用
+样本不提供伪 vtable，exit 样本不破坏 libc 链表。trace 样本覆盖通用 entry/return、
+嵌套/递归和 buffer 机制，不对应特定漏洞或文章。范围详见 evaluator 专用
 [ground truth](manifest.json)。
+
+动态追踪后端在配置的 Linux worker 镜像中另有真实验收入口：`python workers/tests/run.py trace --state /state/acceptance-trace`。覆盖符号、PIE/非 PIE/stripped 地址、调用点、递归、限额、不可读内存、超时、取消、清理和 replay。单元/fake-MI 测试不能替代该真实运行。
 
 构建目录保存 build.json、results.json、原始输入、源码/二进制/输入哈希、编译命令、
 运行时文件哈希、实际 stdout/stderr 字节、期望值、跳过与失败。每条行为检查关联

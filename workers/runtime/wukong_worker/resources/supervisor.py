@@ -35,6 +35,8 @@ def supervise_job(root, directory, execute, admission):
     try:
         outcome = execute(root, directory, spec)
         state, result = outcome.state, {"result": outcome.result}
+        if outcome.cleanup_pending:
+            result["cleanup_pending"] = True
     except Exception as error:
         # The supervisor owns final job publication, including unexpected executor
         # failures; a protocol client must not be required to keep this owner alive.

@@ -28,6 +28,8 @@ HTML 使用 Askama 模板及自动转义；Markdown 单独转义标点。二者�
 
 发现保留记录阶段和基于证据的严重性（critical/high/medium/low/info）及理由。critical/high 仅接受 reproduced 或更高阶段；单纯崩溃最高 medium。`impact_verified` 若没有成功验证记录、非零有效尝试次数、证据和另一位角色为 verifier 的 Agent，会明确标为不完整。导出不会从崩溃推断代码执行、提升阶段或编造缺失的重放条件。
 
+动态 trace job 将 `trace/run.json`、`trace/events.jsonl` 和私有调试器 transcript 保存为原始证据。`trace_compare` 另行生成 `trace.comparison` 产物，关联两侧源 job/证据、逻辑 plan 和 comparison signature。事件流完成、观察完整性、job settled 和证据就绪仍是不同事实；部分 trace 可以导出用于诊断，但不能据此得到 `match`。当前后端和限制见[动态函数追踪与离线差分](../user/dynamic-trace.zh-CN.md)。
+
 重放前先验证包，按调用/验证记录重建运行环境及依赖，将原样本路径映射到 `target/sample.bin`，从 `bundle_path` 导入证据，再执行记录参数。凭据通过原环境变量名提供。包不内置运行时快照或第三方引擎安装，其身份和要求保留在元数据中。
 
 通用分析 `analysis_verify` 记录必须提供 `checks`（1–64 项）和 `limitations`。每项检查绑定声明、期望/观察值、判定及验证者自己的证据；整体 `supported` 判定不能包含被反驳或不确定的检查。复现检查还必须绑定精确产物证据、验证者针对同一目标执行的作业、原始状态证据及声明的预期退出码；保存的参数保留实际调用。覆盖范围明确仅限所列检查，不代表整份报告。应分开验证输入接受性、推导过程、边界行为和命令复现。这些来源门禁不能证明观察声明在语义上正确。

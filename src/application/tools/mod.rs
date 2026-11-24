@@ -81,6 +81,7 @@ mod jobs;
 mod observation;
 mod resource_recovery;
 mod sessions;
+mod trace;
 mod transfers;
 mod verification;
 mod verification_protocol;

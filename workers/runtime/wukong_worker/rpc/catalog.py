@@ -64,6 +64,7 @@ def register(runtime: "Runtime") -> dict[str, Registration]:
         ("poc_verify",),
     )
     add("py.run", runtime.job_tools.python, "execution", ("py_run",))
+    add("trace.start", runtime.job_tools.trace, "debugger", ("dynamic_trace_gdb",))
     add("fuzz.start", runtime.job_tools.fuzz, "fuzz", ("fuzz_qemu",))
     add("angr.solve", runtime.job_tools.solve, "symbolic", ("symbolic_execution",))
     add(

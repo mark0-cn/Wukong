@@ -179,6 +179,18 @@ pub(in crate::application::tools) fn handle_analysis_verify<'a>(
     })
 }
 
+pub(in crate::application::tools) fn handle_trace_compare<'a>(
+    tools: &'a evidence::EvidenceService,
+    agent: &'a AgentMetadata,
+    call_id: &'a str,
+    _name: &'a str,
+    args: Value,
+) -> BoxFuture<'a, Result<Value>> {
+    Box::pin(async move {
+        super::super::trace::compare(tools, agent, call_id, serde_json::from_value(args)?)
+    })
+}
+
 pub(in crate::application::tools) fn handle_differential_test<'a>(
     tools: &'a ExecutionService,
     agent: &'a AgentMetadata,

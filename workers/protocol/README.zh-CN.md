@@ -6,6 +6,8 @@
 
 `job.list` 和 `resource.list` 接受可选的排他性 `after` 游标，以及 1–64 的 `limit`（默认 64）。作业 ID 按升序返回；使用最后一项 ID 继续查询，直到出现空页。资源分页还提供 `next_after`。Linux 作业清单遵循与原生 Windows 相同的游标语义和范围限制。
 
+`trace.start` 接收 `launch_spec`、单个 `input` 和声明式 `spec`（包含 ABI、逻辑点位、capture 和限制）。其副作用为 `Reconcile`，资源需求为 `Execution`。`src/trace.rs` 还定义规范化逻辑 plan/signature 以及 controller 与 Python worker 共用的 run/events JSONL 类型；未知字段、非法 ABI/capture 组合、非连续事件和不完整末行均被拒绝。Windows 不注册该方法。详见[动态函数追踪与离线差分](../../docs/user/dynamic-trace.zh-CN.md)。
+
 `debug.start` 可通过已暂存的 `target` 或 `launch_spec` 选择目标；控制器会核对所有提供的启动描述及输入产物均属于当前任务。原生 Windows 的 LaunchSpec 负责目标和参数，因此此模式下应省略单次调用的 `target` 和 `args`。调试器默认模式为 `launch`，默认引擎为 `auto`。Linux 在解析执行环境前，从校验后的 LaunchSpec 中确定原始目标哈希。
 
 `exec.run`、`crash.replay`、`input.minimize` 和 `poc.verify` 接受可选的 `output_limit`，范围为 1,024–8,388,608 字节（默认 1 MiB），与两种平台的执行器一致。该上限限制保留的执行输出（重放／最小化按每次试验计算），与控制器面向模型的输出预览限制不同。生产者／验证者身份仅属于 `poc.verify` 请求。

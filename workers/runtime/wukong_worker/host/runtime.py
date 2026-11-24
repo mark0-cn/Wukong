@@ -69,7 +69,9 @@ class Runtime:
         self.identity = WorkerIdentity(self.root)
         self.isolated = sys.platform.startswith("linux") and os.geteuid() == 0 and not trusted
         self.jobs = JobManager(self.root, trusted, self.isolated)
-        self.job_tools = JobService(self.root, trusted, self.isolated, self.jobs)
+        self.job_tools = JobService(
+            self.root, trusted, self.isolated, self.jobs, worker_identity=self.identity.value
+        )
         self.sessions = SessionManager(self.root, trusted, self.isolated)
         self.files = FileService(self.root, trusted, self.isolated)
         self.commands = CommandService(self.root, trusted, self.isolated)

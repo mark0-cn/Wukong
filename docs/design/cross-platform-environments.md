@@ -72,6 +72,12 @@ Linux uses GDB/MI; managed Windows uses the native `dbgeng` route and existing W
 
 Windows debugging uses the pinned external WinDbg MCP tool and `rmcp`; the custom DbgEng implementation has been removed. Private sessions use generated Prost protobuf; controller/native worker share identity, lease, capacity and error types in `workers/protocol`. Raw MCP replies remain hashed evidence. Launch/dump sessions retain owned-resource, input-identity and paired target/debugger cleanup rules. See the [Windows component guide](../../workers/windows/README.md) for the current contract and historical acceptance boundary.
 
+<a id="声明式动态追踪"></a>
+
+### Declarative dynamic tracing
+
+`trace.start` is registered only on the Linux GDB/MI worker. Each trace uses an admitted LaunchSpec and one input, owns its debugger inside an ordinary durable job, and publishes bounded run/events artifacts through the existing synchronization path. Windows does not register or advertise the method. `trace_compare` is controller-only and compares already synchronized same-run evidence without rechecking the current worker, so an offline worker does not prevent comparison. See [Dynamic function tracing](../../docs/user/dynamic-trace.md) for the current ABI, address and comparison limits.
+
 ## Windows offline delivery contract
 
 A complete offline package is assembled on the connected controller from pinned, verified official dependencies; VM installation cannot fetch missing dependencies. Native build identity includes the shared protocol crate; assembly verifies actual source identity and preserves licenses. Installation, maintenance and execution require their corresponding acceptance; registration is not execution qualification. Private keys and model credentials remain on the controller. See the [Windows component guide](../../workers/windows/README.md) and its explicitly historical records; old-package acceptance does not qualify current changes.

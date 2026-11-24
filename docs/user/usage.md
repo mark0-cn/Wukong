@@ -330,6 +330,8 @@ Custom `skills_dir` Markdown files appear in the capability catalog. Optional ma
 
 `differential_test` accepts `target_launch_spec`, `reference_launch_spec`, 1–8 `input_evidence_ids` (each at most 64 KiB), an explicit `comparison` (`exact_output`, `exit_status` or `stdout_json`) and `expected_exit_codes`. Each LaunchSpec must record a 1–10 second timeout and stdin_pipe or argv_file input delivery. Ordinary owned jobs run sequentially, including on single-resource Windows workers. Original manifest, input, output and status evidence remain available. Timeout, missing/truncated output, unexpected exit and invalid JSON are inconclusive. The call is bounded to 300 seconds; unfinished resources remain visible through `resource_list`.
 
+For declarative function entry/return and call-site observations plus offline trace comparison, see [Dynamic function tracing and offline trace comparison](dynamic-trace.md). The current backend is Linux x86_64 GDB/MI with SysV AMD64.
+
 <a id="pwn-方法堆分析"></a>
 
 ### Pwn method: heap analysis

@@ -71,8 +71,25 @@ def evaluate(build, require_all=False):
         ("gc-vuln", "gc.c", ()),
         ("gc-fixed", "gc.c", ("-DFIXED",)),
         ("float", "float.c", ()),
+        ("trace-a", "trace.c", ("-fPIE", "-pie")),
+        ("trace-b", "trace.c", ("-DVARIANT", "-fPIE", "-pie")),
+        ("trace-a-nopie", "trace.c", ("-fno-pie", "-no-pie")),
     ]:
         compile_target(name, source, extra)
+    if shutil.which("strip"):
+        source = build / "trace-a"
+        target = build / "trace-a-stripped"
+        shutil.copyfile(source, target)
+        argv = ["strip", str(target)]
+        subprocess.run(argv, check=True, capture_output=True, timeout=60)
+        targets["trace-a-stripped"] = {
+            "path": str(target),
+            "sha256": digest(target),
+            "source_sha256": digest(ROOT / "src" / "trace.c"),
+            "command": argv,
+        }
+    else:
+        skips.append({"case": "trace-a-stripped", "reason": "strip is unavailable"})
     if shutil.which("musl-gcc"):
         compile_target("musl-printf", "musl.c", ("-static",), ["musl-gcc"])
     else:
@@ -104,7 +121,10 @@ def evaluate(build, require_all=False):
         input_path = build / ("input-%03d.bin" % index)
         input_path.write_bytes(input_bytes)
         result = subprocess.run(
-            [targets[binary]["path"], *argv],
+            [
+                targets[binary]["path"],
+                *[str(input_path) if item == "@@" else item for item in argv],
+            ],
             input=input_bytes,
             capture_output=True,
             timeout=5,
@@ -203,6 +223,14 @@ def evaluate(build, require_all=False):
     observe("utf8", "utf8-nul-is-valid", b"borrowed\n410042\n", b"A\0B")
     observe("utf8", "utf8-replacement", b"owned\n41efbfbd42\n", b"A\xffB")
     observe("musl-printf", "musl-positional-counterexample", b"22:11\n")
+    for binary, basic, nested in [
+        ("trace-a", b"ret=3\n141716\n", b"ret=6\n141716141716\n"),
+        ("trace-b", b"ret=3\n1b1819\n", b"ret=3\n1b1819000000\n"),
+    ]:
+        observe(binary, binary + "-basic", basic, b"ABC", ["basic", "@@"])
+        observe(binary, binary + "-nested", nested, b"ABC", ["nested", "@@"])
+        observe(binary, binary + "-recursive", b"ret=24\n", b"ABC", ["recursive", "@@"])
+    observe("trace-a", "trace-loop", b"done\n", b"ABC", ["loop", "@@"])
     runtime = {}
     for name in [
         "/lib/x86_64-linux-gnu/libc.so.6",

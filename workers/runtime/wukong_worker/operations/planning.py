@@ -41,6 +41,8 @@ def prepare_job(
     spec["runner_token"] = secrets.token_hex(32)
     if kind in {"replay", "verify", "minimize"}:
         _admit_replay(root, spec, kind)
+    elif kind == "trace":
+        _admit_trace(root, spec)
     else:
         _admit_process(root, spec, kind)
     safe_env(spec.get("env"))
@@ -73,7 +75,7 @@ def _admit_network(root: Path, spec: dict[str, Any], kind: str, trusted: bool) -
 def _admit_launch(
     root: Path, spec: dict[str, Any], kind: str, requested_timeout: int | None
 ) -> None:
-    if kind == "process" and (
+    if kind in {"process", "trace"} and (
         spec.get("argv") or spec.get("env") or spec.get("cwd") not in (None, ".")
     ):
         raise ValueError("LaunchSpec owns process argv, environment and cwd")
@@ -81,7 +83,7 @@ def _admit_launch(
 
     launch, _, _, _, _ = load(root, spec)
     if (
-        kind == "process"
+        kind in {"process", "trace"}
         and requested_timeout is not None
         and requested_timeout != launch.get("timeout_secs", 30)
     ):
@@ -112,6 +114,17 @@ def _admit_replay(root: Path, spec: dict[str, Any], kind: str) -> None:
             raise ValueError("poc.verify requires verifier_agent_id, producer_agent_id and call_id")
         if spec["verifier_agent_id"] == spec["producer_agent_id"]:
             raise ValueError("independent verifier must differ from PoC producer")
+
+
+def _admit_trace(root, spec):
+    from wukong_worker.operations.trace_plan import validate_spec
+
+    if not spec.get("launch_spec") or not spec.get("input"):
+        raise ValueError("trace.start requires a LaunchSpec and one input")
+    spec["spec"] = validate_spec(spec.get("spec"))
+    input_path = public_file(root, spec["input"])
+    if not input_path.is_file() or input_path.stat().st_size > MAX_FILE:
+        raise ValueError("trace input must be a staged file <=32 MiB")
 
 
 def _admit_process(root: Path, spec: dict[str, Any], kind: str) -> None:

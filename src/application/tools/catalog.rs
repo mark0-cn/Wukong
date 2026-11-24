@@ -290,6 +290,18 @@ fn build_catalog() -> Vec<Spec> {
             Visibility::Child,
             Requirement::Ghidra,
         ),
+        spec::<args::TraceCompareArgs>(
+            "trace_compare",
+            "tool-trace-compare",
+            "Compare two caller-owned trace_run evidence pairs entirely offline. Both run.json and events.jsonl must be imported from distinct jobs. Compatible, complete nonzero traces return match/mismatch with typed integer, buffer, event-order and semantic process differences; incompatible or incomplete inputs never return match. Full bounded comparison details are retained as trace.comparison evidence.",
+            ReplayPolicy::Transactional,
+            false,
+            |services, agent, call, name, args| {
+                handlers::handle_trace_compare(&services.evidence, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Controller,
+        ),
         spec::<args::DifferentialTestArgs>(
             "differential_test",
             "tool-differential-test",
@@ -768,6 +780,18 @@ fn build_catalog() -> Vec<Spec> {
             },
             Visibility::All,
             Requirement::Worker(&[Method::JobStart]),
+        ),
+        spec::<args::TraceStartArgs>(
+            "trace_run",
+            "tool-trace-run",
+            "Start a declarative dynamic trace from an immutable LaunchSpec and same-run input evidence. Trace points must bind the LaunchSpec source target. Returns an ordinary owned job immediately; observe it with job_status and import run.json/events.jsonl with job_artifacts. No debugger session is created.",
+            ReplayPolicy::WorkerIdempotent,
+            true,
+            |services, agent, call, name, args| {
+                handlers::handle_job_start(&services.execution, agent, call, name, args)
+            },
+            Visibility::Child,
+            Requirement::Worker(&[Method::TraceStart]),
         ),
         spec::<args::JobStatusArgs>(
             "job_status",

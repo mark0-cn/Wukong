@@ -23,9 +23,10 @@ class JobService:
         isolated: bool,
         jobs: JobManager,
         observe: Callable[[], dict[str, Any]] | None = None,
+        worker_identity: dict[str, Any] | None = None,
     ):
         self.root, self.trusted, self.isolated = root, trusted, isolated
-        self.jobs, self.observe = jobs, observe
+        self.jobs, self.observe, self.worker_identity = jobs, observe, worker_identity
 
     def start_job(self, params: dict[str, Any], kind: str = "process") -> dict[str, Any]:
         plan = prepare_job(self.root, params, kind, trusted=self.trusted, isolated=self.isolated)
@@ -130,6 +131,11 @@ class JobService:
 
     def start(self, params):
         return self.start_job(params)
+
+    def trace(self, params):
+        if self.worker_identity is None:
+            raise ValueError("trace worker identity is unavailable")
+        return self.start_job({**params, "_worker_identity": self.worker_identity}, "trace")
 
     def fuzz(self, params):
         doctor = self.doctor()
