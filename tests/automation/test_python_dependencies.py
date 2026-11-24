@@ -5,6 +5,21 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 
+COMPATIBILITY_PINS = {
+    "angr": "9.2.78",
+    "ailment": "9.2.78",
+    "archinfo": "9.2.102",
+    "claripy": "9.2.101",
+    "cle": "9.2.78",
+    "pyvex": "9.2.131",
+    "pycparser": "2.21",
+    "bitstring": "3.1.9",
+    "z3-solver": "4.13.4.0",
+    "unicorn": "2.1.4",
+    "protobuf": "5.29.4",
+    "capstone": "5.0.6",
+}
+
 
 def canonical_name(name):
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -84,21 +99,7 @@ class PythonDependencyTests(unittest.TestCase):
             },
             entries.keys(),
         )
-        expected_pins = {
-            "angr": "9.2.78",
-            "ailment": "9.2.78",
-            "archinfo": "9.2.102",
-            "claripy": "9.2.101",
-            "cle": "9.2.78",
-            "pyvex": "9.2.131",
-            "pycparser": "2.21",
-            "bitstring": "3.1.9",
-            "z3-solver": "4.13.4.0",
-            "unicorn": "2.1.4",
-            "protobuf": "5.29.4",
-            "capstone": "5.0.6",
-        }
-        for name, version in expected_pins.items():
+        for name, version in COMPATIBILITY_PINS.items():
             self.assertEqual(entries[name][0], version)
 
     def test_images_install_only_the_complete_hashed_python_lock(self):
@@ -129,6 +130,14 @@ class PythonDependencyTests(unittest.TestCase):
             dependabot,
             r"package-ecosystem: pip\s+directory: /workers\s+schedule:",
         )
+        group = re.search(
+            r"compatible-image-python:(.*?)image-python-security:",
+            dependabot,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(group)
+        excluded = set(re.findall(r"^\s+-\s*'([^']+)'$", group.group(1), re.MULTILINE))
+        self.assertLessEqual(COMPATIBILITY_PINS.keys(), excluded)
 
 
 if __name__ == "__main__":

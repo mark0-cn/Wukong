@@ -51,7 +51,7 @@ Explicitly enable GitHub native auto-merge after creating an ordinary PR intende
 
 Default-branch `.github/dependabot.yml` manages Cargo, the npm workspace, `workers/requirements.txt`, `workers/runtime/requirements.txt`, `scripts/ci/requirements.txt` and commit-pinned GitHub Actions. Checks are staggered Mondays 09:10–09:40 Beijing time, with at most eleven simultaneous version-update PRs. Rig dependencies update together; other compatible updates group by ecosystem, with separate security groups. Repository settings enable alerts/automatic security updates. PRs still require CI and maintainer merge.
 
-apt/gem, AFL base images and custom tool locks are outside this configuration. Review the image lock's intentional angr/AFL compatibility pins rather than treating every proposed Python update as independently compatible. Rust compiler updates must change `rust-toolchain.toml` and Cargo `rust-version` together. Check compatibility between Tauri Rust/npm packages.
+apt/gem, AFL base images and custom tool locks are outside this configuration. The ordinary `compatible-image-python` group excludes the image lock's explicitly tested angr/AFL compatibility pins; `image-python-security` still proposes security fixes for them. Review and accept those updates as a compatibility set rather than treating every proposed Python update as independently compatible. Rust compiler updates must change `rust-toolchain.toml` and Cargo `rust-version` together. Check compatibility between Tauri Rust/npm packages.
 
 Dependabot uses ordinary CI without Docker Hub/model secrets. Its configuration does not govern other PR merge methods or replace plan-restricted private-repository Rulesets.
 
