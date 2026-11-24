@@ -174,7 +174,7 @@ def main():
         leaf_static = symbol_offset(build / "a", "leaf")
         nopie_leaf_static = symbol_offset(build / "nopie", "leaf")
         call_static = call_offset(build / "a", "leaf")
-        client = Client(state)
+        client = Client(state, trusted_local=True)
         reports = {}
         try:
             doctor = client.call("doctor")

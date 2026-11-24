@@ -124,42 +124,45 @@ async fn run_trace(
         .as_str()
         .context("trace job id missing")?
         .to_owned();
-    for _ in 0..200 {
+    for attempt in 0..600 {
         service
             .execute(
                 &agent.id,
-                &format!("{call}:status"),
+                &format!("{call}:status:{attempt}"),
                 "job_status",
                 json!({"job_id":job_id}),
             )
             .await?;
         let job = store.load::<JobRecord>(&job_id)?;
-        if job.status.settled() && job.evidence_ready() {
-            service
+        if job.status.settled() {
+            if job.status.state != JobState::Completed {
+                anyhow::bail!("trace job failed before completion: {job:?}");
+            }
+            let imported = service
                 .execute(
                     &agent.id,
-                    &format!("{call}:artifacts"),
+                    &format!("{call}:artifacts:{attempt}"),
                     "job_artifacts",
                     json!({"job_id":job_id}),
                 )
                 .await?;
+            anyhow::ensure!(!imported.is_error, "trace import failed: {imported:?}");
             let job = store.load::<JobRecord>(&job_id)?;
-            anyhow::ensure!(
-                job.status.state == JobState::Completed,
-                "trace job failed: {job:?}"
-            );
-            anyhow::ensure!(
-                job.status
-                    .result
-                    .as_ref()
-                    .is_some_and(|result| result.extra["trace"]["complete"] == true),
-                "trace is incomplete: {job:?}"
-            );
-            return evidence_pair(&job);
+            if job.evidence_ready() {
+                anyhow::ensure!(
+                    job.status
+                        .result
+                        .as_ref()
+                        .is_some_and(|result| result.extra["trace"]["complete"] == true),
+                    "trace is incomplete: {job:?}"
+                );
+                return evidence_pair(&job);
+            }
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    anyhow::bail!("trace job did not become settled and evidence-ready")
+    let job = store.load::<JobRecord>(&job_id)?;
+    anyhow::bail!("trace job did not become settled and evidence-ready: {job:?}")
 }
 
 #[tokio::test]
