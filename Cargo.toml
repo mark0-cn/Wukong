@@ -62,7 +62,7 @@ wukong-worker-package = { path = "workers/package" }
 tempfile = "3"
 process-wrap = { version = "10.0.1", features = ["tokio1"] }
 jsonrpsee-core = { version = "0.26.0", features = ["async-client"] }
-askama = "0.14.0"
+askama = "0.16.1"
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2", optional = true }
