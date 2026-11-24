@@ -335,6 +335,8 @@ Token 预算按 provider 返回的用量累计。缺少必要用量时，系统�
 
 `differential_test` 接收 `target_launch_spec`、`reference_launch_spec`、1–8 个 `input_evidence_ids`（每个最多 64 KiB）、明确的 `comparison`（`exact_output`、`exit_status` 或 `stdout_json`）及 `expected_exit_codes`。每个 LaunchSpec 必须记录 1–10 秒时限，输入方式为 stdin_pipe 或 argv_file。普通作业按顺序运行，也适用于单资源 Windows worker。保留原始清单、输入、输出及状态证据。超时、输出缺失／截断、非预期退出及无效 JSON 均归为 inconclusive。调用总预算为 300 秒；未完成资源仍可通过 `resource_list` 找到。
 
+声明式函数 entry/return、调用点采集及离线 trace 比较差分，见[动态函数追踪与离线差分](dynamic-trace.zh-CN.md)。当前后端为 Linux x86_64 GDB/MI + SysV AMD64。
+
 <a id="pwn-method-heap-analysis"></a>
 
 ### Pwn 方法：堆分析

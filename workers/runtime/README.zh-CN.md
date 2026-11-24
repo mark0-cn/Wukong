@@ -32,6 +32,8 @@ Docker 镜像自动安装依赖。GDB/MI 结果含解析后的 `payload`；异�
 
 隔离 shell 目标、Python 目标和进程输入共用执行副本准备路径。`py_run.target` 作为只读、可执行的副本追加到参数，无需 chmod。原始 `job_start` 可用 `executable_inputs` 指定最多十六个已暂存的 argv 文件，其余文件参数保持只读数据。LaunchSpec 继续决定可执行文件、cwd 和输入方式。结果公开执行 cwd 以及各准备文件的源哈希、执行哈希和访问权限；复制哈希不一致时准备失败，绝不修改原始附件权限。每次隔离调用都有新的可写工作目录，应显式提取产物，不能假定下一次调用能看到相对路径文件。
 
+声明式动态追踪复用现有作业生命周期的 `kind="trace"`。`operations/trace_plan.py` 校验共享 TraceSpec 并计算逻辑 plan signature；`operations/trace_job.py` 负责执行观察，`debugger/trace.py` 驱动私有 `DebugSession` 完成声明的 entry/return 和调用点采集。私有调试器及其 journal 位于所属 job 受保护的 `trace/debugger` 目录，不进入公开 SessionManager 会话。`artifacts/jsonl.py` 只保留带哈希和字节限制的完整 JSONL 前缀。清理 pending 状态通过 `JobOutcome` 和 supervisor 传递；恢复只处理该 trace job 的确切私有 journal，不影响其他资源。详见[动态函数追踪与离线差分](../../docs/user/dynamic-trace.zh-CN.md)。
+
 作业生命周期写入统一经过 `JobLedger`，使用每个作业的进程间锁。父进程登记 supervisor 创建身份后，子进程才能认领执行令牌；查询和迟到的 supervisor 不能覆盖终态。缺少 PID 或旧版活跃记录视为不确定结果，必须恢复协调，禁止自动重放。Python worker 只能在空闲时升级。快照导入撤销执行权限并保留终态结果。账本令牌、登记握手和锁文件属于内部元数据，不进入 RPC 状态和产物清单。
 
 登记持久化成功后，父进程才通过子进程继承的无缓冲 stdin 管道发送一个字节的确认，放行 supervisor。仅看到登记记录不足以授权执行：父进程退出或登记失败时，管道在未确认的情况下关闭，即使撤销记录的发布也失败，子进程仍不得执行。收到确认后，supervisor 仍须在账本锁内认领令牌。

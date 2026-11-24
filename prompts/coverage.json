@@ -126,6 +126,23 @@
     ],
     "fixtures": []
   },
+  "dynamic_trace": {
+    "related_tools": [
+      "launch_prepare",
+      "trace_run",
+      "trace_compare",
+      "job_status",
+      "job_artifacts",
+      "function_decompile",
+      "analysis_verify"
+    ],
+    "sources": [
+      "docs/user/dynamic-trace.md"
+    ],
+    "fixtures": [
+      "pwn/trace-function-boundaries"
+    ]
+  },
   "validation": {
     "related_tools": [
       "artifact_validate",

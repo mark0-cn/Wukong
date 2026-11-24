@@ -151,6 +151,15 @@ class JobLedger:
             self._write(meta)
             return True
 
+    def confirm_cleanup(self):
+        with self.lock:
+            meta = load_json(self.path)
+            if meta["state"] not in TERMINAL or meta.get("cleanup_pending") is not True:
+                return False
+            meta.update(cleanup_pending=False, cleanup_confirmed=True)
+            self._write(meta)
+            return True
+
     def _lose(self, meta, reason):
         if meta["state"] not in TERMINAL:
             meta.update(

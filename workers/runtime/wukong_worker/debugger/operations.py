@@ -169,7 +169,7 @@ def gdb_inspect(session, params, timeout):
             "data": payload,
             "target_sha256": session.target_sha256,
             "dump_sha256": session.dump_sha256,
-            "transcript": "debug/" + session.id + "/transcript.mi",
+            "transcript": session.transcript,
         }
 
 

@@ -12,7 +12,9 @@
     {"binary":"seccomp-fd","effect":"Native read of an existing FD contrasted with denied open","not_demonstrated":"Policy escape, process execution or unrestricted filesystem access"},
     {"binary":"utf8","effect":"Actual Rust Cow borrowing/replacement and resulting bytes","not_demonstrated":"A call-target exploit"},
     {"binary":"float","effect":"Actual binary64 text parsing and bit observations","not_demonstrated":"Executable shellcode"},
-    {"binary":"musl-printf","effect":"Actual static musl positional-format counterexample","not_demonstrated":"General musl exploitation support"}
+    {"binary":"musl-printf","effect":"Actual static musl positional-format counterexample","not_demonstrated":"General musl exploitation support"},
+    {"binary":"trace-a","effect":"Declarative entry/return, nested/recursive activation and buffer observation","not_demonstrated":"Whole-program equivalence, multi-thread ordering or exploit impact"},
+    {"binary":"trace-b","effect":"Same logical trace plan with changed call count and transformed bytes","not_demonstrated":"A unique vulnerability or article-specific reproduction"}
   ],
   "agent_accuracy": null
 }

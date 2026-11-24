@@ -244,6 +244,12 @@ pub(crate) static REGISTRY: &[Entry] = &[
         "Recover malformed or hand-crafted ELF files: raw header audit, patched working copies and per-entry analysis."
     ),
     entry!(
+        dynamic_trace,
+        Kind::Method,
+        "methods",
+        "Capture function entry/return and call-site observations with declarative traces, then compare normalized evidence offline."
+    ),
+    entry!(
         windows_userland,
         Kind::Method,
         "methods",

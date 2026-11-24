@@ -84,6 +84,7 @@ methods! {
     FuzzStart => ("fuzz.start", FuzzStartArgs, JobStatus, Reconcile, Execution),
     FuzzStatus => ("fuzz.status", FuzzStatusArgs, JobStatus, Read, None),
     FuzzStop => ("fuzz.stop", JobCancelArgs, JobStatus, Reconcile, None),
+    TraceStart => ("trace.start", TraceStartArgs, JobStatus, Reconcile, Execution),
     AngrSolve => ("angr.solve", AngrSolveArgs, JobStatus, Reconcile, Execution),
     EmulateRun => ("emu.run", EmulateRunArgs, RawEvidence, Once, Execution),
     LibcIdentify => ("libc.identify", LibcIdentifyArgs, RawEvidence, Read, Execution),

@@ -168,6 +168,15 @@ impl ToolContext {
                 "requested job LaunchSpec/stdin capability is unavailable"
             );
         }
+        if spec.definition.name.as_str() == "trace_run" {
+            ensure!(
+                observation.as_ref().is_some_and(|value| {
+                    value["capabilities"]["launch_spec_jobs"] == true
+                        && value["capabilities"]["process_stdin"] == true
+                }),
+                "dynamic tracing requires observed LaunchSpec and stdin support"
+            );
+        }
         if spec.definition.name.as_str() == "input_minimize" && args["allow_signal_only"] != true {
             ensure!(
                 observation

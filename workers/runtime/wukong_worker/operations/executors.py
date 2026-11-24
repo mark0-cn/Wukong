@@ -3,6 +3,7 @@
 from wukong_worker.operations.process_job import execute as process
 from wukong_worker.operations.verify_job import execute as verify
 from wukong_worker.operations.reduce_job import execute as reduce
+from wukong_worker.operations.trace_job import execute as trace
 
 EXECUTORS = {
     "process": process,
@@ -10,6 +11,7 @@ EXECUTORS = {
     "replay": verify,
     "verify": verify,
     "minimize": reduce,
+    "trace": trace,
 }
 
 

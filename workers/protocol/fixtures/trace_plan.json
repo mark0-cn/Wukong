@@ -1,0 +1,51 @@
+{
+  "spec": {
+    "schema_version": 1,
+    "abi": "sysv_amd64",
+    "points": [
+      {
+        "kind": "function",
+        "point_id": "read_input",
+        "location": {
+          "kind": "symbol",
+          "module_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "symbol": "read_input"
+        },
+        "phases": [
+          "return",
+          "entry"
+        ],
+        "capture": {
+          "arguments": [
+            {
+              "name": "size",
+              "index": 1,
+              "value_type": "u64"
+            },
+            {
+              "name": "destination",
+              "index": 0,
+              "value_type": "pointer"
+            }
+          ],
+          "buffers": [
+            {
+              "name": "input_bytes",
+              "address_argument": 0,
+              "length": {
+                "kind": "argument",
+                "index": 1
+              }
+            }
+          ],
+          "return_value": "i64"
+        }
+      }
+    ],
+    "limits": {
+      "max_events": 512
+    }
+  },
+  "canonical_json": "{\"abi\":\"sysv_amd64\",\"points\":[{\"capture\":{\"arguments\":[{\"index\":0,\"name\":\"destination\",\"value_type\":\"pointer\"},{\"index\":1,\"name\":\"size\",\"value_type\":\"u64\"}],\"buffers\":[{\"address_argument\":0,\"length\":{\"index\":1,\"kind\":\"argument\"},\"name\":\"input_bytes\"}],\"return_value\":\"i64\"},\"kind\":\"function\",\"phases\":[\"entry\",\"return\"],\"point_id\":\"read_input\"}],\"schema_version\":1}",
+  "expected_signature": "61c936a6a5570b474ccb2aeb8e204003f328a065636f0ddca00e284728f8ae20"
+}

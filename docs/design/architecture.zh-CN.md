@@ -73,6 +73,12 @@ Windows 的执行管理入口只有原生 Worker。控制器负责业务任务�
 | `interfaces/report`、`interfaces/cli` | 报告导出、CLI、人工查询与干预 |
 | `interfaces/desktop`、`ui/src` | Tauri 命令与工作区服务、展示数据适配、React 桌面界面及生命周期 |
 
+<a id="动态追踪与差分"></a>
+
+### 动态追踪与差分
+
+`workers/protocol` 定义声明式 TraceSpec 和原始 trace 事件契约。`trace_run` 复用现有 LaunchSpec、WorkerGateway、观察、取消、产物同步和恢复语义，作为普通持久 job 运行；Linux worker 在该 job 内私有持有 GDB 会话，不向 controller 暴露第二个会话。`trace_compare` 仅在 controller 离线比较经过身份认证的 run/events 证据，不连接 worker。原始 JSONL、启动/地址绑定、source/executed 身份和比较产物均作为哈希证据保存，模型只看到 bounded 摘要。当前实现支持 Linux x86_64 SysV AMD64；Windows 不注册 `trace.start`。
+
 <a id="worker-resource-boundaries"></a>
 
 ### Worker 资源边界

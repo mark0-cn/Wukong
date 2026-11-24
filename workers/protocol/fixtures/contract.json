@@ -712,5 +712,48 @@
       "source": "print(1)"
     },
     "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "trace.start",
+    "value": {
+      "launch_spec": "files/probe/launch.json",
+      "input": "files/input",
+      "spec": {
+        "points": [
+          {
+            "kind": "function",
+            "point_id": "read_input",
+            "location": {
+              "kind": "module_offset",
+              "module_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "offset": 4096
+            },
+            "phases": [
+              "entry",
+              "return"
+            ],
+            "capture": {
+              "arguments": [],
+              "buffers": [],
+              "return_value": "u64"
+            }
+          }
+        ]
+      }
+    },
+    "valid": true
+  },
+  {
+    "kind": "request",
+    "method": "trace.start",
+    "value": {
+      "launch_spec": "files/probe/launch.json",
+      "input": "files/input",
+      "spec": {
+        "points": []
+      }
+    },
+    "valid": false
   }
 ]

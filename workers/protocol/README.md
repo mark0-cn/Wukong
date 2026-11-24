@@ -6,6 +6,8 @@ Verification expectations match only populated predicates. Omitted or null optio
 
 `job.list` and `resource.list` accept an optional exclusive `after` cursor and a `limit` of 1–64 (default 64). Job IDs are returned in ascending order; continue after the last ID until an empty page. Resource pages also expose `next_after`. Linux job inventory honors the same cursor and bounds as native Windows.
 
+`trace.start` accepts `launch_spec`, one `input` and a declarative `spec` containing an ABI, logical points, captures and limits. Its effect is `Reconcile` with `Execution` demand. `src/trace.rs` also defines canonical logical plans/signatures and the raw run/events JSONL types used by the Rust controller and Python worker; unknown fields, invalid ABI/capture combinations, non-contiguous events and incomplete final lines are rejected. Windows does not register this method. See [Dynamic function tracing](../../docs/user/dynamic-trace.md).
+
 `debug.start` can select a staged `target` or a staged `launch_spec`; the controller checks every supplied launch/input artifact against the current run. A native Windows LaunchSpec owns the target and arguments, so omit per-call `target` and `args` in that mode. The default debugger mode is `launch` and the default engine is `auto`. Linux derives the original target hash from the checked LaunchSpec before resolving its execution environment.
 
 `exec.run`, `crash.replay`, `input.minimize` and `poc.verify` accept an optional `output_limit` of 1,024–8,388,608 bytes (default 1 MiB), matching both platform executors. The limit bounds retained execution output (per trial for replay/minimization); it is distinct from the controller's model-facing output preview. Producer/verifier identities belong only to `poc.verify` requests.

@@ -49,7 +49,7 @@ Describe a binary-analysis objective in the desktop workspace or CLI. Wukong's l
 | Workflow | Available capabilities |
 | --- | --- |
 | Understand a binary | ELF/PE/Mach-O profiles and strings; Ghidra functions, decompilation, instructions and cross-references |
-| Recover behavior | Input formats, data layouts, algorithms and state machines; evidence-backed differential checks |
+| Recover behavior | Input formats, data layouts, algorithms and state machines; evidence-backed differential checks; declarative function entry/return traces and offline trace diffs on Linux x86_64 |
 | Investigate Pwn challenges | GDB/MI, interactive processes, AFL++ QEMU, angr, crash replay and minimization; on-demand heap, ROP, format-string and other methods |
 | Coordinate and review | Scoped analyst tasks, a parent-child collaboration tree, independent verifier review, shared notes and coverage |
 | Resume and deliver | Pause/resume, token/cost budgets, English/Chinese UI and task output; JSON/Markdown/HTML reports with original evidence and SHA256 manifests |

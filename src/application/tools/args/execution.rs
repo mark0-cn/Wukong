@@ -80,6 +80,7 @@ pub(in crate::application::tools) use wukong_worker_protocol::params::{
     DebugStartArgs, EmulateRunArgs, ExecCommandArgs, FuzzStartArgs, InputMinimizeArgs,
     InteractiveCloseArgs, InteractiveStartArgs, JobArtifactsArgs, JobCancelArgs, JobStartArgs,
     JobStatusArgs, LibcIdentifyArgs, NetworkReplay, PocVerifyArgs, PyRunArgs, SeccompAnalyzeArgs,
+    TraceStartArgs,
 };
 
 pub(in crate::application::tools) use wukong_worker_protocol::params::RuntimeProfileArgs;

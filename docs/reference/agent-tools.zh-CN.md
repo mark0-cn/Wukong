@@ -19,3 +19,5 @@
 `resource_read` 返回有界输出分块、证据 ID 和 next_offset。at_snapshot_end 表示当前观察中没有更多字节；eof 还要求资源已终止。后端可能只在完成后公布输出流。流缺失会明确报错，不会当作空输出。证据内容仍可通过 evidence_read 读取，不依赖 worker 资源。
 
 `differential_test` 用 1–8 个本次运行的输入证据比较两个真实准备的 LaunchSpec，每个输入最多 64 KiB，两份清单均须记录 1–10 秒时限。明确选择 exact_output、exit_status 或 stdout_json 及预期退出码。作业顺序运行，以支持单资源 worker。保留清单、输入、作业状态和输出证据。超时、输出缺失／截断、非预期退出或无效 JSON 均为 inconclusive。聚合调用预算为 300 秒；未完成作业仍保留所属关系，可通过资源清单发现。
+
+`trace_run` 使用不可变 LaunchSpec 和同 run 的单个输入，以普通持久 job 启动声明式函数 entry/return 或调用点追踪。`trace_compare` 接收两组调用者所有的 `trace/run.json` + `trace/events.jsonl` 证据，离线比较规范化观察，不连接 worker。只有完整、可比、已 settled、证据就绪且非空的 trace 才能返回 match/mismatch。schema 和 Linux/ABI 限制见[动态函数追踪与离线差分](../user/dynamic-trace.zh-CN.md)。

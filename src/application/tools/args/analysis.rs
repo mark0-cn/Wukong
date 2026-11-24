@@ -161,6 +161,47 @@ choices!(ComparisonRule {
 });
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct TraceCompareArgs {
+    pub left: TraceRunEvidenceArgs,
+    pub right: TraceRunEvidenceArgs,
+    #[serde(default)]
+    pub comparison: TraceComparisonArgs,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(in crate::application::tools) struct TraceRunEvidenceArgs {
+    pub run_evidence_id: String,
+    pub events_evidence_id: String,
+}
+
+fn default_trace_max_differences() -> u8 {
+    16
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(in crate::application::tools) struct TraceComparisonArgs {
+    #[schemars(length(min = 1, max = 256))]
+    pub capture_ids: Option<Vec<String>>,
+    #[schemars(length(max = 256))]
+    pub ignore: Vec<String>,
+    #[schemars(range(min = 1, max = 64))]
+    pub max_differences: u8,
+}
+
+impl Default for TraceComparisonArgs {
+    fn default() -> Self {
+        Self {
+            capture_ids: None,
+            ignore: Vec::new(),
+            max_differences: default_trace_max_differences(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(in crate::application::tools) enum ArtifactInterpreter {
     Python3,

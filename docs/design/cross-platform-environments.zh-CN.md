@@ -72,6 +72,12 @@ Linux 使用 GDB/MI；托管 Windows 使用原生 `dbgeng` 路由和现成 WinDb
 
 Windows 使用固定版本的外部 WinDbg MCP 和 `rmcp` 客户端；自写 DbgEng 桥已删除。私有会话协议使用 Prost 生成的 protobuf，公共身份、租约、错误和容量类型由 `workers/protocol` 共享。保留原始 MCP 结果作为证据；启动与转储输入、会话所有权和清理由原生 worker 管理。当前边界见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)，此前验收范围见 [历史记录](../../workers/windows/VALIDATION-HISTORY.zh-CN.md)。
 
+<a id="声明式动态追踪"></a>
+
+### 声明式动态追踪
+
+`trace.start` 仅在 Linux GDB/MI worker 上注册。每次 trace 使用经过准入的 LaunchSpec 和单个输入，在普通持久 job 内私有持有调试器，并通过现有同步路径发布有界 run/events 产物。Windows 不注册也不广告该方法。`trace_compare` 仅在 controller 比较已同步的同 run 证据，不重新检查当前 worker，因此 worker 离线不妨碍比较。当前 ABI、地址和比较限制见[动态函数追踪与离线差分](../../docs/user/dynamic-trace.zh-CN.md)。
+
 ## Windows 离线交付契约
 
 完整离线包由联网控制器使用固定版本、经过校验的官方依赖组装，VM 安装不能在线补依赖。原生构建身份覆盖共用协议 crate；组装校验实际源码身份并保留许可证。安装、维护和实际执行各自需要对应验收，登记成功不能替代执行资格。私钥和模型凭据保留在控制器。详见 [Windows 组件指南](../../workers/windows/README.zh-CN.md)及其中明确标注的历史记录；旧包的验收不证明当前修改通过。

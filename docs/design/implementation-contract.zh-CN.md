@@ -33,6 +33,7 @@
 13. 模型 I/O 前保存解析后的 endpoint/配置；恢复不受环境默认地址改变影响。角色输出预算与模型容量分离。缺少用量/费用信息时保存响应，并在工具 I/O 前暂停。MCP 只读提示不能授权重放不确定效果。
 14. 角色只有 root、analyst、verifier。能力 Skill 补充方法/产物，不改变角色、权限、完成协议。角色指令不能作为 Skill 加载。同范围活动 analyst 跨能力共享去重 owner；独立验证使用另一 verifier 实例。普通报告归 root。
 15. 执行结束与证据就绪是两个阶段。`job_execution_finished` 仅提供信息；`job_completed` 要求清理确认、证据齐全及后处理完成。verifier 认证和 root 成功完成必须要求证据就绪。缺失证据必须作为不确定结果中的明确缺口保留。
+16. 声明式 trace 只能由所属 worker job 的私有调试器执行，使用 typed TraceSpec 校验、有界采集和原始哈希事件，不提供任意调试脚本通道。source/executed target、输入、逻辑 plan 和环境身份分别保持。`trace_compare` 离线验证同 run、调用者所有的 run/events 证据。只有完整、可比、已 settled 且证据就绪的观察才能产生 match/mismatch；不兼容输入为 incomparable，部分、截断或零事件观察为 inconclusive，均不能证明等价。
 
 <a id="acceptance-evidence"></a>
 

@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Add declarative function entry/return and call-site tracing with offline trace comparison. The initial backend supports Linux x86_64 GDB/MI with SysV AMD64, bounded buffers, recursive activations, hashed run/events evidence and explicit incomplete/incompatible results; Windows, multi-thread ordering and whole-program equivalence are not claimed."
+zh_CN = "新增声明式函数 entry/return 和调用点追踪，以及离线 trace 比较差分。首版支持 Linux x86_64 GDB/MI + SysV AMD64，提供有界 buffer、递归 activation、run/events 哈希证据和明确的不完整/不兼容结果；不宣称 Windows、多线程顺序或完整程序等价。"

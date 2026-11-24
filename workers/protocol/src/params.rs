@@ -61,6 +61,16 @@ pub struct JobStartArgs {
     pub output_limit: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TraceStartArgs {
+    #[schemars(length(min = 1))]
+    pub launch_spec: String,
+    #[schemars(length(min = 1))]
+    pub input: String,
+    pub spec: crate::TraceSpec,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct JobStatusArgs {

@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from wukong_worker.artifacts.metadata import atomic_json
-from wukong_worker.artifacts.common import public_file, sha256_file
+from wukong_worker.artifacts.common import confined, public_file, sha256_file
 from wukong_worker.platform.environment import safe_env
 from wukong_worker.platform.process_owner import ProcessResources
 
@@ -33,10 +33,19 @@ class DebugSession:
 
     engine = "gdb_mi"
 
-    def __init__(self, root, params, isolated=False):
+    @property
+    def transcript(self):
+        return getattr(self, "_transcript", "debug/" + self.id + "/transcript.mi")
+
+    def __init__(self, root, params, isolated=False, directory=None):
         self.id = uuid.uuid4().hex
-        self.directory = root / "debug" / self.id
+        self.directory = (
+            confined(root, directory) if directory is not None else Path(root) / "debug" / self.id
+        )
         self.directory.mkdir(parents=True)
+        self._transcript = (
+            self.directory.relative_to(Path(root).resolve()).as_posix() + "/transcript.mi"
+        )
         self.lock = threading.RLock()
         self.stop_condition = threading.Condition()
         self.stop_sequence = 0
@@ -56,6 +65,7 @@ class DebugSession:
         if self.mode not in {"launch", "dump"}:
             raise ValueError("invalid debugger mode")
         self.target_sha256 = sha256_file(target)
+        self.source_target_sha256 = self.target_sha256
         dump = public_file(root, params["dump"]) if self.mode == "dump" else None
         self.dump_sha256 = sha256_file(dump) if dump else None
         self.execution_state = "stopped" if dump else "loaded"
@@ -98,6 +108,9 @@ class DebugSession:
                     self.stdin_path, self.experiment, "stdin.bin"
                 )
             isolation.seal(self.experiment)
+        self.executed_target_sha256 = sha256_file(target)
+        self.target_path = target
+        self.launch = launch
         launch_args = (
             ["--exec", str(target), "--core", str(dump)] if dump else ["--args", str(target)] + args
         )
@@ -257,7 +270,7 @@ class DebugSession:
                         "record": record["record"],
                         "payload": record.get("payload"),
                         "events": list(self.events)[-64:],
-                        "transcript": "debug/" + self.id + "/transcript.mi",
+                        "transcript": self.transcript,
                     }
             # The command may still have effects. Invalidate the session, never
             # issue another command against an unknown debugger state.
@@ -280,7 +293,7 @@ class DebugSession:
                 "session_id": self.id,
                 "launch_identity": self.launch_identity,
                 "process": process_profile(candidates[0]["pid"]),
-                "transcript": "debug/" + self.id + "/transcript.mi",
+                "transcript": self.transcript,
             }
 
     def inspect(self, params, timeout):

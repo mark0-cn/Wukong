@@ -13,6 +13,7 @@ from wukong_worker.artifacts.metadata import load_json
 from wukong_analysis.validation import bounded_int
 from wukong_worker.platform.environment import safe_env
 from wukong_worker.core.jobs import JobPlan
+from wukong_worker.core.lifecycle import TERMINAL
 from filelock import FileLock
 from wukong_worker.resources.job_ledger import JobLedger
 from wukong_worker.platform.process_owner import ProcessResources
@@ -29,6 +30,28 @@ class JobManager:
         self.process_resources = ProcessResources()
         self.lock = FileLock(root / "jobs-admission.lock", timeout=15)
         (root / "jobs").mkdir(exist_ok=True)
+        self.recover_traces()
+
+    def recover_traces(self):
+        from wukong_worker.platform.process_journal import ProcessJournal
+
+        for path in sorted((self.root / "jobs").glob("*/status.json")):
+            directory = path.parent
+            try:
+                spec = load_json(directory / "spec.json")
+                if spec.get("kind") != "trace":
+                    continue
+                ledger = JobLedger(directory)
+                status = ledger.observe()
+                if status["state"] not in TERMINAL or status.get("cleanup_pending") is not True:
+                    continue
+                journal = directory / "trace" / "debugger" / "processes.json"
+                if journal.is_file() and ProcessJournal.reconcile(journal):
+                    ledger.confirm_cleanup()
+            except (OSError, ValueError, KeyError, RuntimeError):
+                # A corrupt or incomplete private journal remains an explicit
+                # recovery blocker; never broaden cleanup to another resource.
+                continue
 
     def start(self, plan: JobPlan) -> dict[str, Any]:
         with self.lock:
