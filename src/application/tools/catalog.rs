@@ -121,7 +121,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::ToolCatalogArgs>(
             "tool_catalog",
             "tool-tool-catalog",
-            "Query bounded tool groups, current selection, task permissions and last-observed backend availability. Follow next_cursor with after. Selection never changes role or task grants.",
+            "Query bounded tool groups, current selection and last-observed backend availability. Follow next_cursor with after. Selection never changes roles.",
             ReplayPolicy::ReadOnly,
             false,
             |services, agent, call, name, args| {
@@ -133,7 +133,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::ToolSelectArgs>(
             "tool_select",
             "tool-tool-select",
-            "Replace optional tool groups for subsequent model requests. Core and resource lifecycle tools stay available. Raw debugger and Windows lab require explicit task grants; external selects configured MCP tools.",
+            "Replace optional tool groups for subsequent model requests. Core and resource lifecycle tools stay available; external selects configured MCP tools.",
             ReplayPolicy::Transactional,
             false,
             |services, agent, call, name, args| {
@@ -672,7 +672,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::FunctionDecompileArgs>(
             "function_decompile",
             "tool-function-decompile",
-            "Ghidra: decompile using a target-bound module_relative AddressRef (preferred) or legacy byte offset. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
+            "Ghidra: decompile using a target-bound module_relative AddressRef. Copy binary_inspect addresses; a link-time VA must subtract image_base. File offsets, runtime addresses and page numbers are not module offsets.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -684,7 +684,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::XrefsQueryArgs>(
             "xrefs_query",
             "tool-xrefs-query",
-            "Ghidra: references to/from a target-bound module_relative AddressRef or legacy byte offset. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
+            "Ghidra: references to/from a target-bound module_relative AddressRef. Copy binary_inspect addresses; subtract image_base from a link-time VA, never reinterpret file offsets or page numbers.",
             ReplayPolicy::ReadOnly,
             true,
             |services, agent, call, name, args| {
@@ -1072,7 +1072,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::LabPrepareArgs>(
             "lab_prepare",
             "tool-lab-prepare",
-            "Start preparation of the assigned Windows lab and return operation_id. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Requires the windows_lab task grant. Unsupported execution requirements are rejected at run admission.",
+            "Start preparation of the assigned Windows lab and return operation_id. Every attempt restores fixed base wukong_base_vm; configured signed worker_media may upgrade, verify and republish that base before a reboot and experiment snapshot. Query lab_operation_status for the owned lab_ref and lease. The controller derives ownership and package hashes from assessment evidence; spec is typed. Available by default to catalog-permitted roles. Unsupported execution requirements are rejected at run admission.",
             ReplayPolicy::OperatorOnly,
             true,
             |services, agent, call, name, args| {

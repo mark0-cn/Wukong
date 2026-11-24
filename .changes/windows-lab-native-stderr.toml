@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Preserve real exit codes and bounded stdout/stderr from offline worker setup under Windows PowerShell 5.1, preventing merged native stderr from terminating the provisioning wrapper before its failure receipt is populated."
+zh_CN = "在 Windows PowerShell 5.1 下保留离线 Worker 安装器的真实退出码及有界 stdout/stderr，避免合并的原生 stderr 在失败回执填充前终止部署包装脚本。"

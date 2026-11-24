@@ -8,7 +8,7 @@
 //! timed-out operation stays `recovery_required` until an operator reconciles
 //! it, and no state transition re-issues an uncertain host effect.
 use crate::adapters::environments::EnvironmentConfig;
-use crate::config::WindowsLabVm;
+use crate::config::{WINDOWS_LAB_BASE_SNAPSHOT, WindowsLabVm};
 use anyhow::{Context, Result, ensure};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -43,7 +43,8 @@ pub use provision_service::{
     CleanGuestOptions, CleanGuestOutcome, ProvisionOptions, ProvisionOutcome,
 };
 
-pub const STATE_SCHEMA: u32 = 2;
+pub const STATE_SCHEMA: u32 = 3;
+pub const BASELINE_SNAPSHOT: &str = WINDOWS_LAB_BASE_SNAPSHOT;
 
 /// Fixed host operations the lab may request. There is no generic run method.
 #[async_trait]
@@ -53,6 +54,10 @@ pub trait VmHost: Send + Sync {
     async fn snapshot(&self, name: &str) -> Result<()>;
     async fn revert(&self, name: &str) -> Result<()>;
     async fn start(&self) -> Result<()>;
+    /// Power off only after the persisted lab intent fences other execution.
+    async fn stop(&self) -> Result<()>;
+    /// Shut down cleanly before offline disk writes; never fall back to a hard stop.
+    async fn stop_clean(&self) -> Result<()>;
     async fn delete_snapshot(&self, name: &str) -> Result<()>;
 }
 
@@ -106,9 +111,15 @@ fn configuration_sha256(
     )?)))
 }
 
+enum PrepareStep {
+    Ready(LabLease),
+    Upgrade(MediaIdentity),
+}
+
 pub struct WindowsLab {
     vm_id: String,
     baseline: String,
+    worker_media: Option<PathBuf>,
     snapshot_prefix: String,
     timeout: Duration,
     start_after_restore: bool,
@@ -157,10 +168,11 @@ impl WindowsLab {
         store.physical_id = Some(physical_id.clone());
         store.configuration_sha256 = Some(configuration_sha256(&physical_id, config, environment)?);
         // Read validates the persisted configuration before opening any capability.
-        store.load(vm_id, &config.baseline_snapshot)?;
+        store.load(vm_id, BASELINE_SNAPSHOT)?;
         Ok(Self {
             vm_id: vm_id.to_owned(),
-            baseline: config.baseline_snapshot.clone(),
+            baseline: BASELINE_SNAPSHOT.to_owned(),
+            worker_media: config.worker_media.clone(),
             snapshot_prefix: config.snapshot_prefix.clone(),
             timeout: Duration::from_secs(config.operation_timeout_seconds),
             start_after_restore: config.start_after_restore,
@@ -321,7 +333,6 @@ impl WindowsLab {
             "lab purpose must be 1–256 characters"
         );
         spec.validate()?;
-        let spec_sha256 = spec.sha256()?;
         let package = if spec.dependencies.is_empty() {
             None
         } else {
@@ -333,6 +344,49 @@ impl WindowsLab {
             .as_ref()
             .map(|install| install.sha256(spec.launch))
             .transpose()?;
+        // A successful update provisions and verifies a new fixed base, then the
+        // next pass restores that base before issuing the experiment lease.
+        for _ in 0..2 {
+            match self
+                .prepare_once(
+                    owner,
+                    purpose,
+                    &spec,
+                    package_sha256.clone(),
+                    install_sha256.clone(),
+                )
+                .await?
+            {
+                PrepareStep::Ready(lease) => return Ok(lease),
+                PrepareStep::Upgrade(media) => {
+                    self.provision(ProvisionOptions {
+                        source: ProvisionSource::Media {
+                            directory: media.media_root,
+                        },
+                        iso_tool: None,
+                        replace_baseline: true,
+                        register: false,
+                        verify_environment: false,
+                        dry_run: false,
+                        timeout_seconds: self.timeout.as_secs().clamp(60, 7200),
+                    })
+                    .await
+                    .context("upgrade the restored Windows worker and replace its verified base")?;
+                }
+            }
+        }
+        anyhow::bail!("worker upgrade did not converge on the configured signed media")
+    }
+
+    async fn prepare_once(
+        &self,
+        owner: &str,
+        purpose: &str,
+        spec: &ExperimentSpec,
+        package_sha256: Option<String>,
+        install_sha256: Option<String>,
+    ) -> Result<PrepareStep> {
+        let spec_sha256 = spec.sha256()?;
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
         let _environment_guard = crate::adapters::environments::lab_guard::acquire(
@@ -384,21 +438,85 @@ impl WindowsLab {
         state.last_error = None;
         self.store.save(&state)?;
 
+        let snapshots = match self.step(self.host.snapshots()).await {
+            Ok(names) => names,
+            Err(StepFailure::Timeout) => return self.mark_unknown(state, pending),
+            Err(StepFailure::Failed(error)) => {
+                return self.mark_failed(state, pending, error, false);
+            }
+        };
+        if !snapshots.iter().any(|name| name == &self.baseline) {
+            return self.mark_failed(
+                state,
+                pending,
+                anyhow::anyhow!(
+                    "fixed base snapshot '{}' is missing; install the worker with `wukong lab provision` before analysis",
+                    self.baseline
+                ),
+                false,
+            );
+        }
+        // Restoring first also recovers a powered-on but unresponsive guest. No
+        // worker readiness or maintenance request is sent to the untrusted state.
+        if let Err(failure) = self.step(self.host.revert(&self.baseline)).await {
+            return match failure {
+                StepFailure::Timeout => self.mark_unknown(state, pending),
+                StepFailure::Failed(error) => self.mark_failed(state, pending, error, true),
+            };
+        }
         if let Err(failure) = self.ensure_running().await {
             return match failure {
                 StepFailure::Timeout => self.mark_unknown(state, pending),
                 StepFailure::Failed(error) => self.mark_failed(state, pending, error, false),
             };
         }
+        let readiness = match self.worker.as_ref() {
+            Some(_) => match self.worker_readiness(self.timeout).await {
+                Ok(observation) => Some(observation),
+                Err(error) => return self.mark_failed(state, pending, error, false),
+            },
+            None => None,
+        };
+        let upgrade = match (&self.worker_media, readiness.as_ref()) {
+            (Some(directory), Some(observation)) => {
+                let candidate = match provision::verify_media(directory) {
+                    Ok(media) => media,
+                    Err(error) => return self.mark_failed(state, pending, error, false),
+                };
+                match worker_upgrade(&state, observation, candidate) {
+                    Ok(upgrade) => upgrade,
+                    Err(error) => return self.mark_failed(state, pending, error, false),
+                }
+            }
+            (Some(_), None) => {
+                return self.mark_failed(
+                    state,
+                    pending,
+                    anyhow::anyhow!("worker_media upgrade checks require a configured lab worker"),
+                    false,
+                );
+            }
+            (None, _) => None,
+        };
         let maintenance = match self.prepare_worker().await {
             Ok(maintenance) => maintenance,
             Err(error) => return self.mark_failed(state, pending, error, false),
         };
-        if let Err(failure) = self.ensure_baseline().await {
-            return match failure {
-                StepFailure::Timeout => self.mark_unknown(state, pending),
-                StepFailure::Failed(error) => self.mark_failed(state, pending, error, false),
-            };
+        if let Some(media) = upgrade {
+            if let Err(failure) = self.step(self.host.stop_clean()).await {
+                return match failure {
+                    StepFailure::Timeout => self.mark_unknown(state, pending),
+                    StepFailure::Failed(error) => self.mark_failed(state, pending, error, true),
+                };
+            }
+            state.phase = LabPhase::Idle;
+            state.pending = None;
+            state.last_error = None;
+            self.store.save(&state)?;
+            if let Some(maintenance) = maintenance {
+                maintenance.finish().await?;
+            }
+            return Ok(PrepareStep::Upgrade(media));
         }
         if let Err(failure) = self.step(self.host.snapshot(&snapshot)).await {
             return match failure {
@@ -413,7 +531,7 @@ impl WindowsLab {
             purpose: purpose.to_owned(),
             generation,
             spec_sha256: spec_sha256.clone(),
-            spec,
+            spec: spec.clone(),
             snapshot: Some(snapshot.clone()),
             package_sha256: package_sha256.clone(),
             install_sha256: install_sha256.clone(),
@@ -424,7 +542,7 @@ impl WindowsLab {
         if let Some(maintenance) = maintenance {
             maintenance.finish().await?;
         }
-        Ok(LabLease {
+        Ok(PrepareStep::Ready(LabLease {
             vm_id: self.vm_id.clone(),
             lab_id,
             generation,
@@ -433,7 +551,7 @@ impl WindowsLab {
             package_sha256,
             install_sha256,
             owner: owner.to_owned(),
-        })
+        }))
     }
 
     /// Fences the lease first: the generation advances and the previous active
@@ -608,8 +726,9 @@ impl WindowsLab {
         }))
     }
 
-    /// Delete unused experiment snapshots. The baseline and the active
-    /// experiment snapshot are always kept.
+    /// Delete unused experiment snapshots and settled, operation-owned base
+    /// staging snapshots. The fixed base, active experiment and every pending or
+    /// unproven snapshot are always kept.
     pub async fn prune(&self) -> Result<serde_json::Value> {
         let _gate = self.gate.lock().await;
         let _lock = self.store.lock(&self.vm_id)?;
@@ -633,6 +752,7 @@ impl WindowsLab {
             .await
             .map_err(|_| anyhow::anyhow!("snapshot listing timed out"))??;
         let prefix = format!("{}-", self.snapshot_prefix);
+        let next_prefix = format!("{}-next-", self.baseline);
         let mut deleted = Vec::new();
         let mut failed = Vec::new();
         let mut kept = vec![self.baseline.clone()];
@@ -640,8 +760,35 @@ impl WindowsLab {
             kept.push(active.clone());
         }
         for name in names {
-            if !name.starts_with(&prefix) || name == self.baseline || Some(&name) == active.as_ref()
-            {
+            let experiment = name.starts_with(&prefix);
+            let base_operation = name.strip_prefix(&next_prefix);
+            if name == self.baseline || Some(&name) == active.as_ref() {
+                continue;
+            }
+            if let Some(operation) = base_operation {
+                // A staging name is owned only when its settled receipt in this
+                // VM's store proves a completed fixed-base replacement. Pending,
+                // unknown, foreign and merely similarly named snapshots are never
+                // pruned.
+                let receipt = self
+                    .store
+                    .root()
+                    .join("provisions")
+                    .join(format!("{operation}.json"));
+                let owned = provision::GuestPaths::for_provision(operation).is_ok()
+                    && provision::read_bounded(&receipt, 4 * 1024 * 1024)
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<LabProvision>(&bytes).ok())
+                        .is_some_and(|record| {
+                            record.provision_id == operation
+                                && record.status == RunStatus::Completed
+                                && record.settled
+                                && record.baseline_snapshot.as_deref() == Some(&self.baseline)
+                        });
+                if !owned {
+                    continue;
+                }
+            } else if !experiment {
                 continue;
             }
             match tokio::time::timeout(self.timeout, self.host.delete_snapshot(&name)).await {
@@ -710,6 +857,8 @@ impl WindowsLab {
                     state.last_error = None;
                 }
                 OperationKind::Provision => {
+                    self.reconcile_provision_snapshots(&pending, ReconcileOutcome::Completed)
+                        .await?;
                     self.cleanup_provision_artifacts(&pending).await?;
                     state.phase = LabPhase::Idle;
                     state.active = None;
@@ -718,6 +867,7 @@ impl WindowsLab {
                     if let Some(record) = state.last_provision.as_mut() {
                         record.status = RunStatus::Completed;
                         record.settled = true;
+                        record.baseline_snapshot = Some(pending.snapshot.clone());
                         record.ended_at = record.ended_at.clone().or_else(|| Some(now()));
                         record.error = None;
                     }
@@ -725,6 +875,11 @@ impl WindowsLab {
             },
             ReconcileOutcome::Failed => {
                 if pending.kind == OperationKind::Provision {
+                    self.reconcile_provision_snapshots(&pending, ReconcileOutcome::Failed)
+                        .await
+                        .context(
+                            "resolve operation-owned base snapshots before recording failure",
+                        )?;
                     self.cleanup_provision_artifacts(&pending).await.context(
                         "restore the VMX and remove the generated ISO before recording failure",
                     )?;
@@ -769,6 +924,18 @@ impl WindowsLab {
     /// Poll the read-only doctor through guest boot. Only after it succeeds do
     /// we acquire the single exclusive maintenance lease used around snapshots.
     async fn worker_readiness(&self, timeout: Duration) -> Result<serde_json::Value> {
+        self.worker_readiness_inner(timeout, false).await
+    }
+
+    async fn worker_upgrade_readiness(&self, timeout: Duration) -> Result<serde_json::Value> {
+        self.worker_readiness_inner(timeout, true).await
+    }
+
+    async fn worker_readiness_inner(
+        &self,
+        timeout: Duration,
+        refresh: bool,
+    ) -> Result<serde_json::Value> {
         let worker = self
             .worker
             .as_ref()
@@ -780,7 +947,14 @@ impl WindowsLab {
             if remaining.is_zero() {
                 break;
             }
-            match tokio::time::timeout(remaining, worker.doctor()).await {
+            let attempt = async {
+                if refresh {
+                    worker.refresh().await
+                } else {
+                    worker.doctor().await
+                }
+            };
+            match tokio::time::timeout(remaining, attempt).await {
                 Ok(Ok(observation)) => return Ok(observation),
                 Ok(Err(error)) => last_error = Some(error),
                 Err(_) => break,
@@ -805,15 +979,6 @@ impl WindowsLab {
         };
         self.worker_readiness(self.timeout).await?;
         Ok(Some(worker.maintenance().await?))
-    }
-
-    async fn ensure_baseline(&self) -> std::result::Result<(), StepFailure> {
-        let names = self.step(self.host.snapshots()).await?;
-        if names.iter().any(|name| name == &self.baseline) {
-            return Ok(());
-        }
-        self.step(self.host.snapshot(&self.baseline)).await?;
-        Ok(())
     }
 
     async fn step<T>(
@@ -960,6 +1125,70 @@ impl WindowsLab {
     }
 }
 
+/// Compare the restored worker's authenticated runtime identity with a fully
+/// verified signed media directory. Version strings alone never authorize an
+/// update, and a base whose provenance differs from its provision receipt is not
+/// upgraded automatically.
+fn worker_upgrade(
+    state: &LabState,
+    observation: &serde_json::Value,
+    candidate: MediaIdentity,
+) -> Result<Option<MediaIdentity>> {
+    let identity = observation
+        .get("observation")
+        .and_then(|observation| observation.get("identity"))
+        .context("restored worker doctor has no identity")?;
+    let installation = identity
+        .get("installation_id")
+        .and_then(serde_json::Value::as_str)
+        .context("restored worker identity has no installation ID")?;
+    let package = identity
+        .get("package_sha256")
+        .and_then(serde_json::Value::as_str)
+        .context("restored worker identity has no package hash")?;
+    ensure!(
+        candidate.installation_id == installation,
+        "worker upgrade media belongs to a different installation"
+    );
+    let current = [
+        state.last_provision.as_ref(),
+        state.rollback_provision.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|provision| {
+        provision.status == RunStatus::Completed
+            && provision.settled
+            && provision.baseline_snapshot.as_deref() == Some(BASELINE_SNAPSHOT)
+            && provision.media.installation_id == installation
+            && provision.media.manifest_sha256 == package
+    })
+    .context("the restored worker has no settled provisioning provenance matching its identity")?;
+    if candidate.manifest_sha256 == package {
+        return Ok(None);
+    }
+    ensure!(
+        candidate.controller_public_key == current.media.controller_public_key
+            && candidate.environment_id == current.media.environment_id
+            && candidate.ssh_port == current.media.ssh_port
+            && candidate.ssh_user == current.media.ssh_user
+            && candidate.management_peer == current.media.management_peer
+            && candidate.ssh_public_key == current.media.ssh_public_key,
+        "worker upgrade cannot replace installation authority, environment or SSH binding"
+    );
+    ensure!(
+        candidate.generation > current.media.generation,
+        "worker upgrade requires a newer signed enrollment generation"
+    );
+    let next = semver::Version::parse(&candidate.controller_version)?;
+    let previous = semver::Version::parse(&current.media.controller_version)?;
+    ensure!(
+        next > previous,
+        "worker upgrade media is not a newer version"
+    );
+    Ok(Some(candidate))
+}
+
 enum StepFailure {
     Failed(anyhow::Error),
     Timeout,
@@ -1030,7 +1259,7 @@ pub(crate) fn check_execution_admission(
         if vm.environment.as_deref() != environment || environment.is_none() {
             continue;
         }
-        let state = LabStore::new(state_dir).load(id, &vm.baseline_snapshot)?;
+        let state = LabStore::new(state_dir).load(id, BASELINE_SNAPSHOT)?;
         ensure!(
             state.pending.is_none()
                 && !matches!(

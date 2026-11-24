@@ -344,6 +344,10 @@ struct MediaAssembly<'a> {
 }
 
 fn assemble_media(media: &Path, assembly: &MediaAssembly<'_>) -> Result<MediaRecord> {
+    ensure!(
+        assembly.sealed.manifest().version == assembly.media_version,
+        "sealed worker manifest version differs from the offline media version"
+    );
     fs::create_dir(media)?;
     copy_tree(assembly.payload, &media.join(PAYLOAD_DIR))?;
     let media_enrollment = media.join(ENROLLMENT_DIR);

@@ -96,8 +96,28 @@ impl EnvironmentConfig {
 
 struct Entry {
     config: EnvironmentConfig,
-    client: OnceCell<RuntimeClient>,
-    lease_client: OnceCell<RuntimeClient>,
+    client: Mutex<OnceCell<RuntimeClient>>,
+    lease_client: Mutex<OnceCell<RuntimeClient>>,
+}
+
+async fn connect_environment(config: &EnvironmentConfig) -> Result<RuntimeClient> {
+    let client = RuntimeClient::connect(config.runtime.clone()).await?;
+    if let Some(expected) = &config.installation_id {
+        ensure!(
+            &client.identity().installation_id == expected,
+            "worker installation identity does not match this registered environment"
+        );
+    }
+    let doctor = client.doctor().await?;
+    let observed = doctor["os"]
+        .as_str()
+        .context("worker did not report its operating system")?;
+    ensure!(
+        observed == config.platform.as_str(),
+        "worker platform mismatch: expected {}, got {observed}",
+        config.platform.as_str()
+    );
+    Ok(client)
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -129,8 +149,8 @@ impl EnvironmentRegistry {
                 id,
                 Entry {
                     config,
-                    client: OnceCell::new(),
-                    lease_client: OnceCell::new(),
+                    client: Mutex::new(OnceCell::new()),
+                    lease_client: Mutex::new(OnceCell::new()),
                 },
             );
         }
@@ -168,7 +188,7 @@ impl EnvironmentRegistry {
     pub fn list(&self) -> Value {
         json!(self.entries.iter().map(|(id, entry)| json!({
             "environment_id": id, "name": entry.config.name, "platform": entry.config.platform,
-            "connected": entry.client.initialized(),
+            "connected": entry.client.try_lock().map(|client| client.initialized()).unwrap_or(true),
         })).collect::<Vec<_>>())
     }
 
@@ -177,27 +197,9 @@ impl EnvironmentRegistry {
             .entries
             .get(id)
             .with_context(|| format!("environment is not registered: {id}"))?;
-        let client = entry
-            .client
-            .get_or_try_init(|| async {
-                let client = RuntimeClient::connect(entry.config.runtime.clone()).await?;
-                if let Some(expected) = &entry.config.installation_id {
-                    ensure!(
-                        &client.identity().installation_id == expected,
-                        "worker installation identity does not match this registered environment"
-                    );
-                }
-                let doctor = client.doctor().await?;
-                let observed = doctor["os"]
-                    .as_str()
-                    .context("worker did not report its operating system")?;
-                ensure!(
-                    observed == entry.config.platform.as_str(),
-                    "worker platform mismatch: expected {}, got {observed}",
-                    entry.config.platform.as_str()
-                );
-                Ok::<_, anyhow::Error>(client)
-            })
+        let cell = entry.client.lock().await;
+        let client = cell
+            .get_or_try_init(|| connect_environment(&entry.config))
             .await?;
         Ok(client.clone())
     }
@@ -207,10 +209,24 @@ impl EnvironmentRegistry {
         Ok(json!({"environment_id": id, "observation": observation}))
     }
 
-    async fn lease_client(&self, id: &str) -> Result<&RuntimeClient> {
+    /// Reconnect after an authorized worker replacement. The fresh client is
+    /// validated before it replaces only this environment's cached channels.
+    pub async fn refresh(&self, id: &str) -> Result<Value> {
+        let entry = self
+            .entries
+            .get(id)
+            .with_context(|| format!("environment is not registered: {id}"))?;
+        let client = connect_environment(&entry.config).await?;
+        let observation = client.doctor().await?;
+        *entry.client.lock().await = OnceCell::from(client);
+        *entry.lease_client.lock().await = OnceCell::new();
+        Ok(json!({"environment_id": id, "observation": observation}))
+    }
+
+    async fn lease_client(&self, id: &str) -> Result<RuntimeClient> {
         let entry = self.entries.get(id).context("environment not registered")?;
-        let client = entry
-            .lease_client
+        let cell = entry.lease_client.lock().await;
+        let client = cell
             .get_or_try_init(|| async {
                 let mut configuration = entry.config.runtime.clone();
                 configuration.request_timeout_secs = 10;
@@ -222,7 +238,7 @@ impl EnvironmentRegistry {
                 Ok::<_, anyhow::Error>(client)
             })
             .await?;
-        Ok(client)
+        Ok(client.clone())
     }
 
     pub(crate) async fn bind(
@@ -398,10 +414,10 @@ impl EnvironmentRegistry {
         }
         self.lab_guards.lock().await.clear();
         for entry in self.entries.values() {
-            if let Some(client) = entry.client.get() {
+            if let Some(client) = entry.client.lock().await.get().cloned() {
                 let _ = client.close().await;
             }
-            if let Some(client) = entry.lease_client.get() {
+            if let Some(client) = entry.lease_client.lock().await.get().cloned() {
                 let _ = client.close().await;
             }
         }

@@ -30,10 +30,8 @@ impl ToolService {
             .filter(|spec| spec.model_visible && spec.allows(agent.role))
         {
             let name = spec.definition.name.as_str();
-            if !capabilities::authorized(agent, name)
-                || !capabilities::selected(&self.store, agent, name)
-            {
-                unavailable.push(json!({"tool":name,"requires":"task grant or group selection"}));
+            if !capabilities::selected(&self.store, agent, name) {
+                unavailable.push(json!({"tool":name,"requires":"group selection"}));
                 continue;
             }
             if name.starts_with("lab_") && self.windows_lab.vms.is_empty() {

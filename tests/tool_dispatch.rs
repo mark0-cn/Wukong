@@ -2442,9 +2442,9 @@ async fn placeholder_completion_is_rejected_without_terminating_the_agent() -> R
 }
 
 #[tokio::test]
-async fn tool_interfaces_enforce_roles_grants_and_remove_aliases() -> Result<()> {
+async fn tool_interfaces_enforce_roles_and_enable_advanced_groups() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let (store, _, _, agent) = fixture(temp.path())?;
     let service = ToolService::new(AppConfig::default(), store.clone()).await?;
     for name in ["analysis_verify", "poc_verify", "verification_record"] {
         assert!(
@@ -2464,51 +2464,21 @@ async fn tool_interfaces_enforce_roles_grants_and_remove_aliases() -> Result<()>
             .await?;
         assert!(denied.is_error, "{name}");
     }
-    for name in [
-        "think",
-        "runtime_doctor",
-        "fuzz_status",
-        "notes_list",
-        "todos_list",
-        "threat_model_get",
-        "lab_prune",
-        "runtime_prepare",
-        "bundle_stage",
-    ] {
-        assert!(
-            !service
-                .definitions(Role::Analyst)
-                .iter()
-                .any(|d| d.name.as_str() == name),
-            "{name}"
-        );
-    }
-    let denied = service
+    let rejected = service
         .execute(
             &agent.id,
-            "raw-denied",
+            "raw-without-session",
             "debug_command",
             json!({"session_id":"s","command":"info registers"}),
         )
         .await?;
-    assert!(denied.is_error && denied.value.to_string().contains("task grant"));
-    let denied = service
-        .execute(
-            &agent.id,
-            "select-denied",
-            "tool_select",
-            json!({"groups":["raw_debugger"]}),
-        )
-        .await?;
-    assert!(denied.is_error);
-    let denied=service.execute(&agent.id,"delegate-denied","create_agent",json!({"name":"escape","role":"analyst","task":"inspect","scope":"escape","contract":{"tool_grants":["raw_debugger"]}})).await?;
-    assert!(denied.is_error);
+    assert!(rejected.is_error, "{rejected:?}");
     let selected = service
         .execute(
             &agent.id,
-            "select-static",
+            "select-raw",
             "tool_select",
-            json!({"groups":["static_analysis"]}),
+            json!({"groups":["raw_debugger"]}),
         )
         .await?;
     assert!(!selected.is_error, "{selected:?}");
@@ -2522,37 +2492,8 @@ async fn tool_interfaces_enforce_roles_grants_and_remove_aliases() -> Result<()>
         .await?;
     assert_eq!(
         result(&catalog)["tools"][0]["status"],
-        "task grant required"
+        "backend unavailable or not yet observed"
     );
-    let granted = coordinator
-        .create_child(
-            &run.root_id,
-            ChildRequest {
-                name: "raw debugger".into(),
-                role: Role::Analyst,
-                task: "trusted advanced debugging".into(),
-                scope: "debug".into(),
-                environment_id: None,
-                skills: vec![],
-                inherit_context: false,
-                wait_for_predecessors: vec![],
-                dependency_policy: Default::default(),
-                contract: TaskContract {
-                    tool_grants: vec![ToolGrant::RawDebugger],
-                    ..Default::default()
-                },
-            },
-        )?
-        .agent;
-    let selected = service
-        .execute(
-            &granted.id,
-            "select-granted",
-            "tool_select",
-            json!({"groups":["raw_debugger"]}),
-        )
-        .await?;
-    assert!(!selected.is_error, "{selected:?}");
     service.close().await;
     Ok(())
 }

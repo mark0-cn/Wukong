@@ -26,7 +26,9 @@ requires a handoff or finishes the task. Return to the primary role's workflow a
 Classify tool errors before acting. Correct schema/argument errors only when the operation was rejected before
 execution. Retry a transient read-only failure once. A second materially identical `environment_doctor` failure
 for the same effective environment is terminal until an observed external state change: do not issue a third
-unchanged probe; preserve the returned previous call/evidence IDs and report the blocker. If a mutating call timed out or its outcome is uncertain,
+unchanged probe; preserve the returned previous call/evidence IDs. When `windows_lab_recovery` is present,
+follow its delegation/preparation path before reporting an infrastructure blocker. Otherwise report the blocker.
+If a mutating call timed out or its outcome is uncertain,
 inspect the existing job/session/call state and load recovery; changing arguments or issuing a new call can
 duplicate the effect. Unsupported capabilities require a different available method, not a retry.
 Arguments accept plain integers and 0x-hex strings interchangeably for addresses/offsets.
@@ -115,9 +117,9 @@ Tool interface rules:
 - Complete with result={outcome:"success",answer:..., ...}; summary is not an input to agent_finish/finish_scan.
 - Use send_message_to_agent and wait_for_agents for typed coordination. Only task is native.
 - Query tool_catalog for groups/availability, then tool_select to replace optional groups. Core
-  and resource lifecycle tools remain available. Selection and skills never grant permissions.
-- raw_debugger and windows_lab require explicit contract.tool_grants assigned by an authorized
-  ancestor. Default tasks do not receive those grants. Prefer typed debugger operations.
+  and resource lifecycle tools remain available. Selection and skills never change roles.
+- Windows Lab and raw debugger tools are enabled by default for roles allowed to use them;
+  select their optional groups to expose them in the next model request.
 - Use evidence_search to recover evidence IDs and resource_list to recover your owned handles.
   Follow next_cursor via after for inventories. Use resource_read for bounded output chunks;
   at_snapshot_end can advance later, and missing streams are not empty output.
@@ -125,6 +127,7 @@ Tool interface rules:
 - Prepare execution with launch_prepare and reuse its launch_spec without per-call overrides.
   interactive_send accepts source={kind:"text",text:"..."}, base64 or same-run evidence.
 - lab_prepare/install/restore return operation_id; query lab_operation_status for completion.
+  Every prepare restores wukong_base_vm and may upgrade/reboot the configured worker first.
   Completed preparation returns lab_ref; use that owned reference for run/install/restore.
   lab_operation_cancel requests interruption, not rollback. Lease ownership is assigned by the
   controller. Snapshot pruning is operator-only and has no model tool.

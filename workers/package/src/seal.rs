@@ -11,9 +11,11 @@ pub fn seal_package(
     signer: &Signer,
     expected: &Compatibility<'_>,
 ) -> Result<VerifiedManifest> {
+    let mut manifest = manifest.clone();
+    manifest.version = expected.controller_version.to_owned();
     manifest.check_compatibility(expected)?;
-    files::verify_payload_tree(root, manifest, None)?;
-    let (bytes, signature) = signer.sign(manifest)?;
+    files::verify_payload_tree(root, &manifest, None)?;
+    let (bytes, signature) = signer.sign(&manifest)?;
     let signature = serde_json::to_vec(&signature)?;
     let public = format!("{}\n", signer.public_key().to_hex());
     for (name, bytes) in [

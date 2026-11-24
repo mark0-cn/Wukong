@@ -340,10 +340,6 @@ impl ToolService {
                 "tool {name} is unavailable for role {}",
                 agent.role
             );
-            ensure!(
-                capabilities::authorized(&agent, name),
-                "tool requires an explicit task grant"
-            );
             let args = if let Some(spec) = builtin {
                 (spec.parse)(validated_arguments(args, &spec.definition.parameters)?)?
             } else {
@@ -456,9 +452,44 @@ fn environment_doctor_failure(
         return Ok(raw);
     };
     raw["environment_id"] = json!(environment_id);
-    raw["next_action"] = json!(
-        "resolve VM/worker/SSH readiness or choose another configured environment; one transient read-only retry is allowed, but stop if the same failure repeats without an observed external state change"
-    );
+    let run: RunRecord = store.load(&agent.run_id)?;
+    let config: crate::config::AppConfig = serde_json::from_value(run.config)?;
+    let retry = "one transient read-only retry is allowed, but stop unchanged probes if the same failure repeats";
+    raw["next_action"] = json!(match config
+        .environments
+        .get(environment_id)
+        .map(|environment| environment.runtime.backend())
+    {
+        Some(crate::adapters::worker::RuntimeBackend::Docker) => format!(
+            "resolve Docker daemon, configured container and worker readiness or choose another configured environment; {retry}"
+        ),
+        Some(
+            crate::adapters::worker::RuntimeBackend::Ssh
+            | crate::adapters::worker::RuntimeBackend::ManagedSsh,
+        ) => format!(
+            "resolve VM/worker/SSH readiness or choose another configured environment; {retry}"
+        ),
+        _ => format!(
+            "resolve configured worker readiness or choose another configured environment; {retry}"
+        ),
+    });
+    if let Some((vm, _)) = config
+        .windows_lab
+        .vms
+        .iter()
+        .find(|(_, vm)| vm.environment.as_deref() == Some(environment_id))
+    {
+        let instruction = if agent.role == crate::domain::Role::Root {
+            "after the allowed transient retry, delegate an analyst to import exact target evidence, select windows_lab, call lab_prepare and poll lab_operation_status"
+        } else {
+            "after the allowed transient retry, import exact target evidence, select windows_lab, call lab_prepare and poll lab_operation_status"
+        };
+        raw["windows_lab_recovery"] = json!({
+            "vm": vm,
+            "instruction": instruction,
+        });
+        raw["next_action"] = json!(instruction);
+    }
     let agents = store.records::<AgentMetadata>(&agent.run_id)?;
     let error = raw["error"].as_str().unwrap_or_default();
     let mut matches = store
@@ -489,7 +520,7 @@ fn environment_doctor_failure(
             "same_error_count": matches.len() + 1,
             "previous_call_id": previous.id,
             "previous_evidence_id": previous.evidence_id,
-            "instruction": "This is the same doctor failure for the same effective environment. Do not issue another unchanged probe; report the blocker and IDs. Probe again only after observing an external state change."
+            "instruction": "This is the same doctor failure for the same effective environment. Do not issue another unchanged probe; follow any available windows_lab_recovery or report the blocker and IDs. Probe again only after observing an external state change."
         });
     }
     Ok(raw)

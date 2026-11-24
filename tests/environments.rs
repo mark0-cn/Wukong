@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 use std::collections::BTreeMap;
 use wukong::{
-    config::AppConfig,
+    config::{AppConfig, WindowsLabVm},
     coordinator::{ChildRequest, Coordinator},
     domain::{AgentMetadata, Budget, Role, WorkerFileRecord},
     environments::{EnvironmentConfig, EnvironmentRegistry, Platform},
@@ -106,6 +106,10 @@ async fn registration_is_lazy_and_missing_workers_do_not_block_other_environment
     assert!(registry.client("absent").await.is_err());
     let client = registry.client("available").await?;
     assert_eq!(client.doctor().await?["os"], Platform::current().as_str());
+    drop(client);
+    let refreshed = registry.refresh("available").await?;
+    assert_eq!(refreshed["observation"]["os"], Platform::current().as_str());
+    let client = registry.client("available").await?;
     client.call("worker.shutdown", json!({})).await?;
     registry.close().await;
     Ok(())
@@ -263,6 +267,87 @@ async fn repeated_doctor_failures_link_prior_calls_without_hiding_fresh_probes()
         second.value["result"]["error"],
         first.value["result"]["error"]
     );
+    tools.close().await;
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn doctor_failure_exposes_default_windows_lab_recovery() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let mut unavailable = environment(&temp.path().join("worker"));
+    unavailable.runtime.trusted_local_mut().unwrap().python =
+        temp.path().join("missing-python.exe").display().to_string();
+    let docker = EnvironmentConfig {
+        name: "Missing Docker fixture".into(),
+        platform: Platform::Linux,
+        installation_id: None,
+        runtime: RuntimeConfig {
+            transport: wukong::runtime::TransportConfig::Docker(wukong::runtime::DockerConfig {
+                docker_executable: temp.path().join("missing-docker.exe").display().to_string(),
+                ..wukong::runtime::DockerConfig::new("missing-fixture".into())
+            }),
+            ..Default::default()
+        },
+    };
+    let mut config = AppConfig {
+        default_environment: Some("windows".into()),
+        environments: BTreeMap::from([("windows".into(), unavailable), ("docker".into(), docker)]),
+        ..Default::default()
+    };
+    config.windows_lab.vms.insert(
+        "lab".into(),
+        WindowsLabVm {
+            vmx: temp.path().join("lab.vmx"),
+            vmrun: temp.path().join("vmrun.exe"),
+            environment: Some("windows".into()),
+            ..Default::default()
+        },
+    );
+    let target = temp.path().join("sample");
+    std::fs::write(&target, b"fixture bytes; never executed")?;
+    let store = Store::open(temp.path().join("state"))?;
+    let coordinator = Coordinator::new(store.clone());
+    let run = coordinator.create_run(
+        &target,
+        "doctor diagnostics with default Lab access",
+        Budget::default(),
+        serde_json::to_value(&config)?,
+    )?;
+    let tools = ToolService::new(config, store).await?;
+
+    let recovery = tools
+        .execute(
+            &run.root_id,
+            "doctor-lab-recovery",
+            "environment_doctor",
+            json!({}),
+        )
+        .await?;
+    assert!(recovery.is_error);
+    assert_eq!(
+        recovery.value["result"]["windows_lab_recovery"]["vm"],
+        "lab"
+    );
+    assert!(
+        recovery.value["result"]["next_action"]
+            .as_str()
+            .unwrap()
+            .contains("delegate an analyst")
+    );
+
+    let docker = tools
+        .execute(
+            &run.root_id,
+            "doctor-docker",
+            "environment_doctor",
+            json!({"environment_id":"docker"}),
+        )
+        .await?;
+    assert!(docker.is_error);
+    let action = docker.value["result"]["next_action"].as_str().unwrap();
+    assert!(action.contains("Docker daemon"));
+    assert!(!action.contains("VM/worker/SSH"));
     tools.close().await;
     Ok(())
 }
