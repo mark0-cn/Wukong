@@ -284,7 +284,8 @@ jobs:
           npm ci
           npm test
           npm run build
-          npx --no-install playwright install --with-deps chromium
+          python -m scripts.ci.playwright_deps chromium
+          npx --no-install playwright install chromium
           npm run test:e2e
       - name: Preserve browser failure evidence
         if: failure()
