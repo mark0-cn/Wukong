@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from wukong_worker.debugger.trace import TraceDriver, typed_value
+from wukong_worker.debugger.trace import TraceDriver, console_start, typed_value
 
 
 LIMITS = {
@@ -143,6 +143,19 @@ class FakeSession:
 
 
 class TraceDriverTests(unittest.TestCase):
+    def test_console_start_preserves_argv_with_stdin_redirection(self):
+        session = FakeSession([])
+        session.launch = {"args": ["null", "with space", "<literal>"]}
+        session.stdin_path = "/tmp/input file"
+        self.assertEqual(
+            console_start(session),
+            "run null 'with space' '<literal>' < '/tmp/input file'",
+        )
+        self.assertEqual(
+            console_start(session, starti=True),
+            "starti null 'with space' '<literal>' < '/tmp/input file'",
+        )
+
     def test_typed_values_preserve_width_and_sign(self):
         self.assertEqual(typed_value(0xFFFFFFFF, "u32")["value"], "4294967295")
         self.assertEqual(typed_value(0xFFFFFFFF, "i32")["value"], "-1")

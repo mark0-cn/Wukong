@@ -103,6 +103,17 @@ def process_stop(payload):
     return payload if isinstance(payload, dict) else {}
 
 
+def console_start(session, starti=False):
+    """Build a CLI start command without letting redirection erase LaunchSpec argv."""
+    command = "starti" if starti else "run"
+    launch = getattr(session, "launch", None)
+    if isinstance(launch, dict) and launch.get("args"):
+        command += " " + shlex.join(launch["args"])
+    if session.stdin_path:
+        command += " < " + shlex.quote(str(session.stdin_path))
+    return command
+
+
 class TraceDriver:
     def __init__(self, session, spec, output_path, cancel_path, deadline):
         self.session = session
@@ -137,9 +148,7 @@ class TraceDriver:
         current = action
         console = None
         if action in {"starti", "run_stdin"}:
-            console = "starti" if action == "starti" else "run"
-            if self.session.stdin_path:
-                console += " < " + shlex.quote(str(self.session.stdin_path))
+            console = console_start(self.session, action == "starti")
         before = self.session.stop_sequence
         if console is not None:
             checked(
