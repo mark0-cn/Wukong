@@ -91,11 +91,11 @@ pub enum Command {
         task: String,
         #[arg(long)]
         output: Option<PathBuf>,
-        /// Cumulative token limit; only with --resume.
-        #[arg(long, conflicts_with = "target")]
+        /// Cumulative token limit for a new run or resume; overrides the configured/saved budget.
+        #[arg(long)]
         max_tokens: Option<u64>,
-        /// Cumulative cost limit in USD; only with --resume.
-        #[arg(long, conflicts_with = "target")]
+        /// Cumulative cost limit in USD for a new run or resume; overrides the configured/saved budget.
+        #[arg(long)]
         max_usd: Option<f64>,
     },
     /// List saved assessments, or inspect one and its recent events with --run.
@@ -241,7 +241,16 @@ pub async fn run(cli: Cli, telemetry: &crate::adapters::telemetry::TelemetryRunt
                 (service.resume(&run_id, Some(budget)).await?, run_id)
             } else {
                 let target = target.context("a target is required without --resume")?;
-                let prepared = service.start(&target, &task).await?;
+                let mut budget = config.budget.clone();
+                if let Some(tokens) = max_tokens {
+                    budget.max_total_tokens = tokens;
+                }
+                if let Some(usd) = max_usd {
+                    budget.max_usd = Some(usd);
+                }
+                let prepared = service
+                    .start_with_budget(&target, &task, Some(budget))
+                    .await?;
                 let run = prepared.run().clone();
                 println!(
                     "{}",

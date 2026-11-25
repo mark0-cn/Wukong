@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Preserve LaunchSpec arguments when tracing with stdin redirection, support budget overrides for new CLI runs, and recover workbench upgrades from interrupted first starts with explicit protocol mismatch diagnostics."
+zh_CN = "修复 stdin 重定向追踪丢失 LaunchSpec 参数的问题，支持新 CLI 任务覆盖预算，并允许工作环境从首次启动中断状态升级，同时明确报告协议不匹配。"
