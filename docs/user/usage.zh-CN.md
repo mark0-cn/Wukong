@@ -232,7 +232,9 @@ wukong gui RUN_ID
 wukong analyze --resume RUN_ID --max-tokens 1000000
 ```
 
-桌面工作区可暂停活动任务并保存进度。CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`analyze --resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限（需与 `--resume` 一起使用）。活动控制端通过租约互斥。
+`--max-tokens` 和 `--max-usd` 也可与新 target 一起使用：新任务覆盖配置预算，恢复任务替换保存的累计预算。费用上限仍要求配置对应的非零价格。
+
+桌面工作区可暂停活动任务并保存进度。CLI 的 Ctrl+C 请求在持久化边界停止调度，保留状态以便恢复。`analyze --resume` 使用保存的配置与检查点，并可通过 `--max-tokens`、`--max-usd` 调整累计预算上限。活动控制端通过租约互斥。
 
 原生 Rig 日志位于状态目录的 `rig/RUN_ID`。当前状态目录使用 schema 3，不提供旧数据库迁移；旧目录会返回版本提示，新任务应选择新的状态目录。
 

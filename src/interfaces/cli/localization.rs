@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn analyze_requires_a_target_or_resume_and_rejects_ambiguous_budget_flags() {
+    fn analyze_requires_a_target_or_resume_and_accepts_budget_overrides() {
         let command = localize(Cli::command(), Locale::EnUs, "");
         assert!(
             command
@@ -187,13 +187,13 @@ mod tests {
             command
                 .clone()
                 .try_get_matches_from(["wukong", "analyze", "target.bin", "--max-tokens", "10"])
-                .is_err()
+                .is_ok()
         );
         assert!(
             command
                 .clone()
                 .try_get_matches_from(["wukong", "analyze", "target.bin", "--max-usd", "1"])
-                .is_err()
+                .is_ok()
         );
         assert!(
             command

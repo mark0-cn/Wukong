@@ -110,6 +110,15 @@ impl AssessmentService {
     }
 
     pub async fn start(&self, target: &Path, task: &str) -> Result<PreparedAssessment> {
+        self.start_with_budget(target, task, None).await
+    }
+
+    pub async fn start_with_budget(
+        &self,
+        target: &Path,
+        task: &str,
+        budget: Option<Budget>,
+    ) -> Result<PreparedAssessment> {
         let maintenance =
             crate::application::maintenance::updates::maintenance::assessment_guard()?;
         let target = std::fs::canonicalize(target)
@@ -123,12 +132,15 @@ impl AssessmentService {
         config.output_language.get_or_insert_with(|| {
             crate::i18n::Locale::for_task(task, crate::i18n::Locale::system())
         });
+        config.budget = budget.unwrap_or_else(|| self.config.budget.clone());
+        config.validate()?;
+        let effective_budget = config.budget.clone();
         let runner =
             (self.runner_factory)(config, self.store.clone(), self.telemetry.clone()).await?;
         let created = runner.coordinator.create_run(
             &target,
             task,
-            self.config.budget.clone(),
+            effective_budget,
             serde_json::to_value(runner.config())?,
         );
         match created {
@@ -188,6 +200,29 @@ impl AssessmentService {
 mod tests {
     use super::*;
     use crate::adapters::models::Provider;
+
+    #[tokio::test]
+    async fn start_with_budget_persists_the_effective_new_run_limit() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(dir.path().join("state"))?;
+        let mut config = AppConfig::default();
+        config.model.provider = Provider::Ollama;
+        config.model.base_url = Some("http://127.0.0.1:1".into());
+        let target = dir.path().join("sample");
+        std::fs::write(&target, b"fixture")?;
+        let service =
+            AssessmentService::new(config.clone(), store.clone(), TelemetryHandle::disabled());
+        let mut budget = config.budget.clone();
+        budget.max_total_tokens = 123_456;
+        let prepared = service
+            .start_with_budget(&target, "fixture", Some(budget))
+            .await?;
+        let run = prepared.run();
+        assert_eq!(run.budget.max_total_tokens, 123_456);
+        let saved: AppConfig = serde_json::from_value(run.config.clone())?;
+        assert_eq!(saved.budget.max_total_tokens, 123_456);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn resume_keeps_saved_identity_and_does_not_mutate_a_live_run() -> Result<()> {

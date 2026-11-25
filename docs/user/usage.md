@@ -227,7 +227,9 @@ Use the desktop workspace to send information, assign follow-ups, pause analysis
 wukong analyze --resume RUN_ID --max-tokens 1000000
 ```
 
-The desktop workspace pauses an active assessment and saves progress. CLI Ctrl+C requests scheduling to stop at a persistence boundary, retaining resumable state. `analyze --resume` uses saved configuration/checkpoints; `--max-tokens` and `--max-usd` change cumulative limits and require `--resume`. A lease excludes simultaneous active controllers.
+`--max-tokens` and `--max-usd` also accept a new target. For a new run they override the configured budget; with `--resume` they replace the saved cumulative budget. Cost limits still require matching nonzero prices.
+
+The desktop workspace pauses an active assessment and saves progress. CLI Ctrl+C requests scheduling to stop at a persistence boundary, retaining resumable state. `analyze --resume` uses saved configuration/checkpoints; `--max-tokens` and `--max-usd` change cumulative limits and a lease excludes simultaneous active controllers.
 
 Native Rig logs live in state-directory `rig/RUN_ID`. State schema is currently 3, without legacy database migration. Old directories return a version message; choose a new state directory for new tasks.
 
