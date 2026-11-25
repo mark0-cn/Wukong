@@ -16,8 +16,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use wukong_worker_package::{
-    Compatibility, PublicKey, SignatureRecord, VerifiedEnrollment, VerifiedManifest, verify_package,
-    verify_package_for_upgrade,
+    Compatibility, PublicKey, SignatureRecord, VerifiedEnrollment, VerifiedManifest,
+    verify_package, verify_package_for_upgrade,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
