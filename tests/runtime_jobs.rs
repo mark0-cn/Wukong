@@ -442,7 +442,8 @@ async fn bridge_startup_error_includes_captured_stderr() -> Result<()> {
 }
 
 #[tokio::test]
-async fn reconnected_worker_identity_is_checked_before_resending_any_operation() -> Result<()> {
+async fn reconnect_allows_boot_restart_but_rejects_installation_change_before_effects() -> Result<()>
+{
     let root = tempfile::tempdir()?;
     let bridge = root.path().join("identity_fixture.py");
     std::fs::write(
@@ -455,7 +456,8 @@ for line in sys.stdin:
   print('{invalid-json',flush=True);continue
  if r['method']=='ping':
   boot=(root/'boot').read_text() if (root/'boot').exists() else 'first'
-  result={'identity':{'protocol':4,'installation_id':'fixture','boot_id':boot,'package_sha256':'0'*64}}
+  installation=(root/'installation').read_text() if (root/'installation').exists() else 'fixture'
+  result={'identity':{'protocol':4,'installation_id':installation,'boot_id':boot,'package_sha256':'0'*64}}
  else:
   (root/'effect').write_text('executed');result={}
  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
@@ -474,9 +476,16 @@ for line in sys.stdin:
     .await?;
     assert!(client.call("job.status", json!({})).await.is_err());
     std::fs::write(root.path().join("boot"), "second")?;
-    let error = client.call("job.cancel", json!({})).await.unwrap_err();
+    assert!(client.call("job.cancel", json!({})).await.is_ok());
+    assert!(root.path().join("effect").exists());
+    client.close().await?;
+    std::fs::write(root.path().join("installation"), "another")?;
+    let error = client.call("job.status", json!({})).await.unwrap_err();
     assert!(format!("{error:#}").contains("identity changed"));
-    assert!(!root.path().join("effect").exists());
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("effect"))?,
+        "executed"
+    );
     client.close().await?;
     Ok(())
 }
