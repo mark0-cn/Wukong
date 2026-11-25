@@ -219,6 +219,8 @@ wukong gui RUN_ID
 
 Use the desktop workspace to send information, assign follow-ups, pause analysis and stop branches. `runs` lists saved assessments; `runs --run RUN_ID` reports one assessment's status and recent events. Ordinary messages add information without reopening completed work; a follow-up assigns more work to a completed Agent, preserving history and cumulative budgets. Paused analysis still requires explicit resume. Stopping a branch stops its subtasks too; recorded evidence remains available.
 
+Resume reconciles existing jobs as their original owners before model execution. Reusing `--output` refreshes a complete same-run bundle through verified staging and replacement; a corrupt bundle or another run's directory is refused.
+
 <a id="暂停与恢复"></a>
 
 ### Pause and resume

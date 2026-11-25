@@ -191,7 +191,8 @@ impl SessionsService {
         closing: bool,
     ) -> Result<()> {
         ensure!(
-            session.worker_id == self.gateway.worker_identity()?,
+            self.gateway
+                .accepts_worker_id(&session.run_id, &session.worker_id)?,
             "session belongs to another runtime"
         );
         if session.agent_id != agent.id {

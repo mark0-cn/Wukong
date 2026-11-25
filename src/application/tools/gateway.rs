@@ -1,5 +1,22 @@
 //! Stable worker requests and their durable replies; no tool routing or role policy.
 use super::*;
+use crate::adapters::worker::protocol;
+
+fn stable_worker_identity(identity: &protocol::WorkerIdentity) -> Result<String> {
+    Ok(stable(
+        "worker",
+        &serde_json::to_string(&json!({
+            "protocol": identity.protocol,
+            "installation_id": identity.installation_id,
+            "package_sha256": identity.package_sha256,
+        }))?,
+    ))
+}
+
+fn legacy_worker_identity(identity: &protocol::WorkerIdentity) -> Result<String> {
+    Ok(stable("worker", &serde_json::to_string(identity)?))
+}
+
 #[derive(Clone)]
 pub(super) struct BoundWorker {
     client: RuntimeClient,
@@ -8,7 +25,7 @@ pub(super) struct BoundWorker {
 }
 impl BoundWorker {
     pub(super) fn new(client: RuntimeClient, environment_id: &str) -> Result<Self> {
-        let identity = stable("worker", &serde_json::to_string(client.identity())?);
+        let identity = stable_worker_identity(&client.identity())?;
         Ok(Self {
             client,
             identity,
@@ -38,6 +55,31 @@ impl WorkerGateway {
             .context("worker context is unbound")?
             .identity
             .clone())
+    }
+
+    /// Accept stable installation IDs plus legacy boot-bound IDs retained by the
+    /// run's binding history. Identity fencing itself happens before this check.
+    pub(super) fn accepts_worker_id(&self, run: &str, worker_id: &str) -> Result<bool> {
+        let worker = self.worker.as_ref().context("worker context is unbound")?;
+        let current = worker.client.identity();
+        let binding_id = stable(
+            "environment-binding",
+            &format!("{run}:{}", worker.environment_id),
+        );
+        let binding = self.store.get_record::<EnvironmentBinding>(&binding_id)?;
+        let mut identities = vec![current];
+        if let Some(binding) = binding {
+            identities.push(binding.identity);
+            identities.extend(binding.prior_identities);
+        }
+        for identity in identities {
+            if stable_worker_identity(&identity)? == worker_id
+                || legacy_worker_identity(&identity)? == worker_id
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(super) fn request_identity(&self, agent: &AgentMetadata, call_id: &str) -> String {

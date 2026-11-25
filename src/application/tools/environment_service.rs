@@ -33,6 +33,7 @@ impl EnvironmentService {
             run_id: agent.run_id.clone(),
             environment_id: environment_id.to_owned(),
             identity: client.identity().clone(),
+            prior_identities: vec![],
         })?;
         Ok(client)
     }

@@ -58,7 +58,10 @@ impl FilesService {
         let record: WorkerFileRecord = self.store.load(&id).with_context(||
             format!("worker path {path:?} is not registered in this run; use stage_target for the sample, file_put/artifact_stage for a script or input, and reuse returned worker paths"))?;
         ensure!(
-            record.run_id == agent.run_id && record.worker_id == self.gateway.worker_identity()?,
+            record.run_id == agent.run_id
+                && self
+                    .gateway
+                    .accepts_worker_id(&record.run_id, &record.worker_id)?,
             "worker file belongs to another assessment or runtime"
         );
         if require_target {
@@ -194,14 +197,18 @@ impl FilesService {
     ) -> Result<Value> {
         let path = text(args, "path")?;
         if self.known_file(agent, path, false).is_err() {
-            let allowed = self
-                .store
-                .records::<JobRecord>(&agent.run_id)?
-                .iter()
-                .any(|job| {
-                    job.worker_id == self.gateway.worker_identity().unwrap_or_default()
-                        && path.starts_with(&format!("jobs/{}/", job.worker_resource_id))
-                });
+            let jobs = self.store.records::<JobRecord>(&agent.run_id)?;
+            let mut allowed = false;
+            for job in jobs {
+                if path.starts_with(&format!("jobs/{}/", job.worker_resource_id))
+                    && self
+                        .gateway
+                        .accepts_worker_id(&agent.run_id, &job.worker_id)?
+                {
+                    allowed = true;
+                    break;
+                }
+            }
             ensure!(
                 allowed,
                 "worker path has not been declared for this run; retrieve controller evidence with evidence_read, or use a returned file_put/artifact_stage/job_artifacts worker path"

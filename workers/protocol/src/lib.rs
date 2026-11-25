@@ -51,6 +51,13 @@ impl WorkerIdentity {
         );
         Ok(())
     }
+
+    /// Boot identities change on restart; installation, package and protocol must not.
+    pub fn same_installation(&self, other: &Self) -> bool {
+        self.protocol == other.protocol
+            && self.installation_id == other.installation_id
+            && self.package_sha256 == other.package_sha256
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -69,8 +76,9 @@ impl EnvironmentLease {
         &self,
         run: &str,
         owner: &str,
-        identity: &WorkerIdentity,
+        identity: impl std::borrow::Borrow<WorkerIdentity>,
     ) -> anyhow::Result<()> {
+        let identity = identity.borrow();
         anyhow::ensure!(
             self.run_id == run
                 && self.owner_id == owner

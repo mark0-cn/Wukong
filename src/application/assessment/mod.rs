@@ -170,6 +170,12 @@ impl AssessmentService {
         saved.validate()?;
         let runner =
             (self.runner_factory)(saved, self.store.clone(), self.telemetry.clone()).await?;
+        // Keep recovery work out of the CLI's main stack frame. An inline
+        // reconcile future overflowed the default Windows stack even for --version.
+        if let Err(error) = Box::pin(runner.tools.reconcile_jobs(run_id)).await {
+            runner.tools.close().await;
+            return Err(error.context("reconcile worker jobs before resuming"));
+        }
         // Applying a budget is a supervised write, after ownership is acquired.
         Ok(PreparedAssessment {
             _maintenance: maintenance,

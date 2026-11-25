@@ -17,7 +17,13 @@ use rig::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::Mutex;
 use wukong_worker_protocol::{Method, Request};
 
@@ -169,6 +175,22 @@ impl ToolService {
             .await?;
         let primary = gateway::BoundWorker::new(client, environment_id)?;
         Ok(ToolContext::new(self, Some(primary)))
+    }
+
+    /// Reconcile missed terminal observations before resumed model work.
+    /// Ownership stays with the original producer; root gains no execution rights.
+    pub(crate) async fn reconcile_jobs(&self, run: &str) -> Result<()> {
+        let agents = self.store.records::<AgentMetadata>(run)?;
+        let mut environments = BTreeSet::new();
+        for agent in agents {
+            let Some(environment) = &agent.environment_id else {
+                continue;
+            };
+            if environments.insert(environment.clone()) {
+                self.bound_to(&agent).await?.jobs().refresh(run).await?;
+            }
+        }
+        Ok(())
     }
 
     async fn bound_for(

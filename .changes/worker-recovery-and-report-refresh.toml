@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow verified worker restarts to reconcile existing jobs and execution tools without weakening installation, package or protocol identity checks. Refresh complete same-run report bundles safely on resume and avoid stale residual-job cleanup loops."
+zh_CN = "支持经过验证的 worker 重启恢复已有 job 和执行工具，同时保持安装、包内容与协议身份检查；恢复时可安全刷新同一任务的完整报告包，并避免残留 job 导致的重复清理循环。"
