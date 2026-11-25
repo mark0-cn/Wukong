@@ -495,6 +495,29 @@ fn incomplete_payloads_bad_licenses_collisions_and_protocols_fail_closed() -> an
             })
             .is_err()
     );
+    let mut installed_old = original.clone();
+    installed_old.runtime_protocol = 3;
+    let current = Compatibility {
+        runtime_protocol: 4,
+        controller_version: "1.1.0",
+    };
+    assert!(installed_old.check_compatibility(&current).is_err());
+    installed_old.check_upgrade_compatibility(&current)?;
+    let mut installed_newer = original.clone();
+    installed_newer.runtime_protocol = 5;
+    assert!(
+        installed_newer
+            .check_upgrade_compatibility(&current)
+            .is_err()
+    );
+    assert!(
+        installed_old
+            .check_upgrade_compatibility(&Compatibility {
+                runtime_protocol: 4,
+                controller_version: "0.9.0",
+            })
+            .is_err()
+    );
     let mut missing = original.clone();
     missing.components.remove("openssh");
     assert!(missing.validate().is_err());
@@ -517,6 +540,51 @@ fn incomplete_payloads_bad_licenses_collisions_and_protocols_fail_closed() -> an
     let mut lock = original;
     lock.toolchain_lock_sha256 = "0".repeat(64);
     assert!(lock.validate().is_err());
+    Ok(())
+}
+
+#[test]
+fn upgrade_verification_authenticates_older_installed_packages() -> anyhow::Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let package = temporary.path().join("installed");
+    fs::create_dir(&package)?;
+    let mut manifest = fixture();
+    manifest.runtime_protocol = 3;
+    for name in manifest.files.keys() {
+        let path = package.join(name);
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, b"fixture")?;
+    }
+    let (signer, _) = Signer::generate()?;
+    let (bytes, signature) = signer.sign(&manifest)?;
+    fs::write(package.join("manifest.json"), bytes)?;
+    fs::write(
+        package.join("manifest.sig"),
+        serde_json::to_vec(&signature)?,
+    )?;
+    let compatibility = Compatibility {
+        runtime_protocol: 4,
+        controller_version: "1.0.0",
+    };
+    assert!(
+        wukong_worker_package::verify_package(&package, &signer.public_key(), &compatibility,)
+            .is_err()
+    );
+    let verified = wukong_worker_package::verify_package_for_upgrade(
+        &package,
+        &signer.public_key(),
+        &compatibility,
+    )?;
+    assert_eq!(verified.manifest().runtime_protocol, 3);
+    fs::write(package.join("worker.exe"), b"tampered")?;
+    assert!(
+        wukong_worker_package::verify_package_for_upgrade(
+            &package,
+            &signer.public_key(),
+            &compatibility,
+        )
+        .is_err()
+    );
     Ok(())
 }
 

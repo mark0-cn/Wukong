@@ -17,6 +17,7 @@ use std::{
 };
 use wukong_worker_package::{
     Compatibility, PublicKey, SignatureRecord, VerifiedEnrollment, VerifiedManifest, verify_package,
+    verify_package_for_upgrade,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -79,6 +80,17 @@ impl Deployment {
         root.join("versions").join(&self.active_manifest_sha256)
     }
     pub fn verify(&self, root: &Path) -> Result<VerifiedManifest> {
+        self.verify_inner(root, false)
+    }
+
+    /// Authenticate the old installation before an offline replacement. The
+    /// incoming package and every service/resource activation still require the
+    /// current runtime protocol through `verify`.
+    pub fn verify_for_upgrade(&self, root: &Path) -> Result<VerifiedManifest> {
+        self.verify_inner(root, true)
+    }
+
+    fn verify_inner(&self, root: &Path, installed_upgrade: bool) -> Result<VerifiedManifest> {
         self.validate()?;
         self.code_policy()?.verify(root, true)?;
         AclPolicy::private_vm().verify(&root.join("metadata"), true)?;
@@ -106,14 +118,15 @@ impl Deployment {
         );
         let package = self.package(root);
         self.code_policy()?.verify(&package, true)?;
-        let verified = verify_package(
-            &package,
-            &key,
-            &Compatibility {
-                runtime_protocol: 4,
-                controller_version: &self.controller_version,
-            },
-        )?;
+        let compatibility = Compatibility {
+            runtime_protocol: 4,
+            controller_version: &self.controller_version,
+        };
+        let verified = if installed_upgrade {
+            verify_package_for_upgrade(&package, &key, &compatibility)?
+        } else {
+            verify_package(&package, &key, &compatibility)?
+        };
         ensure!(
             verified.sha256() == self.active_manifest_sha256,
             "active package differs from protected state"

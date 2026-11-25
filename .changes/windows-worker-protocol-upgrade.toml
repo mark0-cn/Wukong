@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow reviewed offline Windows worker upgrades to authenticate an existing signed installation with an older runtime protocol while keeping incoming packages and normal runtime activation pinned to the current protocol."
+zh_CN = "允许经审查的 Windows Worker 离线升级认证运行协议较旧的现有签名安装，同时要求新包和正常运行时激活精确匹配当前协议。"

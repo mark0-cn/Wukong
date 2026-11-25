@@ -62,12 +62,39 @@ pub fn verify_package(
     trusted: &PublicKey,
     compatibility: &Compatibility<'_>,
 ) -> Result<VerifiedManifest> {
+    verify_package_inner(root, trusted, compatibility, false)
+}
+
+/// Authenticate an existing installation before replacing it offline. This
+/// accepts an older signed runtime protocol, never a newer one, and retains all
+/// signature, exact-tree and minimum-controller checks. Do not use this for
+/// runtime activation or for the incoming replacement package.
+pub fn verify_package_for_upgrade(
+    root: &Path,
+    trusted: &PublicKey,
+    compatibility: &Compatibility<'_>,
+) -> Result<VerifiedManifest> {
+    verify_package_inner(root, trusted, compatibility, true)
+}
+
+fn verify_package_inner(
+    root: &Path,
+    trusted: &PublicKey,
+    compatibility: &Compatibility<'_>,
+    installed_upgrade: bool,
+) -> Result<VerifiedManifest> {
     package_root(root)?;
     let bytes = bounded_read(&root.join("manifest.json"), MAX_MANIFEST_BYTES)?;
     let signature: SignatureRecord =
         serde_json::from_slice(&bounded_read(&root.join("manifest.sig"), 1024)?)?;
     let verified = VerifiedManifest::verify(&bytes, &signature, trusted)?;
-    verified.manifest().check_compatibility(compatibility)?;
+    if installed_upgrade {
+        verified
+            .manifest()
+            .check_upgrade_compatibility(compatibility)?;
+    } else {
+        verified.manifest().check_compatibility(compatibility)?;
+    }
     verified.verify_tree(root)?;
     Ok(verified)
 }
