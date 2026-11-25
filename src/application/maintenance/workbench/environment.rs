@@ -13,6 +13,23 @@ pub(crate) enum ImageAcquisition {
     AllowPull,
     LocalOnly,
 }
+
+fn validate_health(health: &Value) -> Result<()> {
+    ensure!(
+        health["healthy"] == true,
+        "worker startup health probe failed: {health}"
+    );
+    let protocol = health["identity"]["protocol"]
+        .as_u64()
+        .context("worker health protocol missing")?;
+    let expected = wukong_worker_protocol::PROTOCOL as u64;
+    ensure!(
+        protocol == expected,
+        "worker protocol {protocol} is incompatible with controller protocol {expected}; select a matching tool image with env update --image IMAGE"
+    );
+    Ok(())
+}
+
 impl Workbench {
     pub fn environment(&self) -> Result<Environment> {
         read_json(&self.root.join("environment.json"))
@@ -46,12 +63,20 @@ impl Workbench {
         Ok(())
     }
     pub fn up(&self, image: Option<&str>) -> Result<Value> {
-        self.ensure_up(image, ImageAcquisition::AllowPull)
+        self.ensure_up_with_volume(image, ImageAcquisition::AllowPull, None)
     }
     pub(crate) fn ensure_up(
         &self,
         image: Option<&str>,
         acquisition: ImageAcquisition,
+    ) -> Result<Value> {
+        self.ensure_up_with_volume(image, acquisition, None)
+    }
+    fn ensure_up_with_volume(
+        &self,
+        image: Option<&str>,
+        acquisition: ImageAcquisition,
+        volume: Option<String>,
     ) -> Result<Value> {
         let pending = self.root.join("environment.pending.json");
         let selected = image
@@ -84,7 +109,7 @@ impl Workbench {
             image: image.into(),
             image_id,
             container: self.name("tools"),
-            volume: self.name("state"),
+            volume: volume.unwrap_or_else(|| self.name("state")),
             network: self.name("offline"),
         };
         // Persist the selected immutable image before creating any resources.
@@ -99,11 +124,7 @@ impl Workbench {
             "health",
             "/state",
         ])?)?;
-        ensure!(
-            health["healthy"] == true
-                && health["identity"]["protocol"] == wukong_worker_protocol::PROTOCOL,
-            "worker startup health probe failed: {health}"
-        );
+        validate_health(&health)?;
         write_json(&self.root.join("environment.json"), &env)?;
         self.write_worker_config(&env, &self.root.join("wukong.toml"))?;
         fs::remove_file(pending)?;
@@ -228,21 +249,28 @@ impl Workbench {
         Ok(result)
     }
     pub fn worker_json(&self, args: &[&str]) -> Result<Value> {
-        let env = self.environment()?;
+        self.worker_json_for(&self.environment()?, args)
+    }
+    fn worker_json_for(&self, env: &Environment, args: &[&str]) -> Result<Value> {
         let mut command = vec!["exec", &env.container, "python3"];
         command.extend_from_slice(args);
         serde_json::from_str(&self.docker.run(&command)?).context("invalid worker observation")
     }
     pub fn require_idle(&self) -> Result<()> {
-        let env = self.environment()?;
+        self.require_idle_for(&self.environment()?)
+    }
+    fn require_idle_for(&self, env: &Environment) -> Result<()> {
         if let Some(container) = self.docker.inspect("container", &env.container)? {
             self.owned(&container, &env.container)?;
             if container["State"]["Running"] == true {
-                let result = self.worker_json(&[
-                    "/opt/wukong/runtime/wukong_worker/workbench/control.py",
-                    "idle",
-                    "/state",
-                ])?;
+                let result = self.worker_json_for(
+                    env,
+                    &[
+                        "/opt/wukong/runtime/wukong_worker/workbench/control.py",
+                        "idle",
+                        "/state",
+                    ],
+                )?;
                 ensure!(
                     result["idle"] == true,
                     "worker has active jobs or sessions: {result}"
@@ -250,6 +278,24 @@ impl Workbench {
             }
         }
         Ok(())
+    }
+    fn update_base(&self) -> Result<(Option<Environment>, Environment)> {
+        let active = if self.root.join("environment.json").exists() {
+            Some(self.environment()?)
+        } else {
+            None
+        };
+        let pending = if active.is_none() {
+            Some(
+                read_json(&self.root.join("environment.pending.json")).context(
+                    "no active or pending environment; start the workbench with env up first",
+                )?,
+            )
+        } else {
+            None
+        };
+        let old = active.clone().or(pending).expect("pending checked above");
+        Ok((active, old))
     }
     pub fn down(&self) -> Result<Value> {
         self.require_idle()?;
@@ -260,16 +306,26 @@ impl Workbench {
         Ok(json!({"stopped":env.container,"data_preserved":true}))
     }
     pub fn update(&self, image: &str) -> Result<Value> {
-        self.require_idle()?;
+        let (active, old) = self.update_base()?;
+        self.require_idle_for(&old)?;
         if self.docker.inspect("image", image)?.is_none() {
             self.docker
                 .logged(&["pull", image], &self.root.join("logs/pull.log"))?;
         }
-        let old = self.environment()?;
-        write_json(&self.root.join("previous-environment.json"), &old)?;
+        if let Some(old) = &active {
+            write_json(&self.root.join("previous-environment.json"), old)?;
+        }
         if self.docker.inspect("container", &old.container)?.is_some() {
             self.docker.run(&["rm", "-f", "-v", &old.container])?;
         }
+        let Some(old) = active else {
+            let volume = format!("{}-{}", self.name("state"), uuid::Uuid::new_v4().simple());
+            return self
+                .ensure_up_with_volume(Some(image), ImageAcquisition::AllowPull, Some(volume))
+                .context(
+                    "upgrade from interrupted startup failed; no previous active environment existed to restore",
+                );
+        };
         match self.up(Some(image)) {
             Ok(result) => Ok(result),
             Err(error) => {
@@ -282,5 +338,57 @@ impl Workbench {
                 Err(error.context("upgrade failed; attempted previous image restoration"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn environment(image: &str) -> Environment {
+        Environment {
+            image: image.into(),
+            image_id: format!("sha256:{}", "a".repeat(64)),
+            container: "wukong-test-tools".into(),
+            volume: "wukong-test-state".into(),
+            network: "wukong-test-network".into(),
+        }
+    }
+
+    #[test]
+    fn protocol_mismatch_has_an_actionable_upgrade_error() {
+        let error = validate_health(&json!({
+            "healthy": true,
+            "identity": {"protocol": wukong_worker_protocol::PROTOCOL - 1}
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("worker protocol 3"), "{error}");
+        assert!(error.contains("controller protocol 4"), "{error}");
+        assert!(error.contains("env update --image IMAGE"), "{error}");
+    }
+
+    #[test]
+    fn interrupted_first_start_is_a_valid_update_base() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let pending = environment("pending");
+        write_json(&temp.path().join("environment.pending.json"), &pending)?;
+        let workbench = Workbench {
+            root: temp.path().to_owned(),
+            id: "test".into(),
+            docker: Docker::new("missing-docker"),
+            config: AppConfig::default(),
+        };
+        let (active, old) = workbench.update_base()?;
+        assert!(active.is_none());
+        assert_eq!(old.image, "pending");
+        write_json(
+            &temp.path().join("environment.json"),
+            &environment("active"),
+        )?;
+        let (active, old) = workbench.update_base()?;
+        assert_eq!(active.expect("active environment").image, "active");
+        assert_eq!(old.image, "active");
+        Ok(())
     }
 }

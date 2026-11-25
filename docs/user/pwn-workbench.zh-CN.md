@@ -40,6 +40,8 @@ Docker 不在 PATH 时，在配置的 `[workbench]` 设置 `docker_executable` �
 
 `env doctor` 实际编译并运行 32/64 位程序，检查 GDB 断点、pwntools 收发、Python 分析库、Pwndbg/pwninit 和 Ghidra 导入，结果保存在 `doctor.json`。不是只检查可执行文件存在。
 
+启动要求 worker/controller 协议完全一致。不匹配时会报告双方版本；使用 `env update --image IMAGE` 选择匹配镜像。如果首次启动在写入 `environment.json` 前失败，update 会在相同的 idle 检查后使用 `environment.pending.json`，不会回滚到一个从未成功启动的环境。该恢复路径保留旧 state volume，并使用新的 volume，避免覆盖不兼容的 worker 身份或历史证据。
+
 Windows 源码目录可能带 Low 完整性标记，直接运行其中生成的 EXE 会继承该标记并导致 Docker 管道拒绝访问。项目已有 `scripts/dev/publish-gui.ps1`，安装包也将程序复制到正常用户应用目录；按正式发布流程使用客户端，不需要修改 Docker 管道 ACL。
 
 <a id="import-and-prepare-a-challenge"></a>

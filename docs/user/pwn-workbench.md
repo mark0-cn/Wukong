@@ -40,6 +40,8 @@ If Docker is absent from PATH, set `[workbench].docker_executable` to its absolu
 
 `env doctor` compiles/runs 32/64-bit programs and checks GDB breakpoints, pwntools I/O, Python libraries, Pwndbg/pwninit and Ghidra import. Results go to `doctor.json`; it does more than check executable presence.
 
+Startup requires an exact worker/controller protocol match. A mismatch reports both versions; select a matching image with `env update --image IMAGE`. If the first start failed before `environment.json` existed, update uses `environment.pending.json` after the same idle check. It does not roll back to an environment that never started successfully. This recovery retains the old state volume and starts with a fresh one so incompatible worker identity or historical evidence is never overwritten.
+
 Windows source directories may carry Low integrity labels inherited by built EXEs, causing Docker pipe access denial. `scripts/dev/publish-gui.ps1` and installers copy programs to normal user application directories. Follow deployment instructions rather than changing Docker pipe ACLs.
 
 <a id="导入和准备题目"></a>
