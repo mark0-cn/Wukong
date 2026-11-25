@@ -389,8 +389,27 @@ fn validate_evidence_refs(snapshot: &crate::queries::ReportSnapshot) -> Result<(
     Ok(())
 }
 
-/// Export without executing the sample. Existing output paths are refused;
-/// complete bundles are published by renaming a verified staging directory.
+fn existing_bundle(output: &Path, run_id: &str) -> Result<bool> {
+    if !output.exists() {
+        return Ok(false);
+    }
+    ensure!(
+        !fs::symlink_metadata(output)?.file_type().is_symlink(),
+        "export destination must not be a symlink"
+    );
+    verify_bundle(output).context("existing export is not a complete valid bundle")?;
+    let manifest: BundleManifest =
+        serde_json::from_slice(&fs::read(output.join("manifest.json"))?)?;
+    ensure!(
+        manifest.run_id == run_id,
+        "existing export belongs to another run: {}",
+        manifest.run_id
+    );
+    Ok(true)
+}
+
+/// Export without executing the sample. Existing complete bundles can be
+/// refreshed only for the same run; publication uses a verified staging directory.
 pub fn export(store: &Store, run_id: &str, output: &Path) -> Result<ExportSummary> {
     export_with_locale(store, run_id, output, Locale::EnUs)
 }
@@ -400,11 +419,7 @@ pub fn export_with_locale(
     output: &Path,
     locale: Locale,
 ) -> Result<ExportSummary> {
-    ensure!(
-        !output.exists(),
-        "export destination already exists: {}",
-        output.display()
-    );
+    let replace_existing = existing_bundle(output, run_id)?;
     let snapshot = crate::application::queries::ReportQueries::new(store).snapshot(run_id)?;
     validate_evidence_refs(&snapshot)?;
     let (target_size, target_hash) =
@@ -423,7 +438,6 @@ pub fn export_with_locale(
         .file_name()
         .context("export destination must name a new directory")?;
     let final_path = parent.join(name);
-    ensure!(!final_path.exists(), "export destination already exists");
     let staging_directory = tempfile::Builder::new()
         .prefix(".export_")
         .tempdir_in(&parent)?;
@@ -495,7 +509,28 @@ pub fn export_with_locale(
         let sums = checksum_text(&manifest, &manifest_bytes);
         fs::write(staging.join("SHA256SUMS"), sums)?;
         verify_bundle(staging)?;
-        fs::rename(staging, &final_path).context("publish verified export bundle")?;
+        if replace_existing {
+            let backup_directory = tempfile::Builder::new()
+                .prefix(".export-backup-")
+                .tempdir_in(&parent)?;
+            let backup = backup_directory.path().join("previous");
+            fs::rename(&final_path, &backup).context("stage previous export for refresh")?;
+            if let Err(error) = fs::rename(staging, &final_path) {
+                if let Err(restore_error) = fs::rename(&backup, &final_path) {
+                    let retained = backup_directory.keep();
+                    return Err(anyhow::Error::new(error).context(format!(
+                        "publish replacement failed and previous export remains at {}: {restore_error}",
+                        retained.display()
+                    )));
+                }
+                return Err(anyhow::Error::new(error)
+                    .context("publish replacement export; previous export restored"));
+            }
+            // TempDir cleanup removes only the verified previous bundle after
+            // the new bundle has been published successfully.
+        } else {
+            fs::rename(staging, &final_path).context("publish verified export bundle")?;
+        }
         Ok(ExportSummary {
             output_dir: final_path.clone(),
             report_json: final_path.join("report.json"),

@@ -85,7 +85,6 @@ impl ToolContext {
             },
         }
     }
-    #[cfg(test)]
     pub(crate) fn jobs(&self) -> &jobs::JobService {
         &self.execution.jobs
     }

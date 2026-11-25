@@ -172,13 +172,20 @@ impl ExecutionService {
                 if name == "fuzz_start" {
                     let seeds = text(&args, "seeds")?;
                     let prefix = format!("{}/", seeds.trim_end_matches('/'));
+                    let files = self.store.records::<WorkerFileRecord>(&agent.run_id)?;
+                    let mut has_staged_seed = false;
+                    for file in files {
+                        if file.path.starts_with(&prefix)
+                            && self
+                                .gateway
+                                .accepts_worker_id(&agent.run_id, &file.worker_id)?
+                        {
+                            has_staged_seed = true;
+                            break;
+                        }
+                    }
                     ensure!(
-                        self.store
-                            .records::<WorkerFileRecord>(&agent.run_id)?
-                            .iter()
-                            .any(|file| file.worker_id
-                                == self.gateway.worker_identity().unwrap_or_default()
-                                && file.path.starts_with(&prefix)),
+                        has_staged_seed,
                         "seed directory must contain staged in-run files"
                     );
                 }

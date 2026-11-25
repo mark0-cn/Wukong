@@ -155,7 +155,7 @@ fn exports_complete_original_bundle_redacts_config_and_does_not_assert_unverifie
     }
     assert!(report.contains("OPENAI_API_KEY"));
     assert!(report.contains("max_total_tokens"));
-    let json: serde_json::Value = serde_json::from_str(&report).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&report).unwrap();
     assert_eq!(
         json["finding_assessments"][0]["independent_verification_valid"],
         false
@@ -174,7 +174,16 @@ fn exports_complete_original_bundle_redacts_config_and_does_not_assert_unverifie
         fs::read(output.join(artifact)).unwrap(),
         b"original crash log"
     );
-    assert!(report::export(&store, &run_id, &output).is_err());
+    let mut current: RunRecord = store.require("run", &run_id).unwrap();
+    current.total_tokens = 1000;
+    store.put("run", &run_id, &run_id, &current).unwrap();
+    let refreshed = report::export(&store, &run_id, &output).unwrap();
+    assert_eq!(refreshed.output_dir, fs::canonicalize(&output).unwrap());
+    let refreshed_json: serde_json::Value =
+        serde_json::from_slice(&fs::read(&refreshed.report_json).unwrap()).unwrap();
+    assert_eq!(refreshed_json["snapshot"]["run"]["total_tokens"], 1000);
+    report::verify_bundle(&output).unwrap();
+    json = refreshed_json;
     let translated = temp.path().join("bundle-zh");
     report::export_with_locale(&store, &run_id, &translated, wukong::i18n::Locale::ZhCn).unwrap();
     report::verify_bundle(&translated).unwrap();
@@ -198,6 +207,40 @@ fn exports_complete_original_bundle_redacts_config_and_does_not_assert_unverifie
             fs::read(translated.join(file)).unwrap()
         );
     }
+}
+
+#[test]
+fn refresh_rejects_a_valid_bundle_from_another_run() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id, _) = fixture(temp.path());
+    let output = temp.path().join("bundle");
+    report::export(&store, &run_id, &output).unwrap();
+    let path = output.join("manifest.json");
+    let mut manifest: BundleManifest = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest.run_id = "another-run".into();
+    let bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    let digest = hex::encode(Sha256::digest(&bytes));
+    let sums = fs::read_to_string(output.join("SHA256SUMS"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            if line.ends_with("  manifest.json") {
+                format!("{digest}  manifest.json")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(output.join("SHA256SUMS"), sums).unwrap();
+    report::verify_bundle(&output).unwrap();
+    assert!(report::export(&store, &run_id, &output).is_err());
+    assert_eq!(
+        fs::read_to_string(output.join("target/sample.bin")).unwrap(),
+        "trusted-report-fixture"
+    );
 }
 
 #[test]

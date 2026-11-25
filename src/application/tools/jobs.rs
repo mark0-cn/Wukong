@@ -55,7 +55,6 @@ impl JobService {
             .clone()
     }
 
-    #[cfg(test)]
     pub(crate) async fn refresh(&self, run: &str) -> Result<()> {
         if self.gateway.worker.is_none() {
             return Ok(());
@@ -296,7 +295,8 @@ impl JobService {
     ) -> Result<JobRecord> {
         let job: JobRecord = require_in_run(&self.store, job_id, &agent.run_id)?;
         ensure!(
-            job.worker_id == self.gateway.worker_identity()?,
+            self.gateway
+                .accepts_worker_id(&job.run_id, &job.worker_id)?,
             "job belongs to a different runtime configuration"
         );
         ensure!(

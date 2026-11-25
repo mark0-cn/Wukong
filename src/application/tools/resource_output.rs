@@ -53,7 +53,9 @@ impl ExecutionService {
                 ensure!(
                     session.run_id == agent.run_id
                         && session.agent_id == agent.id
-                        && session.worker_id == self.gateway.worker_identity()?,
+                        && self
+                            .gateway
+                            .accepts_worker_id(&session.run_id, &session.worker_id)?,
                     "resource belongs to another run, agent or worker"
                 );
                 let settled = session.state == SessionState::Closed;

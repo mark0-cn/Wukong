@@ -3,12 +3,15 @@
 //! The stdio bridge is only a transport. Its daemon and job runners survive this
 //! client being dropped, and a lost transport is replaced transparently on the
 //! next call; reconnect uses the same worker state directory.
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use jsonrpsee_core::client::{ClientT, Error as RpcError};
 use serde_json::{Value, json};
 #[cfg(windows)]
 use std::path::PathBuf;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use stdio::StdioChannel;
 use tokio::sync::Mutex;
 
@@ -48,7 +51,7 @@ pub struct RuntimeClient {
     session: Arc<Mutex<Session>>,
     start_admission: Arc<Mutex<()>>,
     config: RuntimeConfig,
-    identity: protocol::WorkerIdentity,
+    identity: Arc<RwLock<protocol::WorkerIdentity>>,
     lease: Option<protocol::EnvironmentLease>,
     telemetry: crate::adapters::telemetry::TelemetryHandle,
 }
@@ -77,7 +80,7 @@ impl RuntimeClient {
             session: Arc::new(Mutex::new(session)),
             start_admission: Arc::new(Mutex::new(())),
             config,
-            identity,
+            identity: Arc::new(RwLock::new(identity)),
             lease: None,
             telemetry,
         })
@@ -86,8 +89,11 @@ impl RuntimeClient {
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
     }
-    pub fn identity(&self) -> &protocol::WorkerIdentity {
-        &self.identity
+    pub fn identity(&self) -> protocol::WorkerIdentity {
+        self.identity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
     pub(crate) fn with_lease(&self, lease: protocol::EnvironmentLease) -> Self {
         Self {
@@ -184,7 +190,7 @@ impl RuntimeClient {
 
     async fn call_once(&self, method: &str, mut params: Value) -> Result<Value> {
         if method != "ping" && method != "doctor" {
-            params["_binding"] = serde_json::to_value(&self.identity)?;
+            params["_binding"] = serde_json::to_value(self.identity())?;
             if let Some(lease) = &self.lease {
                 params["_lease"] = serde_json::to_value(lease)?;
             }
@@ -195,12 +201,19 @@ impl RuntimeClient {
                 .await
                 .context("runtime transport lost and reconnect failed")?;
         }
-        if session.identity != self.identity {
-            let _ = session.channel.close().await;
-            session.poisoned = true;
-            bail!(
-                "worker installation, boot or package identity changed; refusing execution in the previous binding"
+        let identity = self.identity();
+        if session.identity != identity {
+            anyhow::ensure!(
+                session.identity.same_installation(&identity),
+                "worker installation, package or protocol identity changed; refusing execution in the previous binding"
             );
+            *self
+                .identity
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = session.identity.clone();
+            if method != "ping" && method != "doctor" {
+                params["_binding"] = serde_json::to_value(&session.identity)?;
+            }
         }
         match request(&session.channel, method, params).await {
             Ok(result) => Ok(result),

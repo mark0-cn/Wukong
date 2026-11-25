@@ -3,7 +3,8 @@ use crate::adapters::worker::protocol::TransportFailure;
 use std::fs;
 
 #[tokio::test]
-async fn reconnect_keeps_identity_and_never_replays_a_timed_out_request() -> Result<()> {
+async fn reconnect_tracks_boot_restart_without_replaying_and_rejects_installation_change()
+-> Result<()> {
     let fixture = tempfile::tempdir()?;
     let bridge = fixture.path().join("bridge.py");
     let state = fixture.path().join("worker");
@@ -20,7 +21,8 @@ for line in sys.stdin:
     request = json.loads(line)
     if request["method"] == "ping":
         boot = (root / "boot").read_text()
-        result = {"identity": {"protocol": 4, "installation_id": "fixture",
+        installation = (root / "installation").read_text()
+        result = {"identity": {"protocol": 4, "installation_id": installation,
                                "boot_id": boot, "package_sha256": "a" * 64}}
     elif request["method"] == "doctor":
         result = {"ready": True}
@@ -35,6 +37,7 @@ for line in sys.stdin:
     )?;
     fs::create_dir(&state)?;
     fs::write(state.join("boot"), "boot-1")?;
+    fs::write(state.join("installation"), "fixture")?;
     let client = RuntimeClient::connect(RuntimeConfig {
         transport: TransportConfig::TrustedLocal(TrustedLocalConfig {
             state_dir: state.clone(),
@@ -59,6 +62,11 @@ for line in sys.stdin:
 
     client.close().await?;
     fs::write(state.join("boot"), "boot-2")?;
+    assert_eq!(client.doctor().await?, json!({"ready": true}));
+    assert_eq!(client.identity().boot_id, "boot-2");
+    assert_eq!(fs::read_to_string(state.join("writes"))?, "fixture-write\n");
+    fs::write(state.join("installation"), "another")?;
+    client.close().await?;
     let failure = client.doctor().await.unwrap_err();
     assert!(format!("{failure:#}").contains("identity changed"));
     assert_eq!(fs::read_to_string(state.join("writes"))?, "fixture-write\n");
@@ -81,7 +89,7 @@ async fn linux_docker_and_ssh_relays_reconnect() -> Result<()> {
         assert_eq!(client.doctor().await?["os"], "linux");
         client.close().await?;
         assert_eq!(client.doctor().await?["os"], "linux");
-        assert_eq!(client.identity(), &identity);
+        assert_eq!(client.identity(), identity);
         client.close().await?;
     }
     Ok(())

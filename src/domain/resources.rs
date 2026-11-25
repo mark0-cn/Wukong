@@ -8,6 +8,8 @@ pub struct EnvironmentBinding {
     pub run_id: String,
     pub environment_id: String,
     pub identity: wukong_worker_protocol::WorkerIdentity,
+    #[serde(default)]
+    pub prior_identities: Vec<wukong_worker_protocol::WorkerIdentity>,
 }
 pub use wukong_worker_protocol::{JobResult, JobState, JobStatus, SessionHandle, SessionState};
 
