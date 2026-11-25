@@ -6,7 +6,7 @@
 
 CLI `analyze`（含 `--resume`）先导出指定的报告包并输出已保存的结果，再检查是否完成。只有 `completed` 退出码为 0；暂停、停止、崩溃、失败及其他未完成状态均返回 1，并在 stderr 标明状态。通过结构化结果的 `status` 区分可恢复的预算暂停与失败。导出成功和报告包完整性不代表分析完成或语义正确。
 
-`wukong::report::export(store, run_id, output)` 将一个事务快照导出到**新目录**。读取并哈希原始目标和每份证据，不执行样本。暂存目录内全部载荷验证通过后才重命名为目标目录；拒绝已有目标。
+`wukong::report::export(store, run_id, output)` 导出一个事务快照。读取并哈希原始目标和每份证据，不执行样本。暂存目录内全部载荷验证通过后才重命名为目标目录。目标不存在时会新建目录；已有目录只有在属于同一 run 且通过完整 bundle 校验时才可刷新。替换失败会恢复旧 bundle；损坏的包、符号链接和其他 run ID 均被拒绝。
 
 `export_with_locale(store, run_id, output, locale)` 翻译 Markdown/HTML 标题、记录状态和包内 README。兼容入口 `export` 默认英文；桌面采用当前界面语言，CLI 使用 `--locale`。已有正文、快照字段、重放参数、标识、哈希及证据字节不变；只有展示文件的内容哈希变化，完整性校验仍覆盖全部文件。
 
