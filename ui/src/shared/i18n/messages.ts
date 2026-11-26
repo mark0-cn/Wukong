@@ -46,6 +46,7 @@ export interface Messages {
   'cli-arg-run-id': undefined;
   'cli-arg-source': undefined;
   'cli-arg-state': undefined;
+  'cli-arg-stop': undefined;
   'cli-arg-strings': undefined;
   'cli-arg-target': undefined;
   'cli-arg-task': undefined;
@@ -81,6 +82,7 @@ export interface Messages {
   'cli-command-init': undefined;
   'cli-command-inspect': undefined;
   'cli-command-reconcile': undefined;
+  'cli-command-recover': undefined;
   'cli-command-runs': undefined;
   'cli-command-wukong': undefined;
   'cli-commands': undefined;
