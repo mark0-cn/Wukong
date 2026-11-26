@@ -3096,7 +3096,10 @@ async fn clean_guest_admits_only_a_verified_receipt_only_completed_orphan() {
         .unwrap();
     assert_eq!(outcome.files_written, 0);
     assert!(outcome.files_removed.is_empty());
-    assert_eq!(outcome.directories_removed, [paths.root.clone()]);
+    assert_eq!(
+        outcome.directories_removed,
+        std::slice::from_ref(&paths.root)
+    );
     assert!(!outcome.boot_task_removed);
     assert!(outcome.service_key_removed.is_none());
     assert_eq!(
@@ -3140,7 +3143,8 @@ async fn clean_guest_admits_only_a_verified_receipt_only_completed_orphan() {
 
 #[tokio::test]
 async fn completed_orphan_rejection_matrix_fails_before_disk_access() {
-    let cases: [(&str, fn(&mut LabProvision)); 11] = [
+    type RecordMutation = fn(&mut LabProvision);
+    let cases: [(&str, RecordMutation); 11] = [
         ("unsettled", |record| record.settled = false),
         ("not completed", |record| record.status = RunStatus::Failed),
         ("provision identity", |record| {
