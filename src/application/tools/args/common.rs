@@ -20,7 +20,8 @@ choices!(CoverageOutcome {
     NeedsFollowUp,
     Inconclusive,
     Completed,
-    NotReachable
+    NotReachable,
+    Superseded
 });
 choices!(Direction { To, From, Both });
 

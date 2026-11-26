@@ -645,8 +645,18 @@ pub struct Coverage {
     pub outcome: String,
     pub notes: String,
     pub evidence_ids: Vec<String>,
+    /// Root resolution links retained for audit and replay repair.
+    #[serde(default)]
+    pub supersedes: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+impl Coverage {
+    pub const SUPERSEDED: &'static str = "superseded";
+
+    pub fn is_superseded(&self) -> bool {
+        self.outcome == Self::SUPERSEDED
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedDocument {

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{Value, json};
 use std::{fs, time::Duration};
@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wukong::{
     config::AppConfig,
     coordinator::Coordinator,
-    domain::{Budget, Role},
+    domain::{Budget, Finding, FindingStage, Role, Verification},
     store::Store,
     tools::{ToolOutcome, ToolService},
 };
@@ -37,6 +37,37 @@ fn worker_config(path: &std::path::Path) -> AppConfig {
         )]),
         ..Default::default()
     }
+}
+
+async fn run_verification_job(
+    service: &ToolService,
+    verifier_id: &str,
+    call_id: &str,
+    args: Value,
+) -> Result<String> {
+    let started = service
+        .execute(verifier_id, call_id, "poc_verify", args)
+        .await?;
+    let job = value(&started)["job_id"]
+        .as_str()
+        .context("verification job ID missing")?
+        .to_owned();
+    for index in 0..160 {
+        let observed = service
+            .execute(
+                verifier_id,
+                &format!("{call_id}-status-{index}"),
+                "job_status",
+                json!({"job_id":job}),
+            )
+            .await?;
+        if value(&observed)["state"] == "completed" {
+            return Ok(job);
+        }
+        assert_ne!(value(&observed)["state"], "failed", "{observed:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    anyhow::bail!("live worker verification did not complete")
 }
 
 #[tokio::test]
@@ -136,7 +167,7 @@ async fn network_verification_imports_transcripts_and_preserves_identity_limits(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let server = tokio::spawn(async move {
-        for _ in 0..2 {
+        for _ in 0..6 {
             let (mut socket, _) = listener.accept().await?;
             socket.write_all(b"ready> ").await?;
             let mut bytes = [0; 4];
@@ -157,7 +188,7 @@ async fn network_verification_imports_transcripts_and_preserves_identity_limits(
             "files":{"target":run.target_sha256},"service":{"mode":"local_service","port":port,"host":null}
         }))?,
     )?;
-    let service = ToolService::new(config, store).await?;
+    let service = ToolService::new(config, store.clone()).await?;
     let staged = service
         .execute(&producer.id, "net-stage", "stage_target", json!({}))
         .await?;
@@ -187,37 +218,16 @@ async fn network_verification_imports_transcripts_and_preserves_identity_limits(
         .execute(&producer.id, "net-self-verify", "poc_verify", args.clone())
         .await?;
     assert!(denied.is_error);
-    let started = service
-        .execute(&verifier.id, "net-verify", "poc_verify", args)
-        .await?;
-    let job = value(&started)["job_id"].as_str().unwrap();
-    let mut completed = false;
-    for index in 0..160 {
-        let observed = service
-            .execute(
-                &verifier.id,
-                &format!("net-status-{index}"),
-                "job_status",
-                json!({"job_id":job}),
-            )
-            .await?;
-        if value(&observed)["state"] == "completed" {
-            completed = true;
-            break;
-        }
-        assert_ne!(value(&observed)["state"], "failed", "{observed:?}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert!(completed);
-    server.await??;
+    let job = run_verification_job(&service, &verifier.id, "net-verify", args.clone()).await?;
+    let record_args = json!({
+        "finding_id":finding_id,"job_id":job,"impact":"arbitrary code execution"
+    });
     let recorded = service
         .execute(
             &verifier.id,
             "net-record",
             "verification_record",
-            json!({
-                "finding_id":finding_id,"job_id":job,"impact":"arbitrary code execution"
-            }),
+            record_args.clone(),
         )
         .await?;
     let record = value(&recorded);
@@ -230,6 +240,111 @@ async fn network_verification_imports_transcripts_and_preserves_identity_limits(
             .contains("runtime identity is unconfirmed")
     );
     assert!(record["evidence_ids"].as_array().unwrap().len() >= 3);
+    let verification_id = record["id"].as_str().unwrap().to_owned();
+    let linked = store.require::<Finding>("finding", finding_id)?;
+    assert_eq!(
+        linked.verification_id.as_deref(),
+        Some(verification_id.as_str())
+    );
+    assert_eq!(linked.stage, FindingStage::Suspected);
+    let inspected = service
+        .execute(
+            &producer.id,
+            "net-finding-get",
+            "finding_get",
+            json!({"id":finding_id}),
+        )
+        .await?;
+    assert_eq!(value(&inspected)["verification"]["id"], verification_id);
+
+    let replayed = service
+        .execute(
+            &verifier.id,
+            "net-record",
+            "verification_record",
+            record_args.clone(),
+        )
+        .await?;
+    assert_eq!(replayed.value, recorded.value);
+
+    let mut unlinked = store.require::<Finding>("finding", finding_id)?;
+    unlinked.verification_id = None;
+    store.save_record(&unlinked)?;
+    let repaired = service
+        .execute(
+            &verifier.id,
+            "net-record-repair",
+            "verification_record",
+            record_args,
+        )
+        .await?;
+    assert_eq!(value(&repaired)["id"], verification_id);
+    let repaired_finding = store.require::<Finding>("finding", finding_id)?;
+    assert_eq!(
+        repaired_finding.verification_id.as_deref(),
+        Some(verification_id.as_str())
+    );
+    assert_eq!(repaired_finding.stage, FindingStage::Suspected);
+
+    let conflicting_job =
+        run_verification_job(&service, &verifier.id, "net-verify-conflict", args.clone()).await?;
+    let conflict = service
+        .execute(
+            &verifier.id,
+            "net-record-conflict",
+            "verification_record",
+            json!({"finding_id":finding_id,"job_id":conflicting_job}),
+        )
+        .await?;
+    assert!(conflict.is_error);
+    assert!(
+        conflict.value["result"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("different valid passing verification")
+    );
+    let after_conflict = store.require::<Finding>("finding", finding_id)?;
+    assert_eq!(
+        after_conflict.verification_id.as_deref(),
+        Some(verification_id.as_str())
+    );
+    assert_eq!(after_conflict.stage, FindingStage::Suspected);
+    assert_eq!(
+        store
+            .records::<Verification>(&run.id)?
+            .into_iter()
+            .filter(|record| record.finding_id == finding_id)
+            .count(),
+        1
+    );
+
+    let failed_finding = service.execute(&producer.id,"net-failed-finding","finding_file",json!({
+        "title":"Unmatched service behavior","description":"The expected marker is deliberately absent",
+        "evidence_ids":[input.value["evidence_id"]]
+    })).await?;
+    let failed_finding_id = value(&failed_finding)["finding"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut failed_args = args;
+    failed_args["finding_id"] = json!(failed_finding_id);
+    failed_args["network"]["steps"][3]["contains_base64"] =
+        json!(BASE64.encode(b"not-network-marker"));
+    let failed_job =
+        run_verification_job(&service, &verifier.id, "net-verify-failed", failed_args).await?;
+    let failed = service
+        .execute(
+            &verifier.id,
+            "net-record-failed",
+            "verification_record",
+            json!({"finding_id":failed_finding_id,"job_id":failed_job}),
+        )
+        .await?;
+    assert_eq!(value(&failed)["passed"], false);
+    let failed_finding = store.require::<Finding>("finding", &failed_finding_id)?;
+    assert!(failed_finding.verification_id.is_none());
+    assert_eq!(failed_finding.stage, FindingStage::Suspected);
+    server.await??;
     service.close().await;
     Ok(())
 }

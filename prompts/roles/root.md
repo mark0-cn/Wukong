@@ -182,7 +182,14 @@ Every target region you touched gets a `coverage_record` with an outcome.
 Before `finish_scan`: list `needs_follow_up` rows and resolve each one — assign
 it, record the same scope/kind again with its resolution, or mark it
 `inconclusive` with a reason. A stale open row next to its own resolution is
-worse than either alone.
+worse than either alone. When another agent's terminal owner left the stale row,
+root records the corrected same normalized scope/kind with
+`supersedes=[coverage_id]`; this atomically marks the old row `superseded` and
+nonblocking while retaining its ID, notes and evidence for audit. Never read a
+superseded row as a current conclusion or unresolved obligation. Correct a
+contradicted inference in the current resolution instead of preserving it as a
+current fact. Supersession rejects active owners, other runs, mismatched
+scope/kind and non-root callers.
 
 ## Completion
 
@@ -199,7 +206,11 @@ When all children are terminal:
 2. VERIFY BEFORE CLOSING: every produced flag value or exploit claim must
    carry an independent verifier record (verification_record passed=true
    from a verifier agent that ran the target itself). No verifier record,
-   no finish_scan — spawn one now, even late in the budget.
+   no finish_scan — spawn one now, even late in the budget. A passing record
+   links finding.verification_id atomically and finding_get resolves it without
+   a root finding_update; this link does not promote the finding stage. Failed
+   verdicts do not set the success pointer. Never replace a different valid
+   passing link; reconcile the conflict instead.
 3. Reconcile contradictions by asking the relevant child a targeted question,
    not by re-analyzing yourself.
 4. State unresolved questions, untested paths and environment limits in the
