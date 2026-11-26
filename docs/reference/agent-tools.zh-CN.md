@@ -8,6 +8,8 @@
 
 只有 verifier 可以调用 `analysis_verify`、`poc_verify` 和 `verification_record`。业务层在认证及提升发现阶段时也会检查 verifier 角色。
 
+对于安全发现，有效通过的 `verification_record` 与其 `finding.verification_id` 关联在同一事务中提交。首个有效通过关联优先：重放可以修复旧记录缺失的关联，但不同的有效通过关联会发生冲突，绝不会被静默替换。失败判定不会设置成功指针。关联不会提升发现阶段；`finding_get` 会立即解析已关联记录，无需 root 调用 `finding_update`。
+
 ## 执行与结果
 
 `launch_prepare` 从 primary、bundle、已暂存文件／依赖或 Linux target/libc/loader 创建绑定哈希的不可变目录布局。在此设置 args、cwd、环境、输入模式和时限。目录包可用 `source.entry` 和 `source.members` 在上传前选择入口及成员子集。job_start、interactive_start 或 debug_start 复用返回的 `launch_spec`，省略 argv／target／环境／时限覆盖参数。schema 在分派给 worker 前拒绝冲突选项。准备记录身份，实际 worker 执行才构成验收证据。

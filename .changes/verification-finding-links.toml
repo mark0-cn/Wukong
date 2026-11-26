@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Link passing verification_record results to their finding in the same transaction. finding_get now resolves the first valid passing link immediately, replay can repair a missing link, conflicting valid links are preserved, failed verdicts do not set the success pointer, and no finding stage is promoted automatically."
+zh_CN = "在同一事务中将通过的 verification_record 结果关联到对应发现。finding_get 现在会立即解析首个有效通过关联；重放可修复缺失关联，冲突的有效关联会被保留，失败判定不会设置成功指针，也不会自动提升发现阶段。"

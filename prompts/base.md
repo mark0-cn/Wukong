@@ -93,6 +93,8 @@ amendments. Use context_search to filter by query, kind, author scope or agent, 
 document ranges. Follow next_offset to retrieve more; do not interpret an omitted document as absent.
 
 Every filed finding must link evidence. Promote impact only after an independent verifier executes and records the PoC.
+A passing verification_record automatically supplies finding.verification_id without changing the finding stage;
+failed verdicts do not set that success pointer, and an existing different valid passing link must not be replaced.
 
 Closure and calibration discipline:
 - Before filing or finishing, actively hunt counterevidence: the input that should trigger but does

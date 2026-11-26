@@ -26,8 +26,8 @@
       "zh-CN": "ba0ee88b3c2f48cee790b34f68a6b2c699ca7569c180eb10b610761a0170d8b3"
     },
     "docs/design/implementation-contract.md": {
-      "en": "25498a18bf71b473a8e26b4e475566563b2f4cb8eca32ea71163024f21e90309",
-      "zh-CN": "6d8a572a93f3ca73fc0bf5bc063ac832993b8eb6bf427dba7254d8659d14ec5f"
+      "en": "8bcd9b8c172373f6a19e561e08e9c8ad0524be771c9367e21007d78e3264a1b9",
+      "zh-CN": "ebd951c47ab987f59900d79caaa8447e47ab62d47704587274ee6290b6228919"
     },
     "docs/design/windows-lab.md": {
       "en": "c8b28082045e234dff2c7e32a926038d15e814414ba5516cd2e7f9f56a03585d",
@@ -98,16 +98,16 @@
       "zh-CN": "03845e27baca57c44dd813f252179f07b5d649198b6fbbc7cb071e1aaa5feb22"
     },
     "docs/reference/agent-tools.md": {
-      "en": "d8a87f67143fd2bdd5edd2b816e86870e9994e5e8a16f1be182c45a4b165cf31",
-      "zh-CN": "73b5c9263fc57eae56c0fa5955a2055e7ec37f76b835c68481d6c47f90031ccf"
+      "en": "e527e131563cab60520bacb44e7944391f40187b5f33496211a5d66387761fb4",
+      "zh-CN": "0caa6b8d8741b9dc3c114eeec9fccdaf3641333a55b36a82b734c6907c87accb"
     },
     "docs/reference/pwn-knowledge.md": {
       "en": "41f72d7e5ffa59a65df7e10a76610f05ddf195bf2f5f3c43f3c3c1f469a2a1ad",
       "zh-CN": "5ee3ede0ee23e57641b92de1a5315c8082e602e2f5037dc58a10f89de1aed524"
     },
     "docs/reference/pwn-tools.md": {
-      "en": "bdd223cb2ab8a36c54f80e892536473c9bea29780e014b1025c51e2837727799",
-      "zh-CN": "b911263c1fdd3314d409f6b34623a181f6104eb85a5fec36eb12c60616958c19"
+      "en": "c34d736c61963da5d074f3cf3985be2afc436f066638d91c2b3c0705cdbca771",
+      "zh-CN": "7e167d647e34e27152f699f223584b1fab175d701e27f267d355d46d5051ddf8"
     },
     "docs/reference/report-format.md": {
       "en": "ab2932ed16e5099db4f3b6e0c56636ca3093b882c48d7eddac9c7926f267488c",
@@ -118,8 +118,8 @@
       "zh-CN": "6061504011cd3fb2e397b76b0f9410043c7a92518eb028b8c73245c176270c1a"
     },
     "docs/reference/tool-catalog.md": {
-      "en": "4ea91bf7c0b3325f70941bad35750213f252967b545fdea08367ca2353f016b8",
-      "zh-CN": "2b88034156ed4d261bab9ce8442003c633ceea8b07b58c52fbe2f6432a824e15"
+      "en": "603705108a5ab391efc256cccc0a49db80f5f948e041b95115129ac1dee85c63",
+      "zh-CN": "070fa55fbee935201710c2d34db65218ea247444702f8606bf425ec0c94a4f19"
     },
     "docs/user/dynamic-trace.md": {
       "en": "b38e4bcc832735f6c2a5cdd8bfbb5aa6e7b8490044262d1b75697dd8ce4d31fa",

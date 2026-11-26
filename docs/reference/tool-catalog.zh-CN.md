@@ -88,7 +88,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `tool_select` | 全部 | 是 | controller | 替换后续模型请求的可选工具分组。核心及资源生命周期工具始终保留；external 分组选择已配置的 MCP 工具。 |
 | `trace_compare` | analyst / verifier | 是 | controller | 完全离线比较调用者拥有的两组 trace_run 证据。run.json 和 events.jsonl 必须已从不同 job 导入。兼容、完整且非空的追踪返回 match/mismatch，包含有类型整数、缓冲区、事件顺序和进程语义差异；不兼容或不完整时绝不返回 match。完整有界比较详情保存为 trace.comparison 证据。 |
 | `trace_run` | analyst / verifier | 是 | trace.start | 使用不可变 LaunchSpec 和同 run 输入证据启动声明式动态追踪。追踪点必须绑定 LaunchSpec 源目标。立即返回普通所属 job；通过 job_status 观察，并用 job_artifacts 导入 run.json/events.jsonl。不创建调试会话。 |
-| `verification_record` | verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。 |
+| `verification_record` | verifier | 是 | job.status + job.artifacts | 仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。通过记录会原子关联发现的首个有效 verification_id，但不提升阶段；失败判定不设置该指针，也绝不覆盖不同的有效关联。 |
 | `view_agent_graph` | 全部 | 否 | controller | 查询紧凑分页的代理状态及完整 ID（默认每页 8 条，使用 next_offset 翻页）。指定 agent_id 获取单个代理完整任务、契约和结果。同一 run 内接受至少 8 字符的唯一前缀；后续协调使用返回的完整 ID。 |
 | `wait_for_agents` | 全部 | 是 | controller | 按 all_terminal（默认）、all_success 或 any_success 等待选定 Agent，返回 satisfied/blocked 或超时；空列表表示子任务。 |
 | `xrefs_query` | analyst / verifier | 否 | controller Ghidra or ghidra_query | Ghidra：查询绑定目标的 module_relative AddressRef 的引用关系。复制 binary_inspect 地址；链接时 VA 减去 image_base，不能将文件偏移或页号解释为模块偏移。 |

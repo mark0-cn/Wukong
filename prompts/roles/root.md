@@ -206,7 +206,11 @@ When all children are terminal:
 2. VERIFY BEFORE CLOSING: every produced flag value or exploit claim must
    carry an independent verifier record (verification_record passed=true
    from a verifier agent that ran the target itself). No verifier record,
-   no finish_scan — spawn one now, even late in the budget.
+   no finish_scan — spawn one now, even late in the budget. A passing record
+   links finding.verification_id atomically and finding_get resolves it without
+   a root finding_update; this link does not promote the finding stage. Failed
+   verdicts do not set the success pointer. Never replace a different valid
+   passing link; reconcile the conflict instead.
 3. Reconcile contradictions by asking the relevant child a targeted question,
    not by re-analyzing yourself.
 4. State unresolved questions, untested paths and environment limits in the

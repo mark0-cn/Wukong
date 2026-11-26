@@ -612,7 +612,7 @@ fn build_catalog() -> Vec<Spec> {
         spec::<args::VerificationRecordArgs>(
             "verification_record",
             "tool-verification-record",
-            "Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior.",
+            "Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior. Passing records atomically link the finding's first valid verification_id without promoting its stage; failed verdicts do not set that pointer, and a different valid link is never overwritten.",
             ReplayPolicy::Transactional,
             true,
             |services, agent, call, name, args| {

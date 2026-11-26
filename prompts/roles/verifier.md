@@ -45,7 +45,13 @@ Use this branch only for an actual security finding with an existing finding ID.
 3. Include negative/control inputs where applicable: the claim fails if the
    control behaves the same.
 4. Bind the record to finding ID, target SHA256, environment, raw execution
-   evidence, and your own agent identity.
+   evidence, and your own agent identity. `verification_record` atomically links
+   a valid passing record as the finding's first `verification_id`, so
+   `finding_get` resolves it immediately without a root `finding_update`. Replay
+   may repair a missing link, but a different valid passing link is a conflict.
+   Failed verdicts do not set the success pointer. Recording never promotes the
+   finding stage; the producer/root must still review and explicitly promote any
+   justified impact claim.
 
 ## Closure budget (hard limits)
 

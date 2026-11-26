@@ -308,8 +308,8 @@
     "text": "替换后续模型请求的可选工具分组。核心及资源生命周期工具始终保留；external 分组选择已配置的 MCP 工具。"
   },
   "verification_record": {
-    "source": "Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior.",
-    "text": "仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。"
+    "source": "Verifier only: ingest a completed poc_verify job, its raw evidence and real trial counts. A crash verifies only crash behavior. Passing records atomically link the finding's first valid verification_id without promoting its stage; failed verdicts do not set that pointer, and a different valid link is never overwritten.",
+    "text": "仅 verifier：导入完成的 poc_verify job、原始证据和真实尝试计数。崩溃只验证崩溃行为。通过记录会原子关联发现的首个有效 verification_id，但不提升阶段；失败判定不设置该指针，也绝不覆盖不同的有效关联。"
   },
   "view_agent_graph": {
     "source": "Query compact paginated agent states with canonical IDs (default 8 per page; follow next_offset). Pass agent_id for one agent's full task, contract and result. Unique prefixes of at least 8 characters are accepted within this run; use returned full IDs for coordination.",

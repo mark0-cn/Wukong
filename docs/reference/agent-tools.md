@@ -8,6 +8,8 @@ The [generated catalog](tool-catalog.md) describes registered tools. The model s
 
 Only verifier may call `analysis_verify`, `poc_verify` and `verification_record`. Certification and finding promotion also check the verifier role in the business layer.
 
+For security findings, a valid passing `verification_record` and its `finding.verification_id` link commit in one transaction. The first valid passing link wins: replay can repair an unlinked old record, but a different valid passing link is a conflict and is never silently replaced. Failed verdicts do not set the success pointer. Linking does not promote the finding stage; `finding_get` immediately resolves the linked record without a root `finding_update`.
+
 ## Execution and results
 
 `launch_prepare` creates a hash-bound immutable layout from primary, bundle, staged files/dependencies or Linux target/libc/loader. Set args, cwd, environment, input mode and timeout there. For bundles, optional `source.entry` and `source.members` select the executable and member subset before upload. Reuse the returned `launch_spec` in job_start, interactive_start or debug_start; omit argv/target/environment/timeout overrides. The schema rejects conflicting choices before worker dispatch. Preparation records identity, but actual worker execution remains the acceptance evidence.
