@@ -1,8 +1,10 @@
-//! Persist failed effects and clean up only artifacts owned by a recorded operation.
+//! Persist failed effects and clean up recorded or narrowly authenticated orphan artifacts.
 use super::super::provision::{
-    BootTaskRemoval, DiskInspectionRequest, GUEST_SYSTEM_HIVE, GuestPaths, GuestRemoval,
-    ServiceRemoval, boot_task_injection, plan_guest_cleanup, require_relative_path,
-    resolve_guest_disk, restore_vmx_preserving_active_disk, staged_base_snapshot,
+    BootTaskRemoval, DiskInspection, DiskInspectionRequest, GUEST_SYSTEM_HIVE, GuestCleanupPlan,
+    GuestPaths, GuestRemoval, ReceiptExpectation, ServiceRemoval, boot_task_injection,
+    plan_guest_cleanup, read_bounded, require_relative_path, resolve_guest_disk,
+    restore_vmx_preserving_active_disk, staged_base_snapshot, validate_connection,
+    verify_guest_receipt,
 };
 use super::super::{
     LabError, LabPhase, LabProvision, LabState, LabStore, OperationKind, PendingOperation,
@@ -11,8 +13,10 @@ use super::super::{
 use super::execution::{step_error, write_synced};
 use super::{CleanGuestOptions, CleanGuestOutcome, PlannedProvision};
 use anyhow::{Context, Result, bail, ensure};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
+use wukong_worker_package::ConnectionReceipt;
 
 impl WindowsLab {
     pub(super) fn abandon_provision<T>(
@@ -91,7 +95,7 @@ impl WindowsLab {
             crate::adapters::environments::lab_guard::LockMode::Exclusive,
         )?;
         let state = self.store.load(&self.vm_id, &self.baseline)?;
-        self.require_known_provision_operation(&state, &paths)?;
+        let orphan = self.admit_provision_cleanup(&state, &paths)?;
         let running = self
             .host_running()
             .await
@@ -111,11 +115,10 @@ impl WindowsLab {
         let vmx_text =
             std::str::from_utf8(&vmx_bytes).context("registered VMX is not valid UTF-8")?;
         let guest_disk = resolve_guest_disk(vmx_text, &self.vmx)?;
+        let mut request = DiskInspectionRequest::for_provision(&paths);
+        request.receipt_only = orphan.is_some();
         let inspection = offline
-            .inspect(
-                &guest_disk.path,
-                &DiskInspectionRequest::for_provision(&paths),
-            )
+            .inspect(&guest_disk.path, &request)
             .await
             .context("offline preflight of the powered-off guest disk")?;
         ensure!(
@@ -133,6 +136,9 @@ impl WindowsLab {
             .as_ref()
             .is_some_and(|record| record.provision_id == paths.provision_id());
         let plan = plan_guest_cleanup(&paths, &inspection, last_operation)?;
+        if let Some(record) = &orphan {
+            verify_receipt_only_orphan(record, &paths, &inspection, &plan)?;
+        }
         let mut outcome = CleanGuestOutcome {
             dry_run: options.dry_run,
             vm_id: self.vm_id.clone(),
@@ -259,14 +265,17 @@ impl WindowsLab {
         Ok(outcome)
     }
 
-    /// Only a recorded provision operation of this VM may be cleaned. An
-    /// unknown or foreign identity is refused before the guest disk is touched,
-    /// and an unrelated pending operation must be reconciled first.
-    fn require_known_provision_operation(
+    /// Only a recorded provision operation of this VM may be cleaned. The one
+    /// exception is a settled completed host receipt whose guest left only its
+    /// own receipt after an otherwise successful installation. That orphan is
+    /// fully authenticated below before any guest mutation. Unknown or foreign
+    /// identities are refused before the guest disk is touched, and an unrelated
+    /// pending operation must be reconciled first.
+    fn admit_provision_cleanup(
         &self,
         state: &LabState,
         paths: &GuestPaths,
-    ) -> Result<()> {
+    ) -> Result<Option<LabProvision>> {
         let operation_id = paths.provision_id();
         if let Some(pending) = &state.pending {
             ensure!(
@@ -282,12 +291,81 @@ impl WindowsLab {
         }) || state.last_provision.as_ref().is_some_and(|record| {
             record.provision_id == operation_id || record.operation_id == operation_id
         });
+        if recorded {
+            return Ok(None);
+        }
+        let record = self
+            .load_completed_orphan(operation_id)
+            .with_context(|| {
+                format!(
+                    "operation {operation_id} is not a recorded offline provisioning of lab VM {}; refusing to modify the guest disk",
+                    self.vm_id
+                )
+            })?;
+        Ok(Some(record))
+    }
+
+    /// Authenticate all host-side fields of a receipt-only orphan before disk
+    /// access. Finalized template media may already have been removed after a
+    /// successful provision, so validity means the persisted media identity and
+    /// both public receipt records are internally valid and mutually bound, not
+    /// that the transient media directory still exists.
+    fn load_completed_orphan(&self, operation_id: &str) -> Result<LabProvision> {
+        let path = self
+            .store
+            .root()
+            .join("provisions")
+            .join(format!("{operation_id}.json"));
+        let bytes = read_bounded(&path, 4 * 1024 * 1024)
+            .with_context(|| format!("read completed provisioning receipt {}", path.display()))?;
+        let record: LabProvision =
+            serde_json::from_slice(&bytes).context("parse completed provisioning receipt")?;
         ensure!(
-            recorded,
-            "operation {operation_id} is not a recorded offline provisioning of lab VM {}; refusing to modify the guest disk",
-            self.vm_id
+            record.provision_id == operation_id && record.operation_id == operation_id,
+            "completed provisioning receipt identity mismatch"
         );
-        Ok(())
+        ensure!(
+            record.status == RunStatus::Completed && record.settled,
+            "provisioning receipt is not settled and completed"
+        );
+        ensure!(
+            record.baseline_snapshot.as_deref() == Some(self.baseline.as_str()),
+            "completed provisioning receipt does not name the current fixed base"
+        );
+        ensure!(
+            record.media.media_root.is_absolute(),
+            "completed provisioning receipt has a relative media path"
+        );
+        record
+            .media
+            .validate()
+            .context("completed provisioning receipt has invalid media identity")?;
+        let guest_receipt = record
+            .guest_receipt
+            .as_ref()
+            .context("completed provisioning receipt has no guest receipt")?;
+        let recorded_connection = record
+            .connection
+            .clone()
+            .context("completed provisioning receipt has no worker connection")?;
+        let connection: ConnectionReceipt = serde_json::from_value(recorded_connection.clone())
+            .context("parse completed provisioning worker connection")?;
+        validate_connection(&connection, &record.media)
+            .context("completed provisioning worker connection differs from its media")?;
+        let host_bytes = serde_json::to_vec(guest_receipt)?;
+        let verified = verify_guest_receipt(
+            &host_bytes,
+            &ReceiptExpectation {
+                provision_id: operation_id.to_owned(),
+                media: record.media.clone(),
+            },
+        )
+        .context("completed provisioning guest receipt is invalid")?;
+        ensure!(
+            serde_json::to_value(verified)? == recorded_connection,
+            "completed provisioning guest receipt and worker connection differ"
+        );
+        Ok(record)
     }
 
     /// Resolve only snapshot names owned by this provisioning operation. A
@@ -463,6 +541,67 @@ impl WindowsLab {
         }
         Ok(())
     }
+}
+
+/// Restrict an orphaned successful provision to either an already-clean retry
+/// or recursive removal of a directory containing exactly its verified receipt.
+/// No boot registration, policy, service, individual file or other directory
+/// action is admitted through this path.
+fn verify_receipt_only_orphan(
+    record: &LabProvision,
+    paths: &GuestPaths,
+    inspection: &DiskInspection,
+    plan: &GuestCleanupPlan,
+) -> Result<()> {
+    let no_other_actions = plan.files.is_empty()
+        && plan.files_to_remove.is_empty()
+        && !plan.boot_task
+        && plan.service_key.is_none();
+    ensure!(
+        no_other_actions,
+        "completed receipt-only orphan cleanup refuses boot, policy, service or other file changes"
+    );
+    if !inspection.operation_root_present {
+        ensure!(
+            inspection.operation_root_entries.is_empty()
+                && inspection.receipt.is_none()
+                && plan.is_empty(),
+            "completed provisioning orphan has unexpected leftovers without its operation directory"
+        );
+        return Ok(());
+    }
+    ensure!(
+        inspection.operation_root_entries == ["receipt.json"],
+        "completed provisioning orphan directory must contain exactly receipt.json"
+    );
+    ensure!(
+        plan.directories_to_remove == [paths.root.clone()] && plan.actions.len() == 1,
+        "completed receipt-only orphan cleanup must remove exactly its operation directory"
+    );
+    let bytes = inspection
+        .receipt
+        .as_deref()
+        .context("completed provisioning orphan has no readable guest receipt")?;
+    let connection = verify_guest_receipt(
+        bytes,
+        &ReceiptExpectation {
+            provision_id: record.provision_id.clone(),
+            media: record.media.clone(),
+        },
+    )
+    .context("verify completed orphan guest receipt")?;
+    let guest_receipt: Value =
+        serde_json::from_slice(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes))
+            .context("parse completed orphan guest receipt for comparison")?;
+    ensure!(
+        Some(&guest_receipt) == record.guest_receipt.as_ref(),
+        "guest receipt differs from the completed host provisioning record"
+    );
+    ensure!(
+        Some(serde_json::to_value(connection)?) == record.connection,
+        "guest connection differs from the completed host provisioning record"
+    );
+    Ok(())
 }
 
 /// Bounded retry for a filesystem removal that can transiently fail with a

@@ -87,11 +87,11 @@ pub enum Command {
         #[arg(long, default_value_t = 300)]
         timeout: u64,
     },
-    /// Remove one failed provisioning attempt's leftovers from the powered-off guest disk.
+    /// Remove a recorded attempt's leftovers or a verified completed receipt-only orphan.
     CleanGuest {
         #[arg(long)]
         vm: String,
-        /// Operation id reported by the failed `lab provision` run.
+        /// Provision id recorded by the VM or its settled completed host receipt.
         #[arg(long)]
         operation: String,
         /// Inspect the guest and print the planned removals without writing.

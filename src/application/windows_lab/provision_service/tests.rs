@@ -425,6 +425,11 @@ impl OfflineDisk for FakeDisk {
         ] {
             state.guest_paths.push(guest_path(windows)?);
         }
+        if request.receipt_only {
+            for windows in [&request.operation_root, &request.receipt] {
+                state.guest_paths.push(guest_path(windows)?);
+            }
+        }
         let files = state.files.clone();
         let scripts_ini = files.get(&request.scripts_ini).cloned();
         let startup_command_lines = scripts_ini
@@ -466,6 +471,18 @@ impl OfflineDisk for FakeDisk {
             .filter(|name| !name.contains('\\'))
             .map(str::to_owned)
             .collect();
+        let operation_root_entries = files
+            .keys()
+            .filter(|windows| under(windows, &request.operation_root))
+            .chain(state.directories.iter().filter(|directory| {
+                directory
+                    .strip_prefix(&format!("{}\\", request.operation_root))
+                    .is_some_and(|name| !name.is_empty() && !name.contains('\\'))
+            }))
+            .map(|windows| windows.rsplit('\\').next().unwrap_or_default().to_owned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         Ok(DiskInspection {
             windows_volume: true,
             system_hive_present: true,
@@ -474,6 +491,18 @@ impl OfflineDisk for FakeDisk {
             control_set: Some(1),
             existing_service: state.service.clone(),
             provision_root_entries,
+            operation_root_present: request.receipt_only
+                && state.directories.contains(&request.operation_root),
+            operation_root_entries: if request.receipt_only {
+                operation_root_entries
+            } else {
+                Vec::new()
+            },
+            receipt: if request.receipt_only {
+                files.get(&request.receipt).cloned()
+            } else {
+                None
+            },
             task_file_present: files.contains_key(&request.task_file),
             boot_task: state.boot_task,
             launcher: files.get(&request.launcher).cloned(),
@@ -547,6 +576,7 @@ impl OfflineDisk for FakeDisk {
                 state
                     .directories
                     .retain(|path| !path.starts_with(&prefix) && path != directory);
+                state.files.retain(|path, _| !path.starts_with(&prefix));
                 evidence.removed_directories.push(directory.clone());
             } else {
                 evidence.absent.push(directory.clone());
@@ -1355,6 +1385,65 @@ fn record_failed_provision(deployment: &Deployment, operation_id: &str) -> Guest
     });
     deployment.store().save(&state).unwrap();
     paths
+}
+
+fn completed_orphan(
+    deployment: &Deployment,
+    operation_id: &str,
+) -> (GuestPaths, LabProvision, Vec<u8>) {
+    let paths = GuestPaths::for_provision(operation_id).unwrap();
+    let receipt_bytes = fixture::guest_receipt(operation_id, &deployment.fixture.connection);
+    let guest_receipt: serde_json::Value = serde_json::from_slice(&receipt_bytes).unwrap();
+    let record = LabProvision {
+        provision_id: operation_id.into(),
+        operation_id: operation_id.into(),
+        generation: 1,
+        status: RunStatus::Completed,
+        source: deployment.media_source(),
+        media: deployment.fixture.identity.clone(),
+        iso_sha256: None,
+        iso_size: None,
+        vmx_sha256_before: None,
+        vmx_sha256_after: None,
+        hive_sha256_before: None,
+        hive_sha256_after: None,
+        injected: Vec::new(),
+        boot_task_sha256: None,
+        launcher_sha256: None,
+        scripts_ini_sha256: None,
+        gpt_ini_sha256: None,
+        identity_file: None,
+        guest_receipt: Some(guest_receipt),
+        connection: Some(serde_json::to_value(&deployment.fixture.connection).unwrap()),
+        environment_verified: None,
+        verification: None,
+        baseline_snapshot: Some(BASELINE_SNAPSHOT.into()),
+        settled: true,
+        started_at: "2026-01-01T00:00:00Z".into(),
+        ended_at: Some("2026-01-01T00:00:00Z".into()),
+        error: None,
+    };
+    deployment
+        .store()
+        .save(&deployment.with_configuration(LabState::fresh("labvm", BASELINE_SNAPSHOT)))
+        .unwrap();
+    write_orphan_record(deployment, &record);
+    (paths, record, receipt_bytes)
+}
+
+fn write_orphan_record(deployment: &Deployment, record: &LabProvision) {
+    let root = deployment.state_dir.join("windows-lab/provisions");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join(format!("{}.json", record.provision_id)),
+        serde_json::to_vec_pretty(record).unwrap(),
+    )
+    .unwrap();
+}
+
+fn seed_receipt_only_orphan(disk: &FakeDisk, paths: &GuestPaths, receipt: &[u8]) {
+    disk.set_directories([paths.root.clone()]);
+    disk.set_file(&paths.receipt, receipt.to_vec());
 }
 
 /// Emulate the guest state a failed attempt left behind: injected startup
@@ -2916,6 +3005,24 @@ async fn clean_guest_never_touches_an_unrelated_legacy_service() {
 }
 
 #[tokio::test]
+async fn recorded_cleanup_does_not_adopt_orphan_receipt_validation() {
+    let deployment = deployment();
+    let operation = "0".repeat(32);
+    let paths = record_failed_provision(&deployment, &operation);
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    seed_receipt_only_orphan(&disk, &paths, b"not a provisioning receipt");
+    let lab = wired(&deployment, disk.clone(), Arc::new(FakeIso::new()));
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.directories_removed, [paths.root]);
+}
+
+#[tokio::test]
 async fn clean_guest_refuses_unknown_or_foreign_operations() {
     let deployment = deployment();
     let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
@@ -2946,6 +3053,227 @@ async fn clean_guest_refuses_unknown_or_foreign_operations() {
         "{error:#}"
     );
     assert!(disk.calls().is_empty());
+}
+
+#[tokio::test]
+async fn clean_guest_admits_only_a_verified_receipt_only_completed_orphan() {
+    let deployment = deployment();
+    let operation = "e".repeat(32);
+    let (paths, _record, receipt) = completed_orphan(&deployment, &operation);
+    let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+    seed_receipt_only_orphan(&disk, &paths, &receipt);
+    let lab = wired(&deployment, disk.clone(), Arc::new(FakeIso::new()));
+    let state_before = serde_json::to_value(deployment.state()).unwrap();
+    let host_receipt = deployment
+        .state_dir
+        .join("windows-lab/provisions")
+        .join(format!("{operation}.json"));
+    let host_bytes = fs::read(&host_receipt).unwrap();
+
+    let preview = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: true,
+        })
+        .await
+        .unwrap();
+    assert!(preview.dry_run);
+    assert_eq!(
+        preview.actions,
+        [format!("delete the operation directory {}", paths.root)]
+    );
+    assert!(preview.files_removed.is_empty());
+    assert!(preview.directories_removed.is_empty());
+    assert_eq!(disk.calls(), ["inspect"]);
+    assert!(disk.file(&paths.receipt).is_some());
+
+    let outcome = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome.files_written, 0);
+    assert!(outcome.files_removed.is_empty());
+    assert_eq!(outcome.directories_removed, [paths.root.clone()]);
+    assert!(!outcome.boot_task_removed);
+    assert!(outcome.service_key_removed.is_none());
+    assert_eq!(
+        disk.removals(),
+        [GuestRemoval {
+            directories: vec![paths.root.clone()],
+            files: Vec::new(),
+        }]
+    );
+    assert!(!disk.directories().contains(&paths.root));
+    assert!(disk.file(&paths.receipt).is_none());
+    assert_eq!(
+        serde_json::to_value(deployment.state()).unwrap(),
+        state_before,
+        "receipt-only cleanup never adopts the orphan into controller state"
+    );
+    assert_eq!(fs::read(&host_receipt).unwrap(), host_bytes);
+
+    let retry = lab
+        .clean_guest_leftovers(CleanGuestOptions {
+            operation_id: operation,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert!(retry.directories_removed.is_empty());
+    assert!(
+        retry
+            .actions
+            .iter()
+            .any(|action| action.contains("no offline provisioning leftovers")),
+        "{:?}",
+        retry.actions
+    );
+    assert_eq!(
+        disk.removals().len(),
+        1,
+        "the no-leftovers retry writes nothing"
+    );
+}
+
+#[tokio::test]
+async fn completed_orphan_rejection_matrix_fails_before_disk_access() {
+    let cases: [(&str, fn(&mut LabProvision)); 11] = [
+        ("unsettled", |record| record.settled = false),
+        ("not completed", |record| record.status = RunStatus::Failed),
+        ("provision identity", |record| {
+            record.provision_id = "f".repeat(32)
+        }),
+        ("operation identity", |record| {
+            record.operation_id = "f".repeat(32)
+        }),
+        ("foreign baseline", |record| {
+            record.baseline_snapshot = Some("other-base".into());
+        }),
+        ("invalid media", |record| record.media.generation = 0),
+        ("relative media", |record| {
+            record.media.media_root = PathBuf::from("relative-media");
+        }),
+        ("invalid guest receipt", |record| {
+            record.guest_receipt.as_mut().unwrap()["installed"] = serde_json::json!(false);
+        }),
+        ("connection mismatch", |record| {
+            record.connection.as_mut().unwrap()["generation"] = serde_json::json!(65);
+        }),
+        ("missing guest receipt", |record| {
+            record.guest_receipt = None
+        }),
+        ("missing connection", |record| record.connection = None),
+    ];
+    for (name, mutate) in cases {
+        let deployment = deployment();
+        let operation = "1".repeat(32);
+        let (paths, mut record, receipt) = completed_orphan(&deployment, &operation);
+        mutate(&mut record);
+        // Always write at the requested path so internal ID mismatches are
+        // tested instead of accidentally admitting the original valid record.
+        fs::write(
+            deployment
+                .state_dir
+                .join("windows-lab/provisions")
+                .join(format!("{operation}.json")),
+            serde_json::to_vec_pretty(&record).unwrap(),
+        )
+        .unwrap();
+        let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+        seed_receipt_only_orphan(&disk, &paths, &receipt);
+        let lab = wired(&deployment, disk.clone(), Arc::new(FakeIso::new()));
+        let error = lab
+            .clean_guest_leftovers(CleanGuestOptions {
+                operation_id: operation.clone(),
+                dry_run: false,
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("not a recorded offline provisioning"),
+            "{name}: {error:#}"
+        );
+        assert!(disk.calls().is_empty(), "{name} reached the guest disk");
+        assert!(disk.removals().is_empty(), "{name} mutated the guest");
+    }
+}
+
+#[tokio::test]
+async fn completed_orphan_rejects_every_broader_guest_shape_without_mutating() {
+    enum Rejection {
+        ExtraFile,
+        WrongReceipt,
+        SemanticMismatch,
+        BootTask,
+        Policy,
+        Service,
+        NestedDirectory,
+        MissingReceipt,
+    }
+    let cases = [
+        Rejection::ExtraFile,
+        Rejection::WrongReceipt,
+        Rejection::SemanticMismatch,
+        Rejection::BootTask,
+        Rejection::Policy,
+        Rejection::Service,
+        Rejection::NestedDirectory,
+        Rejection::MissingReceipt,
+    ];
+    for (index, rejection) in cases.into_iter().enumerate() {
+        let deployment = deployment();
+        let operation = "2".repeat(32);
+        let (paths, _record, receipt) = completed_orphan(&deployment, &operation);
+        let disk = Arc::new(FakeDisk::new(deployment.fixture.connection.clone()));
+        seed_receipt_only_orphan(&disk, &paths, &receipt);
+        match rejection {
+            Rejection::ExtraFile => disk.set_file(&paths.plan, b"{}\n".to_vec()),
+            Rejection::WrongReceipt => disk.set_file(
+                &paths.receipt,
+                fixture::guest_receipt(&"3".repeat(32), &deployment.fixture.connection),
+            ),
+            Rejection::SemanticMismatch => {
+                let mut value: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+                value["already_installed"] = serde_json::json!(true);
+                disk.set_file(&paths.receipt, serde_json::to_vec(&value).unwrap());
+            }
+            Rejection::BootTask => disk.state.lock().unwrap().boot_task.tree = true,
+            Rejection::Policy => disk.set_file(
+                &paths.scripts_ini_backup,
+                b"[Startup]\r\n0CmdLine=other.cmd\r\n0Parameters=\r\n".to_vec(),
+            ),
+            Rejection::Service => disk.set_service(Some(paths.service.clone())),
+            Rejection::NestedDirectory => {
+                disk.set_directories([format!("{}\\nested", paths.root)]);
+            }
+            Rejection::MissingReceipt => {
+                disk.state.lock().unwrap().files.remove(&paths.receipt);
+            }
+        }
+        let lab = wired(&deployment, disk.clone(), Arc::new(FakeIso::new()));
+        let error = lab
+            .clean_guest_leftovers(CleanGuestOptions {
+                operation_id: operation.clone(),
+                dry_run: index % 2 == 0,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(disk.calls(), ["inspect"], "{index}: {error:#}");
+        assert!(disk.removals().is_empty(), "{index} removed guest paths");
+        assert!(disk.written().is_empty(), "{index} wrote guest files");
+        assert!(
+            disk.boot_task_removals().is_empty(),
+            "{index} edited the boot hive"
+        );
+        assert!(
+            disk.service_removals().is_empty(),
+            "{index} edited the service hive"
+        );
+        assert!(disk.directories().contains(&paths.root));
+    }
 }
 
 #[tokio::test]

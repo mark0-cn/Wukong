@@ -43,8 +43,9 @@ pub struct ProvisionOptions {
     pub timeout_seconds: u64,
 }
 
-/// Explicit operator cleanup of one failed attempt's leftovers on the
-/// powered-off guest disk. It never mutates controller lab state or the VMX.
+/// Explicit operator cleanup of one recorded attempt's leftovers or a verified
+/// completed receipt-only orphan on the powered-off guest disk. It never mutates
+/// controller lab state or the VMX.
 pub struct CleanGuestOptions {
     pub operation_id: String,
     pub dry_run: bool,

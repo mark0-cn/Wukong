@@ -260,6 +260,73 @@ mod platform {
         format!("download {guest} {host}\n")
     }
 
+    fn list_marker(index: usize, end: bool) -> String {
+        format!(
+            "WUKONG-LAB-LIST-{index}-{}",
+            if end { "END" } else { "BEGIN" }
+        )
+    }
+
+    fn push_marked_list(script: &mut String, index: usize, guest: &str) {
+        script.push_str(&format!("echo {}\n", list_marker(index, false)));
+        script.push_str(&format!("ls {guest}\n"));
+        script.push_str(&format!("echo {}\n", list_marker(index, true)));
+    }
+
+    /// Parse only the exact marker sequence emitted by `push_marked_list`.
+    /// Downloads produce no stdout, so their output cannot be confused with a
+    /// listing. A guest filename that collides with any marker is rejected, as
+    /// are missing/reordered markers and every nonempty trailing line.
+    fn parse_marked_lists(text: &str, expected: usize) -> Result<Vec<Vec<String>>> {
+        let lines: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        let is_marker = |line: &str| {
+            (0..expected)
+                .any(|index| line == list_marker(index, false) || line == list_marker(index, true))
+        };
+        ensure!(
+            lines.iter().filter(|line| is_marker(line)).count() == expected * 2,
+            "libguestfs list output contains missing or colliding markers"
+        );
+        let mut cursor = 0;
+        let mut lists = Vec::with_capacity(expected);
+        for index in 0..expected {
+            let begin = list_marker(index, false);
+            let end = list_marker(index, true);
+            ensure!(
+                lines.get(cursor).copied() == Some(begin.as_str()),
+                "libguestfs list markers are missing or out of order"
+            );
+            cursor += 1;
+            let mut entries = Vec::new();
+            while lines.get(cursor).is_some_and(|line| *line != end.as_str()) {
+                let line = lines[cursor];
+                ensure!(
+                    !line.starts_with("WUKONG-LAB-LIST-"),
+                    "libguestfs list entry collides with a marker"
+                );
+                if line != "." && line != ".." {
+                    entries.push(line.to_owned());
+                }
+                cursor += 1;
+            }
+            ensure!(
+                lines.get(cursor).copied() == Some(end.as_str()),
+                "libguestfs list end marker is missing"
+            );
+            cursor += 1;
+            lists.push(entries);
+        }
+        ensure!(
+            cursor == lines.len(),
+            "libguestfs returned trailing output after the final list marker"
+        );
+        Ok(lists)
+    }
+
     fn parent_windows(windows: &str) -> Result<String> {
         let index = windows
             .rfind('\\')
@@ -427,18 +494,19 @@ mod platform {
             )
         }
 
-        async fn guestfish(
+        async fn guestfish_at_root(
             &self,
             disk_posix: &str,
+            root: &str,
             writable: bool,
             script: &str,
         ) -> Result<ToolOutput> {
             // Do not use `-i`: libguestfs inspection resolves registry hives via
             // case_sensitive_path, which can fail on a written NTFS delta even
-            // when the exact fixed paths remain readable. Select the system
-            // volume by those exact paths, then mount it explicitly.
-            let root = self.windows_root(disk_posix).await?;
-            let script = guestfish_session_script(&root, writable, script)?;
+            // when the exact fixed paths remain readable. The high-level caller
+            // selects the system volume once by those exact paths, then every
+            // session mounts that same device explicitly.
+            let script = guestfish_session_script(root, writable, script)?;
             self.raw_guestfish(disk_posix, writable, &script).await
         }
 
@@ -455,32 +523,13 @@ mod platform {
             Ok(output.stdout_text())
         }
 
-        async fn list_entries(
+        async fn read_staged_bytes(
             &self,
-            disk_posix: &str,
-            guest: &str,
-            operation: &str,
-        ) -> Result<Vec<String>> {
-            let output = self
-                .guestfish(disk_posix, false, &format!("ls {guest}\n"))
-                .await?;
-            require_success(&output, operation)?;
-            Ok(parse_lines(&output.stdout_text())
-                .into_iter()
-                .filter(|name| name != "." && name != "..")
-                .collect())
-        }
-
-        async fn read_guest_bytes(
-            &self,
-            disk_posix: &str,
-            guest: &str,
+            posix: &str,
             limit: u64,
             operation: &str,
         ) -> Result<Vec<u8>> {
-            let output = self
-                .guestfish(disk_posix, false, &format!("cat {guest}\n"))
-                .await?;
+            let output = self.wsl_run(&["cat".into(), posix.into()], None).await?;
             require_success(&output, operation)?;
             ensure!(
                 output.stdout.len() as u64 <= limit,
@@ -493,6 +542,7 @@ mod platform {
             &self,
             staging: &str,
             disk_posix: &str,
+            root: &str,
             request: &DiskInspectionRequest,
         ) -> Result<DiskInspection> {
             let system_config = guestfish_path(GUEST_SYSTEM_CONFIG)?;
@@ -500,6 +550,8 @@ mod platform {
             let software_hive = guestfish_path(&request.software_hive)?;
             let program_data = guestfish_path(&request.program_data)?;
             let provision_root = guestfish_path(&request.provision_root)?;
+            let operation_root = guestfish_path(&request.operation_root)?;
+            let receipt = guestfish_path(&request.receipt)?;
             let tasks_dir = guestfish_path(&request.tasks_dir)?;
             let task_file = guestfish_path(&request.task_file)?;
             let launcher = guestfish_path(&request.launcher)?;
@@ -510,12 +562,20 @@ mod platform {
             let gpt_ini = guestfish_path(&request.gpt_ini)?;
             let gpt_backup = guestfish_path(&request.gpt_ini_backup)?;
             let gpo_root = guestfish_path(&request.gpo_root)?;
-            let probe = format!(
+            let mut probe = format!(
                 "is-dir {system_config}\nis-file {system_hive}\nis-file {software_hive}\nis-dir {program_data}\nis-dir {provision_root}\nis-dir {tasks_dir}\nis-file {task_file}\nis-file {launcher}\nis-dir {scripts_dir}\nis-dir {startup_dir}\nis-file {scripts_ini}\nis-file {scripts_backup}\nis-file {gpt_ini}\nis-file {gpt_backup}\nis-dir {gpo_root}\n"
             );
-            let output = self.guestfish(disk_posix, false, &probe).await?;
+            if request.receipt_only {
+                probe.push_str(&format!("is-dir {operation_root}\nis-file {receipt}\n"));
+            }
+            let output = self
+                .guestfish_at_root(disk_posix, root, false, &probe)
+                .await?;
             require_success(&output, "libguestfs preflight")?;
-            let values = parse_booleans(&output.stdout_text(), 15)?;
+            let values = parse_booleans(
+                &output.stdout_text(),
+                if request.receipt_only { 17 } else { 15 },
+            )?;
             let mut inspection = DiskInspection {
                 windows_volume: values[0],
                 system_hive_present: values[1],
@@ -524,6 +584,9 @@ mod platform {
                 control_set: None,
                 existing_service: None,
                 provision_root_entries: Vec::new(),
+                operation_root_present: request.receipt_only && values[15],
+                operation_root_entries: Vec::new(),
+                receipt: None,
                 task_file_present: values[6],
                 boot_task: provision::BootTaskCacheState::default(),
                 launcher: None,
@@ -532,98 +595,162 @@ mod platform {
             if !inspection.windows_volume || !inspection.system_hive_present {
                 return Ok(inspection);
             }
-            if values[4] {
-                inspection.provision_root_entries = self
-                    .list_entries(disk_posix, &provision_root, "list guest provision root")
-                    .await?;
+            #[derive(Clone, Copy)]
+            enum ListTarget {
+                ProvisionRoot,
+                OperationRoot,
+                Scripts,
+                Startup,
+                GroupPolicy,
             }
-            if values[7] {
-                inspection.launcher = Some(
-                    self.read_guest_bytes(
-                        disk_posix,
-                        &launcher,
-                        provision::MAX_LAUNCHER_BYTES,
-                        "read guest boot launcher",
-                    )
-                    .await?,
-                );
+            #[derive(Clone, Copy)]
+            enum DownloadTarget {
+                Launcher,
+                ScriptsIni,
+                ScriptsBackup,
+                GptIni,
+                GptBackup,
+                Receipt,
+                Software,
+                System,
+            }
+            let mut lists = Vec::new();
+            let mut downloads = Vec::new();
+            let mut script = String::new();
+            let mut list = |target, guest: String| {
+                push_marked_list(&mut script, lists.len(), &guest);
+                lists.push((target, guest));
+            };
+            if values[4] {
+                list(ListTarget::ProvisionRoot, provision_root);
+            }
+            if request.receipt_only && values[15] {
+                list(ListTarget::OperationRoot, operation_root);
             }
             if values[8] {
-                inspection.policy.scripts_directory_entries = self
-                    .list_entries(disk_posix, &scripts_dir, "list guest scripts directory")
-                    .await?;
+                list(ListTarget::Scripts, scripts_dir);
             }
             if values[9] {
-                inspection.policy.startup_directory_entries = self
-                    .list_entries(disk_posix, &startup_dir, "list guest startup directory")
-                    .await?;
+                list(ListTarget::Startup, startup_dir);
             }
             if values[14] {
-                inspection.policy.group_policy_entries = self
-                    .list_entries(disk_posix, &gpo_root, "list guest Group Policy directory")
-                    .await?;
+                list(ListTarget::GroupPolicy, gpo_root);
+            }
+            let mut download = |target, guest: &str, local: String, limit, operation| {
+                script.push_str(&guestfish_download_script(guest, &local));
+                downloads.push((target, local, limit, operation));
+            };
+            if values[7] {
+                download(
+                    DownloadTarget::Launcher,
+                    &launcher,
+                    format!("{staging}/launch.ps1"),
+                    provision::MAX_LAUNCHER_BYTES,
+                    "read guest boot launcher",
+                );
             }
             if values[10] {
-                let bytes = self
-                    .read_guest_bytes(
-                        disk_posix,
-                        &scripts_ini,
-                        MAX_POLICY_BYTES,
-                        "read guest scripts.ini",
-                    )
-                    .await?;
-                inspection.policy.startup_command_lines = startup_command_lines(&bytes)?;
-                inspection.policy.scripts_ini = Some(bytes);
+                download(
+                    DownloadTarget::ScriptsIni,
+                    &scripts_ini,
+                    format!("{staging}/scripts.ini"),
+                    MAX_POLICY_BYTES,
+                    "read guest scripts.ini",
+                );
             }
             if values[11] {
-                inspection.policy.scripts_ini_backup = Some(
-                    self.read_guest_bytes(
-                        disk_posix,
-                        &scripts_backup,
-                        MAX_POLICY_BYTES,
-                        "read guest scripts.ini backup",
-                    )
-                    .await?,
+                download(
+                    DownloadTarget::ScriptsBackup,
+                    &scripts_backup,
+                    format!("{staging}/scripts.ini.backup"),
+                    MAX_POLICY_BYTES,
+                    "read guest scripts.ini backup",
                 );
             }
             if values[12] {
-                inspection.policy.gpt_ini = Some(
-                    self.read_guest_bytes(
-                        disk_posix,
-                        &gpt_ini,
-                        MAX_POLICY_BYTES,
-                        "read guest gpt.ini",
-                    )
-                    .await?,
+                download(
+                    DownloadTarget::GptIni,
+                    &gpt_ini,
+                    format!("{staging}/gpt.ini"),
+                    MAX_POLICY_BYTES,
+                    "read guest gpt.ini",
                 );
             }
             if values[13] {
-                inspection.policy.gpt_ini_backup = Some(
-                    self.read_guest_bytes(
-                        disk_posix,
-                        &gpt_backup,
-                        MAX_POLICY_BYTES,
-                        "read guest gpt.ini backup",
-                    )
-                    .await?,
+                download(
+                    DownloadTarget::GptBackup,
+                    &gpt_backup,
+                    format!("{staging}/gpt.ini.backup"),
+                    MAX_POLICY_BYTES,
+                    "read guest gpt.ini backup",
                 );
             }
+            if request.receipt_only && values[16] {
+                download(
+                    DownloadTarget::Receipt,
+                    &receipt,
+                    format!("{staging}/receipt.json"),
+                    MAX_RECEIPT_BYTES,
+                    "read guest provisioning receipt",
+                );
+            }
+            let software = format!("{staging}/SOFTWARE");
             if values[2] {
-                let software = format!("{staging}/SOFTWARE");
-                self.download_hive(
-                    disk_posix,
-                    &request.software_hive,
-                    &software,
+                download(
+                    DownloadTarget::Software,
+                    &software_hive,
+                    software.clone(),
+                    0,
                     "download guest SOFTWARE hive",
-                )
+                );
+            }
+            let hive = format!("{staging}/SYSTEM");
+            download(
+                DownloadTarget::System,
+                &system_hive,
+                hive.clone(),
+                0,
+                "download guest SYSTEM hive",
+            );
+            let output = self
+                .guestfish_at_root(disk_posix, root, false, &script)
                 .await?;
+            require_success(&output, "batch guest inspection lists and downloads")?;
+            let list_targets: Vec<ListTarget> = lists.iter().map(|(target, _)| *target).collect();
+            let entries = parse_marked_lists(&output.stdout_text(), lists.len())?;
+            for (target, entries) in list_targets.into_iter().zip(entries) {
+                match target {
+                    ListTarget::ProvisionRoot => inspection.provision_root_entries = entries,
+                    ListTarget::OperationRoot => inspection.operation_root_entries = entries,
+                    ListTarget::Scripts => inspection.policy.scripts_directory_entries = entries,
+                    ListTarget::Startup => inspection.policy.startup_directory_entries = entries,
+                    ListTarget::GroupPolicy => inspection.policy.group_policy_entries = entries,
+                }
+            }
+            for (target, local, limit, operation) in downloads {
+                if matches!(target, DownloadTarget::Software | DownloadTarget::System) {
+                    continue;
+                }
+                let bytes = self.read_staged_bytes(&local, limit, operation).await?;
+                match target {
+                    DownloadTarget::Launcher => inspection.launcher = Some(bytes),
+                    DownloadTarget::ScriptsIni => {
+                        inspection.policy.startup_command_lines = startup_command_lines(&bytes)?;
+                        inspection.policy.scripts_ini = Some(bytes);
+                    }
+                    DownloadTarget::ScriptsBackup => {
+                        inspection.policy.scripts_ini_backup = Some(bytes);
+                    }
+                    DownloadTarget::GptIni => inspection.policy.gpt_ini = Some(bytes),
+                    DownloadTarget::GptBackup => inspection.policy.gpt_ini_backup = Some(bytes),
+                    DownloadTarget::Receipt => inspection.receipt = Some(bytes),
+                    DownloadTarget::Software | DownloadTarget::System => unreachable!(),
+                }
+            }
+            if values[2] {
                 let registry = provision::boot_task_registry();
                 inspection.boot_task = self.boot_task_state_in(&software, &registry).await?;
             }
-            let hive = format!("{staging}/SYSTEM");
-            let script = guestfish_download_script(&system_hive, &hive);
-            let output = self.guestfish(disk_posix, false, &script).await?;
-            require_success(&output, "download guest SYSTEM hive")?;
             let select = self
                 .hivexsh(&hive, "cd \\Select\nlsval Current\nquit\n", false)
                 .await?;
@@ -649,6 +776,7 @@ mod platform {
             &self,
             staging: &str,
             disk_posix: &str,
+            root: &str,
             files: &[GuestFile],
         ) -> Result<()> {
             ensure!(files.len() <= 16, "too many guest files were supplied");
@@ -675,7 +803,9 @@ mod platform {
             for (guest, _) in &local_paths {
                 script.push_str(&format!("checksum sha256 {guest}\n"));
             }
-            let output = self.guestfish(disk_posix, true, &script).await?;
+            let output = self
+                .guestfish_at_root(disk_posix, root, true, &script)
+                .await?;
             require_success(&output, "write guest provisioning files")?;
             let digests: Vec<String> = output
                 .stdout_text()
@@ -698,6 +828,7 @@ mod platform {
             &self,
             staging: &str,
             disk_posix: &str,
+            root: &str,
             removal: &ServiceRemoval,
         ) -> Result<ServiceRemovalEvidence> {
             provision::validate_service_name(&removal.service)?;
@@ -705,8 +836,9 @@ mod platform {
             let hive = format!("{staging}/SYSTEM");
             let removed = format!("{staging}/SYSTEM.removed");
             let output = self
-                .guestfish(
+                .guestfish_at_root(
                     disk_posix,
+                    root,
                     false,
                     &format!("download {hive_guest} {hive}\n"),
                 )
@@ -742,8 +874,9 @@ mod platform {
             );
             let after = self.sha256(&removed).await?;
             let output = self
-                .guestfish(
+                .guestfish_at_root(
                     disk_posix,
+                    root,
                     true,
                     &format!("upload {removed} {hive_guest}\nsync\nchecksum sha256 {hive_guest}\n"),
                 )
@@ -762,6 +895,7 @@ mod platform {
         async fn remove_paths_in(
             &self,
             disk_posix: &str,
+            root: &str,
             removal: &GuestRemoval,
         ) -> Result<GuestRemovalEvidence> {
             removal.validate()?;
@@ -780,7 +914,9 @@ mod platform {
             for file in &files {
                 probe.push_str(&format!("is-file {file}\n"));
             }
-            let output = self.guestfish(disk_posix, false, &probe).await?;
+            let output = self
+                .guestfish_at_root(disk_posix, root, false, &probe)
+                .await?;
             require_success(&output, "inspect guest cleanup paths")?;
             let values = parse_booleans(&output.stdout_text(), directories.len() + files.len())?;
             let mut evidence = GuestRemovalEvidence::default();
@@ -808,7 +944,9 @@ mod platform {
                 return Ok(evidence);
             }
             script.push_str("sync\n");
-            let output = self.guestfish(disk_posix, true, &script).await?;
+            let output = self
+                .guestfish_at_root(disk_posix, root, true, &script)
+                .await?;
             require_success(&output, "remove guest cleanup paths")?;
             let mut verify = String::new();
             for directory in &directories {
@@ -817,7 +955,9 @@ mod platform {
             for file in &files {
                 verify.push_str(&format!("is-file {file}\n"));
             }
-            let output = self.guestfish(disk_posix, false, &verify).await?;
+            let output = self
+                .guestfish_at_root(disk_posix, root, false, &verify)
+                .await?;
             require_success(&output, "verify guest cleanup paths")?;
             let remaining = parse_booleans(&output.stdout_text(), directories.len() + files.len())?;
             ensure!(
@@ -831,6 +971,7 @@ mod platform {
             &self,
             staging: &str,
             disk_posix: &str,
+            root: &str,
             request: &GuestObservationRequest,
         ) -> Result<GuestObservation> {
             let wrapper_guest = guestfish_path(&request.wrapper)?;
@@ -845,15 +986,39 @@ mod platform {
             let script = format!(
                 "is-file {wrapper_guest}\nis-file {plan_guest}\nis-file {receipt_guest}\nis-file {launcher_guest}\nis-file {task_file_guest}\nis-file {scripts_ini_guest}\nis-file {scripts_backup_guest}\nis-file {gpt_backup_guest}\nis-file {software_hive_guest}\n"
             );
-            let output = self.guestfish(disk_posix, false, &script).await?;
+            let output = self
+                .guestfish_at_root(disk_posix, root, false, &script)
+                .await?;
             require_success(&output, "inspect provisioned guest")?;
             let values = parse_booleans(&output.stdout_text(), 9)?;
+            let mut batch = String::new();
+            let scripts = format!("{staging}/scripts.ini");
+            if values[5] {
+                batch.push_str(&guestfish_download_script(&scripts_ini_guest, &scripts));
+            }
+            let receipt_local = format!("{staging}/receipt.json");
+            if values[2] {
+                batch.push_str(&guestfish_download_script(&receipt_guest, &receipt_local));
+            }
+            let software = format!("{staging}/SOFTWARE");
+            if values[8] {
+                batch.push_str(&guestfish_download_script(&software_hive_guest, &software));
+            }
+            if !batch.is_empty() {
+                let output = self
+                    .guestfish_at_root(disk_posix, root, false, &batch)
+                    .await?;
+                require_success(&output, "download provisioned guest evidence")?;
+                ensure!(
+                    output.stdout.is_empty(),
+                    "guestfish downloads produced unexpected stdout"
+                );
+            }
             let mut startup_entry_present = false;
             if values[5] {
                 let bytes = self
-                    .read_guest_bytes(
-                        disk_posix,
-                        &scripts_ini_guest,
+                    .read_staged_bytes(
+                        &scripts,
                         MAX_POLICY_BYTES,
                         "read guest scripts.ini after provisioning",
                     )
@@ -865,9 +1030,8 @@ mod platform {
             let mut receipt = None;
             if values[2] {
                 let bytes = self
-                    .read_guest_bytes(
-                        disk_posix,
-                        &receipt_guest,
+                    .read_staged_bytes(
+                        &receipt_local,
                         MAX_RECEIPT_BYTES,
                         "read guest provisioning receipt",
                     )
@@ -877,14 +1041,6 @@ mod platform {
             }
             let mut boot_task_registered = false;
             if values[8] {
-                let software = format!("{staging}/SOFTWARE");
-                self.download_hive(
-                    disk_posix,
-                    &request.software_hive,
-                    &software,
-                    "download guest SOFTWARE hive",
-                )
-                .await?;
                 let registry = provision::boot_task_registry();
                 boot_task_registered = self
                     .boot_task_state_in(&software, &registry)
@@ -908,13 +1064,19 @@ mod platform {
         async fn download_hive(
             &self,
             disk_posix: &str,
+            root: &str,
             windows_hive: &str,
             local: &str,
             operation: &str,
         ) -> Result<()> {
             let guest = guestfish_path(windows_hive)?;
             let output = self
-                .guestfish(disk_posix, false, &guestfish_download_script(&guest, local))
+                .guestfish_at_root(
+                    disk_posix,
+                    root,
+                    false,
+                    &guestfish_download_script(&guest, local),
+                )
                 .await?;
             require_success(&output, operation)
         }
@@ -975,12 +1137,14 @@ mod platform {
             &self,
             staging: &str,
             disk_posix: &str,
+            root: &str,
             injection: &BootTaskInjection,
         ) -> Result<BootTaskEvidence> {
             let registry = &injection.registry;
             let hive = format!("{staging}/SOFTWARE");
             self.download_hive(
                 disk_posix,
+                root,
                 &registry.hive,
                 &hive,
                 "download guest SOFTWARE hive",
@@ -1009,8 +1173,9 @@ mod platform {
             );
             let guest = guestfish_path(&registry.hive)?;
             let output = self
-                .guestfish(
+                .guestfish_at_root(
                     disk_posix,
+                    root,
                     true,
                     &format!("upload {patched} {guest}\nsync\nchecksum sha256 {guest}\n"),
                 )
@@ -1030,12 +1195,14 @@ mod platform {
             &self,
             staging: &str,
             disk_posix: &str,
+            root: &str,
             removal: &BootTaskRemoval,
         ) -> Result<BootTaskRemovalEvidence> {
             let registry = &removal.registry;
             let hive = format!("{staging}/SOFTWARE");
             self.download_hive(
                 disk_posix,
+                root,
                 &removal.software_hive,
                 &hive,
                 "download guest SOFTWARE hive",
@@ -1067,8 +1234,9 @@ mod platform {
             let after = self.sha256(&patched).await?;
             let guest = guestfish_path(&removal.software_hive)?;
             let output = self
-                .guestfish(
+                .guestfish_at_root(
                     disk_posix,
+                    root,
                     true,
                     &format!("upload {patched} {guest}\nsync\nchecksum sha256 {guest}\n"),
                 )
@@ -1094,8 +1262,9 @@ mod platform {
         ) -> Result<DiskInspection> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
+            let root = self.windows_root(&disk_posix).await?;
             let staging = self.temp_directory().await?;
-            let result = self.inspect_in(&staging, &disk_posix, request).await;
+            let result = self.inspect_in(&staging, &disk_posix, &root, request).await;
             self.remove_directory(&staging).await;
             result
         }
@@ -1104,8 +1273,11 @@ mod platform {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             ensure!(!files.is_empty(), "no guest files were supplied");
             let disk_posix = self.wsl_path(disk).await?;
+            let root = self.windows_root(&disk_posix).await?;
             let staging = self.temp_directory().await?;
-            let result = self.write_files_in(&staging, &disk_posix, files).await;
+            let result = self
+                .write_files_in(&staging, &disk_posix, &root, files)
+                .await;
             self.remove_directory(&staging).await;
             result
         }
@@ -1117,9 +1289,10 @@ mod platform {
         ) -> Result<BootTaskEvidence> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
+            let root = self.windows_root(&disk_posix).await?;
             let staging = self.temp_directory().await?;
             let result = self
-                .inject_boot_task_in(&staging, &disk_posix, injection)
+                .inject_boot_task_in(&staging, &disk_posix, &root, injection)
                 .await;
             self.remove_directory(&staging).await;
             result
@@ -1132,9 +1305,10 @@ mod platform {
         ) -> Result<BootTaskRemovalEvidence> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
+            let root = self.windows_root(&disk_posix).await?;
             let staging = self.temp_directory().await?;
             let result = self
-                .remove_boot_task_in(&staging, &disk_posix, removal)
+                .remove_boot_task_in(&staging, &disk_posix, &root, removal)
                 .await;
             self.remove_directory(&staging).await;
             result
@@ -1147,8 +1321,11 @@ mod platform {
         ) -> Result<ServiceRemovalEvidence> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
+            let root = self.windows_root(&disk_posix).await?;
             let staging = self.temp_directory().await?;
-            let result = self.remove_service_in(&staging, &disk_posix, removal).await;
+            let result = self
+                .remove_service_in(&staging, &disk_posix, &root, removal)
+                .await;
             self.remove_directory(&staging).await;
             result
         }
@@ -1160,7 +1337,8 @@ mod platform {
         ) -> Result<GuestRemovalEvidence> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
-            self.remove_paths_in(&disk_posix, removal).await
+            let root = self.windows_root(&disk_posix).await?;
+            self.remove_paths_in(&disk_posix, &root, removal).await
         }
 
         async fn observe_guest(
@@ -1170,8 +1348,9 @@ mod platform {
         ) -> Result<GuestObservation> {
             ensure!(disk.is_absolute(), "guest disk path must be absolute");
             let disk_posix = self.wsl_path(disk).await?;
+            let root = self.windows_root(&disk_posix).await?;
             let staging = self.temp_directory().await?;
-            let result = self.observe_in(&staging, &disk_posix, request).await;
+            let result = self.observe_in(&staging, &disk_posix, &root, request).await;
             self.remove_directory(&staging).await;
             result
         }
@@ -1361,6 +1540,7 @@ mod platform {
             "cat",
             "checksum",
             "download",
+            "echo",
             "is-dir",
             "is-file",
             "list-filesystems",
@@ -1416,6 +1596,68 @@ mod platform {
             let write = guestfish_session_script("/dev/sda3", true, "sync\n").unwrap();
             assert_eq!(write, "run\nmount /dev/sda3 /\nsync\numount /\n");
             assert!(guestfish_session_script("/dev/sda3 /", false, "sync\n").is_err());
+        }
+
+        #[test]
+        fn batched_lists_require_exact_markers_and_reject_collisions_or_trailing_output() {
+            let mut script = String::new();
+            push_marked_list(&mut script, 0, "/ProgramData/WukongLab/provision");
+            push_marked_list(&mut script, 1, "/Windows/System32/Tasks");
+            script.push_str(&guestfish_download_script(
+                "/ProgramData/WukongLab/provision/receipt.json",
+                "/tmp/wukong-lab-provision-0123456789abcdef/receipt.json",
+            ));
+            assert_eq!(
+                script,
+                "echo WUKONG-LAB-LIST-0-BEGIN\nls /ProgramData/WukongLab/provision\necho WUKONG-LAB-LIST-0-END\necho WUKONG-LAB-LIST-1-BEGIN\nls /Windows/System32/Tasks\necho WUKONG-LAB-LIST-1-END\ndownload /ProgramData/WukongLab/provision/receipt.json /tmp/wukong-lab-provision-0123456789abcdef/receipt.json\n"
+            );
+            for command in script.lines() {
+                let verb = command.split_whitespace().next().unwrap();
+                assert!(SUPPORTED.contains(&verb), "unsupported command {command}");
+            }
+
+            let output = "WUKONG-LAB-LIST-0-BEGIN\nreceipt.json\n.\nWUKONG-LAB-LIST-0-END\nWUKONG-LAB-LIST-1-BEGIN\nWukongLabProvision\nWUKONG-LAB-LIST-1-END\n";
+            assert_eq!(
+                parse_marked_lists(output, 2).unwrap(),
+                [
+                    vec!["receipt.json".to_owned()],
+                    vec!["WukongLabProvision".to_owned()]
+                ]
+            );
+            assert!(parse_marked_lists("", 0).unwrap().is_empty());
+            assert!(parse_marked_lists(output, 1).is_err(), "wrong marker count");
+            assert!(
+                parse_marked_lists(&format!("{output}unexpected\n"), 2).is_err(),
+                "trailing output"
+            );
+            assert!(
+                parse_marked_lists(
+                    "WUKONG-LAB-LIST-0-BEGIN\nWUKONG-LAB-LIST-0-END\nWUKONG-LAB-LIST-0-END\n",
+                    1
+                )
+                .is_err(),
+                "colliding filename"
+            );
+            assert!(
+                parse_marked_lists(
+                    "WUKONG-LAB-LIST-0-BEGIN\nWUKONG-LAB-LIST-99-BEGIN\nWUKONG-LAB-LIST-0-END\n",
+                    1
+                )
+                .is_err(),
+                "out-of-range marker-shaped filename"
+            );
+            assert!(
+                parse_marked_lists(
+                    "WUKONG-LAB-LIST-0-END\nreceipt.json\nWUKONG-LAB-LIST-0-BEGIN\n",
+                    1
+                )
+                .is_err(),
+                "reordered markers"
+            );
+            assert!(
+                parse_marked_lists("WUKONG-LAB-LIST-0-BEGIN\nreceipt.json\n", 1).is_err(),
+                "missing end marker"
+            );
         }
 
         #[test]
