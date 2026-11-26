@@ -8,7 +8,7 @@ mod files;
 pub use enrollment::{
     Enrollment, ExecutionBoundary, SshPublicKey, VerifiedEnrollment, write_enrollment,
 };
-pub use files::verify_package;
+pub use files::{verify_package, verify_package_for_upgrade};
 mod keys;
 pub use keys::{create_controller_signer, load_controller_signer};
 mod seal;

@@ -293,7 +293,7 @@ fn upgrade(root: PathBuf, plan: Plan) -> Result<ConnectionReceipt> {
     let metadata = root.join("metadata");
     let deployment_path = metadata.join("deployment.json");
     let (current, _) = deployment::load(&deployment_path)?;
-    let previous = current.verify(&root)?;
+    let previous = current.verify_for_upgrade(&root)?;
     let key = PublicKey::from_hex(&current.controller_public_key)?;
     let current_enrollment = deployment::read_enrollment(&metadata, &key)?;
     let authority = Authority::load(&metadata, &AclPolicy::private_vm())?;

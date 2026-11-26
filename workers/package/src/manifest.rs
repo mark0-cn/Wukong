@@ -193,9 +193,25 @@ impl Manifest {
     }
 
     pub fn check_compatibility(&self, expected: &Compatibility<'_>) -> Result<()> {
+        self.check_compatibility_inner(expected, false)
+    }
+
+    /// Verify an already installed signed package before an offline upgrade.
+    /// Older protocols are readable only for this transition; the replacement
+    /// and every runtime activation still use `check_compatibility`.
+    pub fn check_upgrade_compatibility(&self, expected: &Compatibility<'_>) -> Result<()> {
+        self.check_compatibility_inner(expected, true)
+    }
+
+    fn check_compatibility_inner(
+        &self,
+        expected: &Compatibility<'_>,
+        installed_upgrade: bool,
+    ) -> Result<()> {
         self.validate()?;
         ensure!(
-            self.runtime_protocol == expected.runtime_protocol,
+            self.runtime_protocol == expected.runtime_protocol
+                || (installed_upgrade && self.runtime_protocol < expected.runtime_protocol),
             "worker package protocol is incompatible"
         );
         ensure!(
