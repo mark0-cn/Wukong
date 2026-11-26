@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Allow native Windows LaunchSpec replay when the caller target and canonical target have identical admitted bytes and executable policy, even at different logical paths. Re-admit completed inputs for a successor controller epoch only within the same run and installation after verifying the original receipt, immutable bytes and executable policy; stale references, other runs, missing receipts and changed content remain rejected with actionable recovery errors."
+zh_CN = "当调用方目标与规范目标的已准入字节和可执行策略一致时，即使逻辑路径不同，也允许原生 Windows LaunchSpec 重放。仅对同一运行、同一安装内的后继控制器 epoch 重新准入完整输入，并事先核对原回执、不可变字节和可执行策略；过期引用、其他运行、缺失回执及已更改内容仍会被拒绝，并获得可操作的恢复错误。"

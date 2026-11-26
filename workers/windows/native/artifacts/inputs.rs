@@ -17,7 +17,7 @@ use std::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_SHARE_READ, GetFileInformationByHandle,
+    FILE_SHARE_READ, GetFileInformationByHandle, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 #[cfg(test)]
 use wukong_worker_protocol::WorkerIdentity as Identity;
@@ -257,9 +257,21 @@ impl Inputs {
         wukong_worker_package::validate_path(logical)?;
         self.policy.verify(&self.root, true)?;
         let directory = self.root.join(digest(owner)?);
-        self.policy.verify(&directory, true)?;
+        self.policy.verify(&directory, true).with_context(|| {
+            format!(
+                "native input reference is unavailable for the current controller epoch; re-stage it or recover it by logical path: {}",
+                reference.path
+            )
+        })?;
         let key = digest(&reference.path)?;
-        let declaration = self.read_record(&directory.join(format!("{key}.declaration.json")))?;
+        let declaration = self
+            .read_record(&directory.join(format!("{key}.declaration.json")))
+            .with_context(|| {
+                format!(
+                    "native input declaration is unavailable for the current controller epoch; re-stage it or recover it by logical path: {}",
+                    reference.path
+                )
+            })?;
         ensure!(
             declaration.schema == 1
                 && declaration.owner == *owner
@@ -277,14 +289,22 @@ impl Inputs {
             "native input was not admitted as executable"
         );
         ensure!(
-            self.read_record(&directory.join(format!("{key}.receipt.json")))? == declaration,
+            self.read_record(&directory.join(format!("{key}.receipt.json")))
+                .with_context(|| {
+                    format!(
+                        "native input receipt is unavailable for the current controller epoch; re-stage it or recover it by logical path: {}",
+                        reference.path
+                    )
+                })?
+                == declaration,
             "native input has no matching completed receipt"
         );
         let file = self.open_blob(&directory.join(format!("{key}.data")), &declaration)?;
         Ok(AdmittedInput::new(file, reference.clone()))
     }
     /// Resolve only a completed logical input in the already admitted owner
-    /// scope. The System child still verifies and retains the actual bytes.
+    /// scope. A successor may explicitly re-admit the same run's sealed bytes;
+    /// the System child still verifies and retains the actual bytes.
     pub(crate) fn reference(
         &self,
         owner: &Owner,
@@ -296,27 +316,183 @@ impl Inputs {
             .context("native program must be a staged files/... path")?;
         wukong_worker_package::validate_path(logical)?;
         let directory = self.root.join(digest(owner)?);
-        self.policy.verify(&directory, true)?;
         let key = digest(&path)?;
-        let declaration = self.read_record(&directory.join(format!("{key}.declaration.json")))?;
-        ensure!(
-            declaration.owner == *owner
-                && declaration.path == path
-                && declaration.schema == 1
-                && (!matches!(purpose, Purpose::Execute) || declaration.executable),
-            "native logical input differs from admitted owner or execution policy"
-        );
-        ensure!(
-            self.read_record(&directory.join(format!("{key}.receipt.json")))? == declaration,
-            "native logical input is not completed"
-        );
-        Ok(Reference {
-            path: path.into(),
-            id: digest(&declaration)?,
-            sha256: declaration.sha256,
-            size: declaration.size,
-            executable: declaration.executable,
+        let record = directory.join(format!("{key}.declaration.json"));
+        if record.exists() {
+            self.policy.verify(&directory, true)?;
+            let declaration = self.read_record(&record).with_context(|| {
+                format!("native input declaration cannot be read for current owner: {path}")
+            })?;
+            ensure!(
+                declaration.owner == *owner
+                    && declaration.path == path
+                    && declaration.schema == 1
+                    && owner.epoch > 0
+                    && (!matches!(purpose, Purpose::Execute) || declaration.executable),
+                "native logical input differs from admitted owner or execution policy"
+            );
+            ensure!(
+                self.read_record(&directory.join(format!("{key}.receipt.json")))
+                    .with_context(|| {
+                        format!(
+                            "native input has no completed receipt for the current owner; re-stage it or recover the original controller: {path}"
+                        )
+                    })?
+                    == declaration,
+                "native logical input is not completed"
+            );
+            return Ok(Reference {
+                path: path.into(),
+                id: digest(&declaration)?,
+                sha256: declaration.sha256,
+                size: declaration.size,
+                executable: declaration.executable,
+            });
+        }
+        self.recover(owner, path, purpose).with_context(|| {
+            format!(
+                "native input is not admitted for the current controller epoch; re-stage it or recover a completed declaration from an earlier epoch of the same run and installation: {path}"
+            )
         })
+    }
+
+    /// Re-admit only the newest declaration and its completed receipt from an
+    /// earlier epoch of the same run and installation. An old Reference never
+    /// reaches this path: acquisition remains bound to the exact current-owner
+    /// declaration ID.
+    fn recover(&self, owner: &Owner, path: &str, purpose: Purpose) -> Result<Reference> {
+        ensure!(
+            owner.epoch > 0,
+            "native input recovery requires a valid epoch"
+        );
+        let key = digest(&path)?;
+        let mut prior: Option<Declaration> = None;
+        let mut scopes = 0usize;
+        for entry in fs::read_dir(&self.root)? {
+            scopes += 1;
+            ensure!(scopes <= MAX_MEMBERS, "native input scope budget exhausted");
+            let directory = entry?.path();
+            self.policy.verify(&directory, true)?;
+            let record = directory.join(format!("{key}.declaration.json"));
+            if !record.exists() {
+                continue;
+            }
+            let declaration = self
+                .read_record(&record)
+                .with_context(|| format!("cannot read possible recovery declaration for {path}"))?;
+            if declaration.owner.run_id != owner.run_id
+                || declaration.owner.identity.installation_id != owner.identity.installation_id
+                || declaration.owner.epoch >= owner.epoch
+            {
+                continue;
+            }
+            ensure!(
+                declaration.schema == 1
+                    && declaration.path == path
+                    && declaration.owner.epoch > 0
+                    && declaration.size <= 16 * 1024 * 1024 * 1024
+                    && directory == self.root.join(digest(&declaration.owner)?),
+                "native input recovery declaration differs from its protected scope"
+            );
+            if let Some(previous) = &prior {
+                if declaration.owner.epoch > previous.owner.epoch {
+                    prior = Some(declaration);
+                } else if declaration.owner.epoch == previous.owner.epoch {
+                    ensure!(
+                        declaration == *previous,
+                        "native input recovery has ambiguous declarations at one epoch"
+                    );
+                }
+            } else {
+                prior = Some(declaration);
+            }
+        }
+        let prior = prior.context(
+            "no completed same-run declaration from an earlier controller epoch is available",
+        )?;
+        ensure!(
+            !matches!(purpose, Purpose::Execute) || prior.executable,
+            "native input recovery preserves the original non-executable policy"
+        );
+        let previous_directory = self.root.join(digest(&prior.owner)?);
+        ensure!(
+            self.read_record(&previous_directory.join(format!("{key}.receipt.json")))
+                .with_context(|| {
+                    format!(
+                        "native input recovery needs the completed receipt from controller epoch {}",
+                        prior.owner.epoch
+                    )
+                })?
+                == prior,
+            "native input recovery receipt differs from its declaration"
+        );
+        let mut source = self.open_blob(&previous_directory.join(format!("{key}.data")), &prior)?;
+        let declaration = Declaration {
+            schema: 1,
+            owner: owner.clone(),
+            path: prior.path.clone(),
+            sha256: prior.sha256.clone(),
+            size: prior.size,
+            executable: prior.executable,
+        };
+        let directory = self.directory(&declaration)?;
+        let record = directory.join(format!("{key}.declaration.json"));
+        let blob = directory.join(format!("{key}.data"));
+        let receipt = directory.join(format!("{key}.receipt.json"));
+        let bytes = serde_json::to_vec(&declaration)?;
+        if record.exists() {
+            ensure!(
+                self.read_record(&record)? == declaration,
+                "native input recovery declaration changed"
+            );
+        }
+        self.reserve(
+            &directory,
+            &[
+                (&record, bytes.len() as u64),
+                (&blob, declaration.size),
+                (&receipt, bytes.len() as u64),
+            ],
+        )?;
+        if !record.exists() {
+            self.publish(&record, &bytes)?;
+        }
+        if !blob.exists() {
+            self.publish_blob(&blob, &mut source, declaration.size)?;
+        }
+        self.check_blob(&blob, &declaration)?;
+        self.publish_receipt(&declaration)?;
+        self.reference(owner, path, purpose)
+    }
+
+    fn publish_blob(&self, path: &Path, source: &mut fs::File, size: u64) -> Result<()> {
+        let parent = path.parent().context("native input copy has no parent")?;
+        self.policy.verify(parent, true)?;
+        let temporary = parent.join(format!(
+            "{}.tmp",
+            hex::encode(crate::host::accounts::random_bytes::<16>()?)
+        ));
+        let result = (|| -> Result<()> {
+            let mut output = self.policy.create_file(&temporary)?;
+            ensure!(
+                std::io::copy(source, &mut output)? == size,
+                "native input recovery copy size differs"
+            );
+            output.sync_all()?;
+            drop(output);
+            let from = security::wide(temporary.as_os_str())?;
+            let to = security::wide(path.as_os_str())?;
+            // SAFETY: `from` and `to` are live NUL-terminated wide buffers, and
+            // MoveFileExW only reads them during this call.
+            security::check(unsafe {
+                MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH)
+            })?;
+            self.policy.verify(path, false)
+        })();
+        if temporary.exists() {
+            let _ = fs::remove_file(temporary);
+        }
+        result
     }
     /// Persist immutable bytes before publishing the native receipt.
     pub fn prepare(&self, put: &Put) -> Result<()> {

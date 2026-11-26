@@ -142,6 +142,17 @@ fn plan(params: &Map<String, Value>, kind: Kind) -> Result<Plan> {
         response: Response::Job,
         prepare: Box::new(move |inputs, owner| {
             let mut request = spec.prepare(inputs, owner)?;
+            let mut configuration = configuration;
+            if request.launch.is_some() {
+                let admitted = inputs.reference(owner, &configuration.target, Purpose::Execute)?;
+                ensure!(
+                    admitted.sha256 == request.program.sha256
+                        && admitted.size == request.program.size
+                        && admitted.executable == request.program.executable,
+                    "replay target differs from the LaunchSpec target bytes or executable policy"
+                );
+                configuration.target = request.program.path.clone();
+            }
             request.replay = Some(Replay {
                 input: inputs.reference(owner, &configuration.input, Purpose::Inspect)?,
                 configuration,
@@ -174,6 +185,7 @@ mod tests {
         core::Owner,
         executors::{resource_process::Request, specification::Specification},
     };
+    use anyhow::Context;
     use base64::{Engine, engine::general_purpose::STANDARD};
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -382,6 +394,59 @@ mod tests {
         assert!(request.validate().is_err());
         Ok(())
     }
+    #[test]
+    fn launch_replay_binds_an_identical_admitted_target_to_the_canonical_member() -> Result<()> {
+        let (_root, inputs, _runtime) = fixture()?;
+        let target = b"inert development input; never execute";
+        let hash = hex::encode(Sha256::digest(target));
+        let manifest = json!({"schema_version":1,"base":"files/canonical","target":"bin/target.exe",
+            "files":{"bin/target.exe":hash},"args":["--replay","@@"],"cwd":".",
+            "input_mode":"argv_file","env":{},"timeout_secs":30,"service":{"mode":"offline"}});
+        upload(&inputs, "canonical/bin/target.exe", target, true)?;
+        upload(&inputs, "alias.exe", target, true)?;
+        upload(&inputs, "input.bin", b"payload", false)?;
+        upload(
+            &inputs,
+            "launch.json",
+            &serde_json::to_vec(&manifest)?,
+            false,
+        )?;
+        let mut params = parameters();
+        params["target"] = json!("files/alias.exe");
+        params["launch_spec"] = json!("files/launch.json");
+        params["args"] = Value::Null;
+        let prepared =
+            plan(params.as_object().unwrap(), Kind::Verify)?.prepare(&inputs, &owner())?;
+        let crate::executors::plan::Target::Process(request) = prepared.target else {
+            anyhow::bail!("replay did not prepare a process")
+        };
+        assert_eq!(request.program.path, "files/canonical/bin/target.exe");
+        assert_eq!(
+            request.replay.as_ref().unwrap().configuration.target,
+            request.program.path
+        );
+        assert_eq!(request.replay.as_ref().unwrap().input.sha256, {
+            hex::encode(Sha256::digest(b"payload"))
+        });
+
+        let (_root, inputs, _runtime) = fixture()?;
+        upload(&inputs, "canonical/bin/target.exe", target, true)?;
+        upload(&inputs, "alias.exe", b"different bytes", true)?;
+        upload(&inputs, "input.bin", b"payload", false)?;
+        upload(
+            &inputs,
+            "launch.json",
+            &serde_json::to_vec(&manifest)?,
+            false,
+        )?;
+        let error = plan(params.as_object().unwrap(), Kind::Verify)?
+            .prepare(&inputs, &owner())
+            .err()
+            .context("different replay target bytes were admitted")?;
+        assert!(error.to_string().contains("replay target differs"));
+        Ok(())
+    }
+
     #[test]
     fn replay_verdict_requires_all_original_trial_hashes_and_observed_outcomes() -> Result<()> {
         let (_root, inputs, _runtime) = fixture()?;

@@ -18,16 +18,16 @@
       "zh-CN": "7884d09b1c98b02e25a02d193ea09f2ee3e001b80d5346bc0595e707844bb2e0"
     },
     "docs/design/architecture.md": {
-      "en": "9a31408fb5c748d7ea5222348df23c43297138c8ac8f46d70ad909612a919192",
-      "zh-CN": "924ed1fc3f5f6bf0ab829fca65935ca99ac534663555eab24a2e0e50f3c1543b"
+      "en": "07a703b02c4478531468e3fbc2e0df8107ba11647ccd38fc80623548612b3a1a",
+      "zh-CN": "4b237032a37599b2b2bb34da04f101023da2a67ce59c1c4fc18741d85828724a"
     },
     "docs/design/cross-platform-environments.md": {
       "en": "ef922a7109208ca248dcfa18aeff8b1cea2dc99ee2c9e1c7d8b339755d479638",
       "zh-CN": "ba0ee88b3c2f48cee790b34f68a6b2c699ca7569c180eb10b610761a0170d8b3"
     },
     "docs/design/implementation-contract.md": {
-      "en": "8bcd9b8c172373f6a19e561e08e9c8ad0524be771c9367e21007d78e3264a1b9",
-      "zh-CN": "ebd951c47ab987f59900d79caaa8447e47ab62d47704587274ee6290b6228919"
+      "en": "21b7be5b96b6787ce755d9b7535d05ef26eeed8b9c20002e00775b49a60b7292",
+      "zh-CN": "d6764c3db6e581e91496179708a50a2b7f6caf7c19bd1fc9365b7ce3845dcf46"
     },
     "docs/design/windows-lab.md": {
       "en": "c8b28082045e234dff2c7e32a926038d15e814414ba5516cd2e7f9f56a03585d",
@@ -142,8 +142,8 @@
       "zh-CN": "ca4e806e0ee229cf2c5973f77356480dccc8fb5adac2e46769c37d5763e40fc7"
     },
     "docs/user/usage.md": {
-      "en": "1d23f5217f9d6519566bbafdca2bed82f81a5d33deb761ac0b68c877ee58e916",
-      "zh-CN": "625d223a92f49ebc0d3bc198f189e91e8d2ccc99de929f31aca38efe3889a2a4"
+      "en": "d323dbee9a7d0d44dc6735225cc8c72037a2db3e393388f6be3692e1bec27c39",
+      "zh-CN": "dce438c2ce75ffd5b3704887556d5a29397a443b6a95f5d5fdb36c43f3e20a35"
     },
     "docs/user/windows-worker.md": {
       "en": "4d026d958a27dd0388dec3c722dcf4b6c5f1f84ee47a2821ae21d2c4360df82d",
@@ -202,8 +202,8 @@
       "zh-CN": "dc5c89b8cc73bb1f734fde41a6e9fa61a9a82a8d817fb1048bd2c259641ea831"
     },
     "workers/windows/README.md": {
-      "en": "a345857552841d9816b81b5512ac850ad1444729b2fd9cce35bd6d1a544f8de6",
-      "zh-CN": "d4045e3337c1a86d253a2161c0cbc1179e8d2cc88dd5969735d80490f691dbc3"
+      "en": "12c1835ec8c36dc2e5361e6a818cafbcd34798b48544296b56c5b11ef29e33e5",
+      "zh-CN": "60c07096f9bbc62cff370f5c6554b8db9c4529703db257ec9636875ee72e0bee"
     },
     "workers/windows/VALIDATION-HISTORY.md": {
       "en": "0d0397e04441b89da389edcc895fb469ebce0fdea4521dea4315f2fd7d863772",
