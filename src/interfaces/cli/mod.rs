@@ -107,6 +107,14 @@ pub enum Command {
         #[arg(long, requires = "run")]
         events: Option<usize>,
     },
+    /// Recover an assessment after confirming its controller is gone.
+    Recover {
+        /// Saved assessment whose previous controller is confirmed to be gone.
+        run_id: String,
+        /// Stop the root and its unfinished descendants instead of preparing a resume.
+        #[arg(long)]
+        stop: bool,
+    },
     /// Resolve an uncertain external effect using an operator-reviewed result and evidence.
     Reconcile {
         call_id: String,
@@ -275,6 +283,10 @@ pub async fn run(cli: Cli, telemetry: &crate::adapters::telemetry::TelemetryRunt
                 )?)?,
                 None => print_json(&serde_json::to_value(queries.runs()?)?)?,
             }
+        }
+        Command::Recover { run_id, stop } => {
+            let run = service.recover_orphaned(&run_id, stop)?;
+            print_json(&serde_json::to_value(run)?)?;
         }
         Command::Reconcile {
             call_id,

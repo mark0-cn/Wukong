@@ -191,6 +191,11 @@ impl AssessmentService {
     pub fn stop(&self, agent: &str, reason: &str) -> Result<Vec<String>> {
         Coordinator::new(self.store.clone()).stop(agent, reason)
     }
+    /// Recover an assessment only after its previous controller is known to be gone.
+    /// The default prepares a later resume; `stop` explicitly terminates the root branch.
+    pub fn recover_orphaned(&self, run_id: &str, stop: bool) -> Result<RunRecord> {
+        supervisor::recover_orphaned(&self.store, run_id, stop)
+    }
     pub fn message(
         &self,
         recipient: &str,

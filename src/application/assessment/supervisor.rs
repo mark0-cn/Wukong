@@ -18,6 +18,30 @@ pub(crate) struct RunSupervisor {
     tasks: Vec<tokio::task::AbortHandle>,
 }
 
+/// Explicitly settle controller-owned lifecycle state after an orphaned run.
+/// This never contacts a worker or infers a worker job outcome.
+pub(crate) fn recover_orphaned(store: &Store, run_id: &str, stop: bool) -> Result<RunRecord> {
+    store.require::<RunRecord>("run", run_id)?;
+    let owner = id("recovery");
+    let token = store.claim_lease(run_id, &owner, 30)?.context(
+        "a live controller owns this assessment; use its normal pause/stop controls instead of orphaned-run recovery",
+    )?;
+    let fenced = store.fenced(token.clone());
+    let result =
+        crate::application::coordinator::Coordinator::new(fenced).recover_orphaned(run_id, stop);
+    let release = store.release_token(&token);
+    match result {
+        Ok(run) => {
+            release?;
+            Ok(run)
+        }
+        Err(error) => {
+            let _ = release;
+            Err(error)
+        }
+    }
+}
+
 impl Drop for RunSupervisor {
     fn drop(&mut self) {
         self.cancel.cancel();
@@ -182,6 +206,47 @@ impl RunSupervisor {
 mod tests {
     use super::*;
     use crate::{adapters::models::Provider, config::AppConfig};
+
+    #[test]
+    fn orphaned_recovery_fences_the_old_controller_and_releases_its_token() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let target = directory.path().join("sample");
+        std::fs::write(&target, b"fixture")?;
+        let store = Store::open(directory.path().join("state"))?;
+        let run = crate::application::coordinator::Coordinator::new(store.clone()).create_run(
+            &target,
+            "orphaned recovery",
+            Budget::default(),
+            json!({}),
+        )?;
+        let crashed = store
+            .claim_lease(&run.id, "crashed-controller", 20)?
+            .context("initial controller lease")?;
+        let stale = store.fenced(crashed);
+        store.transaction(|tx| {
+            tx.execute("UPDATE leases SET expires_at=0 WHERE run_id=?1", [&run.id])?;
+            Ok(())
+        })?;
+        assert_eq!(
+            store.require::<RunRecord>("run", &run.id)?.status,
+            Status::Running,
+            "lease expiry alone must not rewrite durable lifecycle state"
+        );
+
+        let recovered = recover_orphaned(&store, &run.id, false)?;
+        assert_eq!(recovered.status, Status::BudgetPaused);
+        assert!(
+            stale
+                .put("fixture", "late-write", &run.id, &json!(true))
+                .is_err(),
+            "the old controller epoch must remain fenced"
+        );
+        let next = store
+            .claim_lease(&run.id, "next-controller", 20)?
+            .context("recovery token was not released")?;
+        store.release_token(&next)?;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn stalled_worker_does_not_block_renewal_cancellation_or_wall_budget() -> Result<()> {

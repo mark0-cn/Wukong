@@ -213,6 +213,8 @@ Rig 原生日志位于 `state_dir/rig/RUN_ID`，保存模型对话、效果及 p
 
 `RunSupervisor` 独立管理控制端租约、时间预算和后台 worker 观察，Rig 帧不等待 worker RPC。租约带持久化递增版本；运行中的 runner、coordinator 和工具共享带该版本的存储句柄，每次业务写事务在提交修改前验证 owner、版本和有效期。租约失效后旧控制端停止执行，其迟到结果不能覆盖接管者。监督任务随运行结束或取消清理，释放租约时也核对版本。
 
+显式 `wukong recover RUN_ID` 处理控制端被终止后遗留的持久化 `running` 状态，不依赖 `Drop`。仅当没有存活控制端持有任务时，它才取得恢复租约，然后通过带围栏的 coordinator 事务执行。默认操作发布 `run.recovered` 并记录中断暂停，使任务及未完成 Agent 进入 `budget_paused`；`--stop` 则应用根任务停止语义。已终态任务保持不变。恢复只释放自己的 token，绝不改写 worker job 结果。后续普通 resume 负责 worker 对账；仅凭墙钟过期不会改写生命周期状态。
+
 桌面与 CLI 通过 `AssessmentService` 执行启动、恢复，桌面端还使用其暂停、停止及操作员消息能力。`PreparedAssessment` 保留已解析的运行配置与事件订阅，在执行完成或错误后关闭控制端工具连接；前端不自行编排租约或构造恢复配置。恢复准备不修改任务，预算修改在监督器取得正式租约后提交。
 
 `ToolContext` 显式装配执行、分析、协调、文档、证据及环境服务，不再解引用为 `ToolService`。目录适配器向每个处理器传入具体服务，处理器不能访问完整入口对象。目录继续管理 schema、注册、权限和恢复策略，Rig 保留通用调度职责。`FilesService`、`JobService` 和 `SessionsService` 负责 worker 用例；`WorkerGateway` 集中管理传输与稳定回执。控制端使用 `JobRecord`、`SessionRecord`、`WorkerFileRecord` 和 `RunScoped` 检查归属，原始 worker 扩展载荷保留为 JSON。

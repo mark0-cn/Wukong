@@ -18,16 +18,16 @@
       "zh-CN": "7884d09b1c98b02e25a02d193ea09f2ee3e001b80d5346bc0595e707844bb2e0"
     },
     "docs/design/architecture.md": {
-      "en": "9a31408fb5c748d7ea5222348df23c43297138c8ac8f46d70ad909612a919192",
-      "zh-CN": "924ed1fc3f5f6bf0ab829fca65935ca99ac534663555eab24a2e0e50f3c1543b"
+      "en": "07a703b02c4478531468e3fbc2e0df8107ba11647ccd38fc80623548612b3a1a",
+      "zh-CN": "4b237032a37599b2b2bb34da04f101023da2a67ce59c1c4fc18741d85828724a"
     },
     "docs/design/cross-platform-environments.md": {
       "en": "ef922a7109208ca248dcfa18aeff8b1cea2dc99ee2c9e1c7d8b339755d479638",
       "zh-CN": "ba0ee88b3c2f48cee790b34f68a6b2c699ca7569c180eb10b610761a0170d8b3"
     },
     "docs/design/implementation-contract.md": {
-      "en": "3b12a95ebf691268a9440fa888b85d1e8e17a39a598def89d581d9fe5e34cd0d",
-      "zh-CN": "58bba074a9ee53a0f3c7443706502f5da48f20dac0e8da78a8debd633e218a8e"
+      "en": "5eaf9c19024277d65c9b434c2a159c7a25dca883b1171ff6b098a0e7cf5186d6",
+      "zh-CN": "3c35539d5c5a965b8b812431f13c3713ba5db36bb13a7017982f4344fa6af70f"
     },
     "docs/design/windows-lab.md": {
       "en": "c8b28082045e234dff2c7e32a926038d15e814414ba5516cd2e7f9f56a03585d",
@@ -142,8 +142,8 @@
       "zh-CN": "ca4e806e0ee229cf2c5973f77356480dccc8fb5adac2e46769c37d5763e40fc7"
     },
     "docs/user/usage.md": {
-      "en": "1d23f5217f9d6519566bbafdca2bed82f81a5d33deb761ac0b68c877ee58e916",
-      "zh-CN": "625d223a92f49ebc0d3bc198f189e91e8d2ccc99de929f31aca38efe3889a2a4"
+      "en": "d323dbee9a7d0d44dc6735225cc8c72037a2db3e393388f6be3692e1bec27c39",
+      "zh-CN": "dce438c2ce75ffd5b3704887556d5a29397a443b6a95f5d5fdb36c43f3e20a35"
     },
     "docs/user/windows-worker.md": {
       "en": "4d026d958a27dd0388dec3c722dcf4b6c5f1f84ee47a2821ae21d2c4360df82d",

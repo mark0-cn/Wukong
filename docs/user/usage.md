@@ -237,6 +237,21 @@ Native Rig logs live in state-directory `rig/RUN_ID`. State schema is currently 
 
 Reconcile external jobs/debuggers separately. Checkpoints cannot restore vanished debugger processes or live sessions lost with a container/VM.
 
+<a id="孤立控制端恢复"></a>
+
+### Orphaned controller recovery
+
+A killed controller (including `SIGKILL` or a host power loss) cannot run cleanup code, so durable state may remain `running`. After confirming that the original controller is gone, explicitly prepare the assessment to continue:
+
+```sh
+wukong recover RUN_ID
+wukong analyze --resume RUN_ID
+```
+
+`recover` claims a short recovery lease and refuses to proceed while a live controller owns the assessment. The default records an interrupted pause (`budget_paused`) and a `run.recovered` event; it does not mark the run or its Agents as failed or crashed. Recovery does not call a model or worker and does not change job outcomes. The following `analyze --resume` performs worker-job reconciliation before model execution. Recovery is never triggered solely by elapsed time or an expired lease.
+
+To terminate the orphaned assessment instead, use `wukong recover RUN_ID --stop`. This applies root stop semantics to the root and unfinished descendants while preserving terminal Agents. Recovering an already terminal run is a no-op. Inspect `runs --run RUN_ID --events 30` to confirm the resulting lifecycle events.
+
 <a id="未决外部调用"></a>
 
 ### Unresolved external calls
