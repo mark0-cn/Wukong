@@ -501,6 +501,7 @@ async fn coverage_record_reconciles_legacy_duplicate_rows() -> Result<()> {
             outcome: "needs_follow_up".into(),
             notes: "legacy".into(),
             evidence_ids: vec![],
+            supersedes: vec![],
             created_at: timestamp,
             updated_at: timestamp,
         })?;
@@ -519,6 +520,224 @@ async fn coverage_record_reconciles_legacy_duplicate_rows() -> Result<()> {
     let rows = store.records::<Coverage>(&run.id)?;
     assert_eq!(rows.len(), 2);
     assert!(rows.iter().all(|row| row.outcome == "completed"));
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn root_supersedes_terminal_coverage_without_rewriting_its_history() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    let evidence = store.artifact(
+        &run.id,
+        &agent.id,
+        "coverage-history",
+        "fixture",
+        b"original observation",
+        "text/plain",
+        json!({}),
+    )?;
+    let opened = service
+        .execute(
+            &agent.id,
+            "coverage-history-open",
+            "coverage_record",
+            json!({"scope":" parser   input ","kind":" static  analysis ","outcome":"needs_follow_up","notes":"contradicted inference","evidence_ids":[evidence.id]}),
+        )
+        .await?;
+    assert!(!opened.is_error, "{opened:?}");
+    let stale_id = result(&opened)["id"].as_str().unwrap().to_owned();
+    let active = service
+        .execute(
+            &run.root_id,
+            "coverage-active-owner",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"inconclusive","supersedes":[stale_id]}),
+        )
+        .await?;
+    assert!(active.is_error);
+    assert!(
+        result(&active)["error"]
+            .as_str()
+            .unwrap()
+            .contains("still active")
+    );
+
+    coordinator.finish(&agent.id, "original investigation complete")?;
+    let stale_before = store.require::<Coverage>("coverage", &stale_id)?;
+    let resolution_args = json!({"scope":"parser input","kind":"static analysis","outcome":"inconclusive","notes":"corrected by root: the original inference is not current","supersedes":[stale_id]});
+    let resolved = service
+        .execute(
+            &run.root_id,
+            "coverage-root-resolution",
+            "coverage_record",
+            resolution_args.clone(),
+        )
+        .await?;
+    assert!(!resolved.is_error, "{resolved:?}");
+    let resolution = result(&resolved);
+    assert_eq!(resolution["agent_id"], run.root_id);
+    assert_eq!(resolution["supersedes"], json!([stale_id]));
+    let stale_after = store.require::<Coverage>("coverage", &stale_id)?;
+    assert_eq!(stale_after.outcome, Coverage::SUPERSEDED);
+    assert_eq!(stale_after.id, stale_before.id);
+    assert_eq!(stale_after.agent_id, stale_before.agent_id);
+    assert_eq!(stale_after.scope, stale_before.scope);
+    assert_eq!(stale_after.kind, stale_before.kind);
+    assert_eq!(stale_after.notes, stale_before.notes);
+    assert_eq!(stale_after.evidence_ids, stale_before.evidence_ids);
+    assert_eq!(stale_after.created_at, stale_before.created_at);
+
+    let before_replay = serde_json::to_value(store.records::<Coverage>(&run.id)?)?;
+    let replay = service
+        .execute(
+            &run.root_id,
+            "coverage-root-resolution",
+            "coverage_record",
+            resolution_args,
+        )
+        .await?;
+    assert_eq!(replay.value, resolved.value);
+    assert_eq!(
+        serde_json::to_value(store.records::<Coverage>(&run.id)?)?,
+        before_replay
+    );
+    let messages = store.inbox(&run.root_id)?;
+    store.checkpoint_and_ack(
+        &run.root_id,
+        json!({}),
+        &messages
+            .iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>(),
+    )?;
+    coordinator.finish(
+        &run.root_id,
+        "coverage resolved; the superseded inference remains history only",
+    )?;
+    service.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn coverage_supersedes_rejects_invalid_roles_runs_scopes_and_owners() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let (store, coordinator, run, agent) = fixture(temp.path())?;
+    let terminal = child(&coordinator, &run.root_id, Role::Analyst, "terminal")?;
+    let service = ToolService::new(AppConfig::default(), store.clone()).await?;
+    for (owner, call) in [(&agent, "active-open"), (&terminal, "terminal-open")] {
+        let opened = service
+            .execute(
+                &owner.id,
+                call,
+                "coverage_record",
+                json!({"scope":"parser input","kind":"static analysis","outcome":"needs_follow_up"}),
+            )
+            .await?;
+        assert!(!opened.is_error, "{opened:?}");
+    }
+    coordinator.finish(&terminal.id, "terminal coverage owner")?;
+    let terminal_row = store
+        .records::<Coverage>(&run.id)?
+        .into_iter()
+        .find(|row| row.agent_id == terminal.id)
+        .unwrap();
+    let active_row = store
+        .records::<Coverage>(&run.id)?
+        .into_iter()
+        .find(|row| row.agent_id == agent.id)
+        .unwrap();
+
+    let non_root = service
+        .execute(
+            &agent.id,
+            "coverage-non-root-supersedes",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"completed","supersedes":[terminal_row.id]}),
+        )
+        .await?;
+    assert!(non_root.is_error);
+    assert!(
+        result(&non_root)["error"]
+            .as_str()
+            .unwrap()
+            .contains("only root")
+    );
+    let active_owner = service
+        .execute(
+            &run.root_id,
+            "coverage-active-owner-rejected",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"completed","supersedes":[active_row.id]}),
+        )
+        .await?;
+    assert!(active_owner.is_error);
+    assert!(
+        result(&active_owner)["error"]
+            .as_str()
+            .unwrap()
+            .contains("still active")
+    );
+    let mismatch = service
+        .execute(
+            &run.root_id,
+            "coverage-mismatched-scope",
+            "coverage_record",
+            json!({"scope":"other scope","kind":"static analysis","outcome":"completed","supersedes":[terminal_row.id]}),
+        )
+        .await?;
+    assert!(mismatch.is_error);
+    assert!(
+        result(&mismatch)["error"]
+            .as_str()
+            .unwrap()
+            .contains("same normalized scope/kind")
+    );
+
+    let other_run = coordinator.create_run(
+        &run.target_path,
+        "other coverage run",
+        Budget::default(),
+        json!({}),
+    )?;
+    let foreign = child(&coordinator, &other_run.root_id, Role::Analyst, "foreign")?;
+    let foreign = service
+        .execute(
+            &foreign.id,
+            "foreign-coverage-open",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"needs_follow_up"}),
+        )
+        .await?;
+    let foreign_id = result(&foreign)["id"].as_str().unwrap();
+    let cross_run = service
+        .execute(
+            &run.root_id,
+            "coverage-cross-run",
+            "coverage_record",
+            json!({"scope":"parser input","kind":"static analysis","outcome":"completed","supersedes":[foreign_id]}),
+        )
+        .await?;
+    assert!(cross_run.is_error);
+    assert!(
+        result(&cross_run)["error"]
+            .as_str()
+            .unwrap()
+            .contains("another run")
+    );
+    let reserved = service
+        .execute(
+            &run.root_id,
+            "coverage-reserved-outcome",
+            "coverage_record",
+            json!({"scope":"root scope","kind":"static analysis","outcome":"superseded"}),
+        )
+        .await?;
+    assert!(reserved.is_error);
+    let rows = store.records::<Coverage>(&run.id)?;
+    assert!(rows.iter().all(|row| row.agent_id != run.root_id));
+    assert!(rows.iter().all(|row| row.outcome == "needs_follow_up"));
     service.close().await;
     Ok(())
 }

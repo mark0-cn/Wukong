@@ -305,6 +305,8 @@ export interface Messages {
   'report-attempts': undefined;
   'report-bundle-readme': undefined;
   'report-coverage': undefined;
+  'report-coverage-history': undefined;
+  'report-coverage-history-note': undefined;
   'report-evidence': undefined;
   'report-findings': undefined;
   'report-impact': undefined;

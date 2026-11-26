@@ -16,6 +16,8 @@
 
 `findings_list` 和 `coverage_list` 返回过滤后的摘要，每页最多 20 条，使用 after 继续 next_cursor。`evidence_search` 按产出者、目标／内容哈希、作业、来源或媒体类型检索本次运行证据。`resource_list` 只从控制器记录列出调用者拥有的作业和会话，包含最近观测状态；它不会接管未知 worker 资源或授予清理权限。
 
+普通 `coverage_record` 按调用者及经过空白规范化、区分大小写的 scope/kind 更新或插入一行。root 还可通过 `supersedes` 提供最多 128 个不同的同 run 覆盖 ID，这些行的规范化 scope/kind 必须匹配，且 owner 必须已终止。root 的解决记录与旧行转为 `superseded` 在同一事务中提交。被取代的行保留 ID、备注和证据供审计，但不阻塞完成，也不是当前结论；被反驳的推断必须在 root 解决记录中更正。非 root 调用、活跃 owner、跨 run 引用和 scope/kind 不匹配均被拒绝。
+
 `resource_read` 返回有界输出分块、证据 ID 和 next_offset。at_snapshot_end 表示当前观察中没有更多字节；eof 还要求资源已终止。后端可能只在完成后公布输出流。流缺失会明确报错，不会当作空输出。证据内容仍可通过 evidence_read 读取，不依赖 worker 资源。
 
 `differential_test` 用 1–8 个本次运行的输入证据比较两个真实准备的 LaunchSpec，每个输入最多 64 KiB，两份清单均须记录 1–10 秒时限。明确选择 exact_output、exit_status 或 stdout_json 及预期退出码。作业顺序运行，以支持单资源 worker。保留清单、输入、作业状态和输出证据。超时、输出缺失／截断、非预期退出或无效 JSON 均为 inconclusive。聚合调用预算为 300 秒；未完成作业仍保留所属关系，可通过资源清单发现。

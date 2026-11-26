@@ -21,37 +21,77 @@ impl EvidenceService {
         call_id: &str,
         args: &Value,
     ) -> Result<Value> {
+        fn normalized(value: &str) -> String {
+            value.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+
         let evidence = string_list(args, "evidence_ids")?;
         ensure!(
             evidence.len() <= 128,
             "evidence links are limited to 128 per record"
         );
         self.store.verify_evidence_links(&agent.run_id, &evidence)?;
-        let scope = text(args, "scope")?
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let kind = text(args, "kind")?
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let supersedes = string_list(args, "supersedes")?;
+        let supersedes_requested = args.get("supersedes").is_some();
+        ensure!(
+            !supersedes_requested || agent.role == Role::Root,
+            "only root can supersede another coverage row"
+        );
+        ensure!(
+            supersedes.len() <= 128
+                && supersedes
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    == supersedes.len(),
+            "supersedes must contain at most 128 distinct coverage IDs"
+        );
+        let outcome = text(args, "outcome")?;
+        ensure!(
+            outcome != Coverage::SUPERSEDED,
+            "superseded is reserved for rows replaced through root supersedes"
+        );
+        let scope = normalized(text(args, "scope")?);
+        let kind = normalized(text(args, "kind")?);
         let identity = stable(
             "cov",
             &serde_json::to_string(&(&agent.run_id, &agent.id, &scope, &kind))?,
         );
         self.effect(agent, call_id, |tx| {
+            let mut superseded = Vec::new();
+            for id in &supersedes {
+                let previous: Coverage = tx
+                    .get_record(id)?
+                    .context("superseded coverage row missing")?;
+                ensure!(
+                    previous.run_id == agent.run_id,
+                    "superseded coverage row belongs to another run"
+                );
+                ensure!(
+                    normalized(&previous.scope) == scope && normalized(&previous.kind) == kind,
+                    "superseded coverage row must have the same normalized scope/kind"
+                );
+                let owner: AgentMetadata = tx
+                    .get_record(&previous.agent_id)?
+                    .context("superseded coverage owner missing")?;
+                ensure!(
+                    owner.run_id == agent.run_id,
+                    "superseded coverage owner belongs to another run"
+                );
+                ensure!(
+                    owner.status.terminal(),
+                    "superseded coverage owner is still active"
+                );
+                superseded.push(previous);
+            }
+
             let mut matching = tx
                 .records::<Coverage>(&agent.run_id)?
                 .into_iter()
                 .filter(|record| {
                     record.agent_id == agent.id
-                        && record
-                            .scope
-                            .split_whitespace()
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                            == scope
-                        && record.kind.split_whitespace().collect::<Vec<_>>().join(" ") == kind
+                        && normalized(&record.scope) == scope
+                        && normalized(&record.kind) == kind
                 })
                 .collect::<Vec<_>>();
             matching.sort_by(|left, right| {
@@ -71,6 +111,7 @@ impl EvidenceService {
                     outcome: String::new(),
                     notes: String::new(),
                     evidence_ids: vec![],
+                    supersedes: vec![],
                     created_at: now(),
                     updated_at: now(),
                 }
@@ -79,19 +120,32 @@ impl EvidenceService {
             };
             coverage.scope = scope.clone();
             coverage.kind = kind.clone();
-            coverage.outcome = text(args, "outcome")?.into();
+            coverage.outcome = outcome.into();
             if let Some(notes) = args["notes"].as_str() {
                 coverage.notes = notes.into();
             }
             if args.get("evidence_ids").is_some() {
                 coverage.evidence_ids = evidence;
             }
+            if supersedes_requested {
+                coverage.supersedes = supersedes.clone();
+            }
             coverage.updated_at = now();
             tx.save_record(&coverage)?;
             for mut duplicate in matching {
                 duplicate.outcome = coverage.outcome.clone();
                 duplicate.updated_at = coverage.updated_at;
+                if supersedes_requested {
+                    duplicate.supersedes = coverage.supersedes.clone();
+                }
                 tx.save_record(&duplicate)?;
+            }
+            for mut previous in superseded {
+                if !previous.is_superseded() {
+                    previous.outcome = Coverage::SUPERSEDED.into();
+                    previous.updated_at = coverage.updated_at;
+                    tx.save_record(&previous)?;
+                }
             }
             Ok(serde_json::to_value(coverage)?)
         })

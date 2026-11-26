@@ -711,6 +711,7 @@ fn unresolved_coverage_prevents_clean_finish() {
         outcome: "needs_follow_up".into(),
         notes: "runtime unavailable".into(),
         evidence_ids: vec![],
+        supersedes: vec![],
         created_at: now(),
         updated_at: now(),
     };

@@ -111,6 +111,7 @@ fn fixture(root: &Path) -> (Store, String, String) {
         outcome: "inspected".into(),
         notes: "Read <parser>".into(),
         evidence_ids: vec![evidence.id.clone()],
+        supersedes: vec![],
         created_at: now(),
         updated_at: now(),
     };
@@ -207,6 +208,59 @@ fn exports_complete_original_bundle_redacts_config_and_does_not_assert_unverifie
             fs::read(translated.join(file)).unwrap()
         );
     }
+}
+
+#[test]
+fn report_separates_superseded_coverage_from_current_conclusions() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id, _) = fixture(temp.path());
+    let mut current: Coverage = store.require("coverage", "coverage_fixture").unwrap();
+    let mut historical = current.clone();
+    historical.id = "coverage_superseded".into();
+    historical.outcome = Coverage::SUPERSEDED.into();
+    historical.notes = "contradicted inference retained for audit".into();
+    current.notes = "corrected current conclusion".into();
+    current.supersedes = vec![historical.id.clone()];
+    store
+        .put("coverage", &historical.id, &run_id, &historical)
+        .unwrap();
+    store
+        .put("coverage", &current.id, &run_id, &current)
+        .unwrap();
+
+    let summary = report::export(&store, &run_id, &temp.path().join("bundle")).unwrap();
+    let markdown = fs::read_to_string(&summary.report_markdown).unwrap();
+    let (current_text, history_text) = markdown
+        .split_once("## Superseded coverage history")
+        .unwrap();
+    assert!(!current_text.contains("contradicted inference"));
+    assert!(current_text.contains("corrected current conclusion"));
+    assert!(history_text.contains("contradicted inference retained for audit"));
+    assert!(history_text.contains("not current conclusions or unresolved work"));
+    let html = fs::read_to_string(&summary.report_html).unwrap();
+    let (current_html, history_html) = html
+        .split_once("<h2>Superseded coverage history</h2>")
+        .unwrap();
+    assert!(!current_html.contains("contradicted inference"));
+    assert!(history_html.contains("contradicted inference retained for audit"));
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&summary.report_json).unwrap()).unwrap();
+    assert!(
+        report["snapshot"]["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == "coverage_fixture"
+                && row["supersedes"] == json!(["coverage_superseded"]))
+    );
+    assert!(
+        report["snapshot"]["coverage"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == "coverage_superseded"
+                && row["outcome"] == Coverage::SUPERSEDED)
+    );
 }
 
 #[test]

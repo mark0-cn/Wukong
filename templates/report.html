@@ -38,10 +38,19 @@ td,th{border:1px solid #cbd2da;padding:.5rem;text-align:left}.unconfirmed{color:
 {% endfor %}
 <h2>{{ self.label("report-coverage") }}</h2>
 <table><thead><tr><th>{{ self.label("report-scope") }}</th><th>{{ self.label("report-kind") }}</th><th>{{ self.label("report-outcome") }}</th><th>{{ self.label("report-notes") }}</th></tr></thead><tbody>
-{% for coverage in snapshot.coverage %}
+{% for coverage in coverage %}
 <tr><td>{{ coverage.scope }}</td><td>{{ coverage.kind }}</td><td>{{ coverage.outcome }}</td><td>{{ coverage.notes }}</td></tr>
 {% endfor %}
 </tbody></table>
+{% if !superseded_coverage.is_empty() %}
+<h2>{{ self.label("report-coverage-history") }}</h2>
+<p>{{ self.label("report-coverage-history-note") }}</p>
+<table><thead><tr><th>{{ self.label("report-scope") }}</th><th>{{ self.label("report-kind") }}</th><th>{{ self.label("report-outcome") }}</th><th>{{ self.label("report-notes") }}</th></tr></thead><tbody>
+{% for coverage in superseded_coverage %}
+<tr><td>{{ coverage.scope }}</td><td>{{ coverage.kind }}</td><td>{{ coverage.outcome }}</td><td>{{ coverage.notes }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
 {% if !snapshot.artifact_validations.is_empty() %}
 <h2>{{ self.label("report-artifact-validation") }}</h2>
 <p>{{ self.label("report-predicate-limit") }}</p>

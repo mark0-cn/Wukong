@@ -36,6 +36,8 @@ attempt counts, evidence, and a separate agent whose role is `verifier`.
 Export does not infer code execution from a crash, promote a stage, or invent
 missing replay conditions.
 
+Current coverage excludes rows whose outcome is `superseded`. Markdown and HTML retain those rows in a separate audit-history section, while `report.json` preserves every row and each root resolution's `supersedes` links. Historical notes and evidence are not current conclusions or unresolved work. When new evidence contradicts an inference, the current record must correct it rather than presenting the superseded text as a surviving fact.
+
 Dynamic trace jobs retain `trace/run.json`, `trace/events.jsonl` and the private debugger transcript as original evidence. `trace_compare` writes a separate `trace.comparison` artifact linking both source jobs/evidence, the logical plan and the comparison signature. Completion of the event stream, observation completeness, job settlement and evidence readiness remain distinct; a partial trace can be exported for diagnosis but cannot justify `match`. See [Dynamic function tracing](../user/dynamic-trace.md) for the current backend and limits.
 
 To replay, first verify the bundle, recreate the runtime and dependencies recorded in the calls and verification records, map the original sample path to `target/sample.bin`, import referenced evidence from its `bundle_path`, and replay the recorded tool arguments. Supply credentials through the original environment variable names. Runtime snapshots and third-party engine installations are not embedded in the bundle; their identities and requirements remain part of the recorded metadata.

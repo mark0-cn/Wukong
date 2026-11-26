@@ -20,7 +20,7 @@ Rig 提供原生 `task` 工具；消息与等待使用具备类型约束的业�
 | `context_read` | 全部 | 否 | controller | 按字符范围读取同 run 的确切共享文档 JSON，含 amendments。kind/id 来自 context_search；沿 content.next_offset 读取所需完整内容。 |
 | `context_search` | 全部 | 否 | controller | 按文本、kind、作者 scope 或 agent_id 搜索同 run 的笔记、待办和可选威胁模型。返回有界预览和 next_offset；用 context_read 读取完整正文及 amendments。 |
 | `coverage_list` | 全部 | 否 | controller | 按 agent、scope 或 outcome 分页列出覆盖摘要；通过 after 继续 next_cursor。notes 仅为预览，full_evidence_id 保留完整页面。 |
-| `coverage_record` | 全部 | 是 | controller | 记录或更新检查范围、结果及支持证据。同一 agent 重复记录相同规范化 scope/kind 时更新同一行；needs_follow_up 阻止 root 完成。 |
+| `coverage_record` | 全部 | 是 | controller | 记录或更新检查范围、结果及支持证据。同一 agent 重复记录相同规范化 scope/kind 时更新同一行；needs_follow_up 阻止 root 完成。root 可通过 supersedes 关联同 run、规范化 scope/kind 相同且 owner 已终止的行，将其保留为不再阻塞完成的 superseded 历史。 |
 | `crash_replay` | analyst / verifier | 是 | crash.replay | 在干净目录启动持久化崩溃复现 job。 |
 | `crash_snapshot` | analyst / verifier | 否 | core.snapshot | 从自己拥有且已停止的调试会话获取寄存器、PC/SP、故障地址、指令、栈和模块身份，或检查同 run 的 core。强签名要求实际模块哈希；未知身份保持未解决。 |
 | `cyclic_offset` | analyst / verifier | 否 | cyclic.offset | 在同 run 的 cyclic pattern 中找唯一偏移。必须提供原始 alphabet/n 及内存顺序恰好 n 字节；拒绝不一致生成参数，不猜字节序或隐式截断寄存器。 |

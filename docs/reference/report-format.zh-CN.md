@@ -28,6 +28,8 @@ HTML 使用 Askama 模板及自动转义；Markdown 单独转义标点。二者�
 
 发现保留记录阶段和基于证据的严重性（critical/high/medium/low/info）及理由。critical/high 仅接受 reproduced 或更高阶段；单纯崩溃最高 medium。`impact_verified` 若没有成功验证记录、非零有效尝试次数、证据和另一位角色为 verifier 的 Agent，会明确标为不完整。导出不会从崩溃推断代码执行、提升阶段或编造缺失的重放条件。
 
+当前覆盖范围不包含结果为 `superseded` 的行。Markdown 和 HTML 将这些行保留在独立的审计历史部分，`report.json` 则保留所有行及每个 root 解决记录的 `supersedes` 关联。历史备注和证据不是当前结论或未解决工作。新证据反驳某个推断时，当前记录必须更正该推断，不能把被取代的文本当作仍然成立的事实。
+
 动态 trace job 将 `trace/run.json`、`trace/events.jsonl` 和私有调试器 transcript 保存为原始证据。`trace_compare` 另行生成 `trace.comparison` 产物，关联两侧源 job/证据、逻辑 plan 和 comparison signature。事件流完成、观察完整性、job settled 和证据就绪仍是不同事实；部分 trace 可以导出用于诊断，但不能据此得到 `match`。当前后端和限制见[动态函数追踪与离线差分](../user/dynamic-trace.zh-CN.md)。
 
 重放前先验证包，按调用/验证记录重建运行环境及依赖，将原样本路径映射到 `target/sample.bin`，从 `bundle_path` 导入证据，再执行记录参数。凭据通过原环境变量名提供。包不内置运行时快照或第三方引擎安装，其身份和要求保留在元数据中。

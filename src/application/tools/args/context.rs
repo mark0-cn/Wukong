@@ -92,6 +92,10 @@ pub(in crate::application::tools) struct CoverageRecordArgs {
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_ids: Option<Vec<String>>,
+    /// Root-only coverage IDs whose current outcome is resolved by this row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(max = 128))]
+    pub supersedes: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
