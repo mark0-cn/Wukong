@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{Value, json};
 use std::{fs, time::Duration};
@@ -48,7 +48,10 @@ async fn run_verification_job(
     let started = service
         .execute(verifier_id, call_id, "poc_verify", args)
         .await?;
-    let job = value(&started)["job_id"].as_str().unwrap().to_owned();
+    let job = value(&started)["job_id"]
+        .as_str()
+        .context("verification job ID missing")?
+        .to_owned();
     for index in 0..160 {
         let observed = service
             .execute(
