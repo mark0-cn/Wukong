@@ -49,9 +49,13 @@ The resource journal uses schema **2** and rejects older databases without migra
 
 Uploads are stored once in protected native storage. `file.put` accepts at most 32 MiB; resumable uploads use 1-MiB chunks and accept at most 16 GiB. Upload declarations, content SHA256, executable policy and published receipts bind the worker identity, run, controller and lease epoch. Duplicate chunks must match original bytes; status reports the native durable offset. Reads and execution require completed receipts. Inputs are copied into owned resource scratch only when a tool needs them; no ordinary-account file receipt can authorize System reads. Original attachments remain unchanged.
 
+After controller recovery, a logical-path lookup in a later lease epoch may re-admit only the newest declaration from an earlier epoch of the same run and installation, and only with its completed receipt. The native worker rechecks the original receipt, immutable single-link bytes and executable policy, copies those bytes into the successor's protected scope, and publishes a new declaration, receipt and `Reference`. A stale `Reference` by itself never authorizes acquisition or triggers recovery. Other runs, changed bytes and missing receipts fail with contextual re-stage/recovery guidance rather than an unqualified filesystem error.
+
 ## Execution and analysis
 
 `job.*`, `debug.*`, `interact.*`, `exec.run`, `py.run`, replay, minimization and verification use the same native resource lifecycle and journal. A repeated request resolves the original intent before accessing successor inputs. Cleanup failures retain ownership; interrupted execution remains unknown unless original evidence proves an outcome. Artifact access is run-scoped and retains size/SHA256 identity. Resource results describe their isolation; only `doctor` reports current service readiness.
+
+With a LaunchSpec, replay, verification and minimization independently resolve the caller's admitted target and require its SHA256, size and executable policy to match the canonical LaunchSpec target. Distinct logical paths are accepted only for identical bytes; the protected replay request binds the canonical target path. Per-call replay arguments remain rejected because the LaunchSpec owns argv.
 
 `runtime.profile` reads admitted content identities directly from protected native storage without occupying an execution slot. `debug.profile` and `interact.profile` observe only the session-owned process handle, retain the original evidence and return bounded previews. Unavailable observations remain unknown; mapped paths do not prove file hashes. Static binary declarations remain controller-owned.
 
