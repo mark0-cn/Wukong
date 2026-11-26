@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Recover successful Windows lab provisions whose guest contains only a verified receipt and whose completed host receipt is absent from fresh lab state, without changing controller state or permitting broader cleanup. Offline disk inspection now resolves the Windows volume once per operation and batches listings and downloads."
+zh_CN = "支持恢复客体仅剩已校验回执、且全新 Lab 状态未收录其已完成宿主回执的成功 Windows 实验部署；此过程不修改控制器状态，也不允许更广泛的清理。离线磁盘检查现在每个操作只解析一次 Windows 系统卷，并批量执行目录列举和下载。"

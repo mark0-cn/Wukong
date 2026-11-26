@@ -104,6 +104,9 @@ fn provision_requests_carry_windows_guest_paths_that_convert_once() {
     assert_eq!(inspection.software_hive, GUEST_SOFTWARE_HIVE);
     assert_eq!(inspection.program_data, GUEST_PROGRAM_DATA);
     assert_eq!(inspection.provision_root, GUEST_PROVISION_ROOT);
+    assert_eq!(inspection.operation_root, paths.root);
+    assert_eq!(inspection.receipt, paths.receipt);
+    assert!(!inspection.receipt_only);
     assert_eq!(inspection.tasks_dir, GUEST_TASKS_DIR);
     assert_eq!(inspection.task_file, paths.task_file);
     assert_eq!(inspection.launcher, paths.launcher);
@@ -445,6 +448,9 @@ fn cleanup_inspection(_paths: &GuestPaths) -> DiskInspection {
         control_set: Some(1),
         existing_service: None,
         provision_root_entries: Vec::new(),
+        operation_root_present: false,
+        operation_root_entries: Vec::new(),
+        receipt: None,
         task_file_present: false,
         boot_task: BootTaskCacheState::default(),
         launcher: None,

@@ -660,6 +660,13 @@ pub struct DiskInspection {
     pub existing_service: Option<String>,
     /// Entries left below the fixed provision root directory.
     pub provision_root_entries: Vec<String>,
+    /// The selected operation directory and its immediate entries. Receipt-only
+    /// orphan cleanup uses these to prove that recursive removal affects nothing
+    /// except the verified `receipt.json`.
+    pub operation_root_present: bool,
+    pub operation_root_entries: Vec<String>,
+    /// Bytes of the selected operation's guest receipt, when present.
+    pub receipt: Option<Vec<u8>>,
     /// Fixed scheduled-task file from a previous or current injection.
     pub task_file_present: bool,
     /// Presence of the three fixed TaskCache keys.
@@ -788,6 +795,13 @@ pub struct DiskInspectionRequest {
     pub software_hive: String,
     pub program_data: String,
     pub provision_root: String,
+    /// Selected operation directory and receipt, used only to admit the narrow
+    /// settled-completed receipt-only cleanup case.
+    pub operation_root: String,
+    pub receipt: String,
+    /// Read the selected directory and receipt only for the separately
+    /// authenticated completed-orphan cleanup branch.
+    pub receipt_only: bool,
     pub launcher: String,
     pub service_prefix: String,
     pub tasks_dir: String,
@@ -813,6 +827,9 @@ impl DiskInspectionRequest {
             software_hive: GUEST_SOFTWARE_HIVE.into(),
             program_data: GUEST_PROGRAM_DATA.into(),
             provision_root: GUEST_PROVISION_ROOT.into(),
+            operation_root: paths.root.clone(),
+            receipt: paths.receipt.clone(),
+            receipt_only: false,
             launcher: paths.launcher.clone(),
             service_prefix: "WukongLabProvision".into(),
             tasks_dir: GUEST_TASKS_DIR.into(),
