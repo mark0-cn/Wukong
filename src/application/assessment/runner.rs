@@ -42,12 +42,15 @@ impl AssessmentRunner {
         budget: Option<Budget>,
         reconcile_jobs: bool,
     ) -> Result<RunRecord> {
-        crate::application::assessment::supervisor::RunSupervisor::drive(
-            self.clone(),
-            run_id,
-            cancel,
-            budget,
-            reconcile_jobs,
+        // Keep the supervisor and its recovery future off the CLI's main stack.
+        Box::pin(
+            crate::application::assessment::supervisor::RunSupervisor::drive(
+                self.clone(),
+                run_id,
+                cancel,
+                budget,
+                reconcile_jobs,
+            ),
         )
         .await
     }
