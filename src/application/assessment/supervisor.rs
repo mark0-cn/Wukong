@@ -36,6 +36,7 @@ impl RunSupervisor {
         run_id: &str,
         cancel: CancellationToken,
         budget: Option<Budget>,
+        reconcile_jobs: bool,
     ) -> Result<RunRecord> {
         let lease = runner
             .store
@@ -48,6 +49,13 @@ impl RunSupervisor {
             tasks: vec![],
         };
         let runner = runner.with_store(runner.store.fenced(lease.clone()));
+        if reconcile_jobs {
+            runner
+                .tools
+                .reconcile_jobs(run_id)
+                .await
+                .context("reconcile worker jobs before resuming")?;
+        }
         runner.coordinator.resume_once(
             run_id,
             budget,
