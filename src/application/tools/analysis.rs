@@ -11,6 +11,14 @@ pub(super) struct AnalysisService {
     pub(super) config: crate::config::StaticConfig,
 }
 impl AnalysisService {
+    fn remote_backend(&self) -> Option<(&FilesService, &WorkerGateway)> {
+        match (&self.static_files, &self.static_gateway) {
+            (Some(files), Some(gateway)) => Some((files, gateway)),
+            _ if self.gateway.worker.is_some() => Some((&self.files, &self.gateway)),
+            _ => None,
+        }
+    }
+
     /// Resolve and keep secondary bytes alive for every static backend.
     pub(super) fn resolve_target(
         &self,
@@ -77,12 +85,9 @@ impl AnalysisService {
             .ghidra_executable
             .clone()
             .or_else(|| std::env::var_os("WUKONG_GHIDRA_HEADLESS").map(PathBuf::from));
-        if executable.is_none() && (self.gateway.worker.is_some() || self.static_gateway.is_some())
+        if executable.is_none()
+            && let Some((files, gateway)) = self.remote_backend()
         {
-            let (files, gateway) = match (&self.static_files, &self.static_gateway) {
-                (Some(files), Some(gateway)) => (files, gateway),
-                _ => (&self.files, &self.gateway),
-            };
             let staged = if secondary.is_some() {
                 files.file_put(agent, &format!("{call_id}:target"), &json!({"path":format!("files/{}.bin",run.target_sha256),"evidence_id":args["target_ref"]["evidence_id"],"executable":false})).await?["file"].clone()
             } else {
@@ -110,7 +115,7 @@ impl AnalysisService {
                         raw["sha256"] == artifact["sha256"],
                         "remote Ghidra artifact changed during import"
                     );
-                    evidence_ids.push(self.files.import_file(agent, call_id, &raw)?.id);
+                    evidence_ids.push(files.import_file(agent, call_id, &raw)?.id);
                 }
             }
             // The per-artifact metadata (binding/execution/request/response
@@ -228,6 +233,94 @@ mod address_tests {
             assert!(static_address(&json!({"address":address}), &run).is_err());
         }
         assert!(static_address(&json!({}), &run).is_err());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod static_backend_tests {
+    use super::super::gateway::BoundWorker;
+    use super::*;
+    use crate::adapters::environments::{EnvironmentConfig, EnvironmentRegistry, Platform};
+
+    #[tokio::test]
+    async fn artifacts_use_the_selected_static_fileservice_without_a_primary_worker() -> Result<()>
+    {
+        let temp = tempfile::tempdir()?;
+        let store = Store::open(temp.path().join("state"))?;
+        let target = temp.path().join("sample");
+        fs::write(&target, b"fixture")?;
+        let run = Coordinator::new(store.clone()).create_run(
+            &target,
+            "static fixture",
+            Budget::default(),
+            json!({}),
+        )?;
+        let agent: AgentMetadata = store.load(&run.root_id)?;
+        let registry = EnvironmentRegistry::new(std::collections::BTreeMap::from([(
+            "static".into(),
+            EnvironmentConfig {
+                installation_id: None,
+                name: "Trusted static fixture".into(),
+                platform: Platform::current(),
+                runtime: crate::adapters::worker::RuntimeConfig {
+                    transport: crate::adapters::worker::TransportConfig::TrustedLocal(
+                        crate::adapters::worker::TrustedLocalConfig {
+                            state_dir: temp.path().join("worker"),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                },
+            },
+        )]))?;
+        let client = registry.client("static").await?;
+        let primary = WorkerGateway {
+            store: store.clone(),
+            worker: None,
+            output_limit: 12000,
+        };
+        let static_gateway = WorkerGateway {
+            store: store.clone(),
+            worker: Some(BoundWorker::new(client.clone(), "static")?),
+            output_limit: 12000,
+        };
+        let service = AnalysisService {
+            store: store.clone(),
+            files: FilesService {
+                store: store.clone(),
+                gateway: primary,
+            },
+            gateway: WorkerGateway {
+                store: store.clone(),
+                worker: None,
+                output_limit: 12000,
+            },
+            static_files: Some(FilesService {
+                store: store.clone(),
+                gateway: static_gateway.clone(),
+            }),
+            static_gateway: Some(static_gateway.clone()),
+            config: Default::default(),
+        };
+        let bytes = b"static analysis";
+        let raw = json!({
+            "path":"analysis.json",
+            "sha256":binary::sha256_bytes(bytes),
+            "size":bytes.len(),
+            "data_base64":BASE64.encode(bytes),
+        });
+        let (files, gateway) = service.remote_backend().unwrap();
+        let evidence = files.import_file(&agent, "static-artifact", &raw)?;
+        let record = store
+            .records::<WorkerFileRecord>(&run.id)?
+            .into_iter()
+            .find(|file| file.path == "analysis.json")
+            .unwrap();
+        assert_eq!(record.worker_id, gateway.worker_identity()?);
+        assert_eq!(record.evidence_id.as_deref(), Some(evidence.id.as_str()));
+        client.call("worker.shutdown", json!({})).await?;
+        registry.close().await;
         Ok(())
     }
 }

@@ -89,7 +89,13 @@ A normal loop is static facts and Ghidra, a hypothesis, `stage_target`, then
 `debug_control`, `crash_replay`, `input_minimize` and `poc_verify`.
 
 - `debug_start` selects DbgEng on Windows and never falls back to another
-  platform; dump sessions reject execution control.
+  platform; dump sessions reject execution control. If it returns
+  `resource_busy`, inspect `resource_list`, then reuse the owned session or
+  close/cancel it before starting another. Do not treat this pre-effect
+  rejection as an unknown effect or probe PATH/WER for a debugger: the sealed
+  worker invokes its packaged DbgEng backend under the debugger persona.
+  Use `debug_*` results and worker evidence instead of manually launched cdb
+  or WinDbg instances.
 - `input_minimize` needs a fresh stopped-session observation with a strong
   signature: admitted image SHA256, exception code, image-relative PC and
   resolved frames. With only a signal or exception code, set

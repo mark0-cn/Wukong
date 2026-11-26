@@ -402,10 +402,18 @@ impl ToolService {
             Ok(Err(error)) => {
                 let state = if error.is::<crate::application::windows_lab::LabError>() { CallState::Uncertain } else { self.effects().failure_state(policy, &agent, call_id, &error)? };
                 let kind = error.downcast_ref::<crate::adapters::worker::protocol::WorkerError>().map(|e| json!(e.kind));
+                let resource_busy = error.downcast_ref::<crate::adapters::worker::protocol::WorkerError>().is_some_and(|e| e.kind == crate::adapters::worker::protocol::WorkerErrorKind::ResourceBusy);
                 let lab_error = error.downcast_ref::<crate::application::windows_lab::LabError>();
+                let next_action = if resource_busy {
+                    "inspect resource_list; reuse the owned active resource or close/cancel it before starting another"
+                } else if state == CallState::Uncertain {
+                    "reconcile the existing request; do not change arguments or issue a replacement write"
+                } else {
+                    "correct the indicated input; preserve returned references and completed results"
+                };
                 let mut raw = json!({"error":format!("{error:#}"),"kind":kind,"lab_error":lab_error,
                     "effect_state":if state == CallState::Uncertain {"unknown"} else {"rejected"},
-                    "next_action":if state == CallState::Uncertain {"reconcile the existing request; do not change arguments or issue a replacement write"} else {"correct the indicated input; preserve returned references and completed results"}});
+                    "next_action":next_action});
                 if name == "environment_doctor" {
                     raw = environment_doctor_failure(&self.store, &agent, &record.arguments, raw)?;
                 }
