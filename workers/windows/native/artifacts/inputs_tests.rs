@@ -58,6 +58,7 @@ fn native_logical_lookup_needs_completed_exact_owner_and_execution_policy() -> R
     );
     let mut changed = owner();
     changed.epoch += 1;
+    changed.run_id = "another-run".into();
     assert!(
         inputs
             .reference(&changed, &put.declaration.path, Purpose::Execute)
@@ -85,6 +86,136 @@ fn native_logical_lookup_needs_completed_exact_owner_and_execution_policy() -> R
             .is_err()
     );
     inputs.reference(&owner(), &data.declaration.path, Purpose::Inspect)?;
+    Ok(())
+}
+
+#[test]
+fn successor_readmits_only_sealed_same_run_bytes_under_a_new_reference() -> Result<()> {
+    use std::io::Read;
+    let (_directory, inputs) = fixture()?;
+    let put = put(owner(), b"admitted-before-controller-recovery")?;
+    inputs.prepare(&put)?;
+    inputs.receipt(&put.declaration)?;
+    let original = reference(&put)?;
+    let successor = Owner {
+        epoch: 2,
+        owner_id: "successor".into(),
+        ..owner()
+    };
+    let recovered = inputs.reference(&successor, &original.path, Purpose::Execute)?;
+    assert_ne!(recovered.id, original.id);
+    assert_eq!(recovered.path, original.path);
+    assert_eq!(recovered.sha256, original.sha256);
+    assert_eq!(recovered.size, original.size);
+    assert_eq!(recovered.executable, original.executable);
+    assert_eq!(
+        inputs.reference(&successor, &original.path, Purpose::Execute)?,
+        recovered
+    );
+    assert!(
+        inputs
+            .acquire(&successor, &original, Purpose::Execute)
+            .is_err(),
+        "the old reference became a successor capability"
+    );
+    let mut bytes = Vec::new();
+    inputs
+        .acquire(&successor, &recovered, Purpose::Execute)?
+        .read_to_end(&mut bytes)?;
+    assert_eq!(bytes, b"admitted-before-controller-recovery");
+    let scope = inputs.root.join(digest(&successor)?);
+    let key = digest(&original.path)?;
+    let declaration = inputs.read_record(&scope.join(format!("{key}.declaration.json")))?;
+    assert_eq!(declaration.owner, successor);
+    assert_eq!(
+        inputs.read_record(&scope.join(format!("{key}.receipt.json")))?,
+        declaration
+    );
+    Ok(())
+}
+
+#[test]
+fn stale_reference_does_not_trigger_or_authorize_successor_readmission() -> Result<()> {
+    let (_directory, inputs) = fixture()?;
+    let put = put(owner(), b"original-reference")?;
+    inputs.prepare(&put)?;
+    inputs.receipt(&put.declaration)?;
+    let successor = Owner {
+        epoch: 2,
+        owner_id: "successor".into(),
+        ..owner()
+    };
+    let error = inputs
+        .acquire(&successor, &reference(&put)?, Purpose::Execute)
+        .err()
+        .context("stale reference was accepted")?;
+    assert!(format!("{error:#}").contains("re-stage"));
+    assert!(!inputs.root.join(digest(&successor)?).exists());
+    Ok(())
+}
+
+#[test]
+fn recovery_rejects_other_runs_and_missing_receipts_with_actionable_context() -> Result<()> {
+    let (_directory, inputs) = fixture()?;
+    let staged = put(owner(), b"run-bound")?;
+    inputs.prepare(&staged)?;
+    inputs.receipt(&staged.declaration)?;
+    let other_run = Owner {
+        run_id: "other-run".into(),
+        epoch: 2,
+        owner_id: "successor".into(),
+        ..owner()
+    };
+    let error = inputs
+        .reference(&other_run, &staged.declaration.path, Purpose::Execute)
+        .err()
+        .context("another run inherited the input")?;
+    let message = format!("{error:#}");
+    assert!(message.contains("same run and installation"));
+    assert!(message.contains("re-stage"));
+    assert!(!inputs.root.join(digest(&other_run)?).exists());
+
+    let (_directory, inputs) = fixture()?;
+    let incomplete = put(owner(), b"missing-receipt")?;
+    inputs.prepare(&incomplete)?;
+    let successor = Owner {
+        epoch: 2,
+        owner_id: "successor".into(),
+        ..owner()
+    };
+    let error = inputs
+        .reference(&successor, &incomplete.declaration.path, Purpose::Execute)
+        .err()
+        .context("incomplete prior input was re-admitted")?;
+    let message = format!("{error:#}");
+    assert!(message.contains("completed receipt"));
+    assert!(message.contains("re-stage"));
+    assert!(!inputs.root.join(digest(&successor)?).exists());
+    Ok(())
+}
+
+#[test]
+fn recovery_rechecks_immutable_bytes_before_publishing_a_successor_receipt() -> Result<()> {
+    let (_directory, inputs) = fixture()?;
+    let put = put(owner(), b"original-native-input")?;
+    inputs.prepare(&put)?;
+    inputs.receipt(&put.declaration)?;
+    let scope = inputs.directory(&put.declaration)?;
+    let blob = scope.join(format!("{}.data", digest(&put.declaration.path)?));
+    fs::write(&blob, b"modified-native-input")?;
+    let successor = Owner {
+        epoch: 2,
+        owner_id: "successor".into(),
+        ..owner()
+    };
+    let error = inputs
+        .reference(&successor, &put.declaration.path, Purpose::Execute)
+        .err()
+        .context("tampered prior input was re-admitted")?;
+    let message = format!("{error:#}");
+    assert!(message.contains("content differs"), "{message}");
+    assert!(message.contains("re-stage"));
+    assert!(!inputs.root.join(digest(&successor)?).exists());
     Ok(())
 }
 
