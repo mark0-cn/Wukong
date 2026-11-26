@@ -117,32 +117,76 @@ impl Coordinator {
         self.pause(run_id, reason, "interrupted")
     }
     fn pause(&self, run_id: &str, reason: &str, cause: &str) -> Result<()> {
+        self.store
+            .write(|tx| Self::tx_pause(tx, run_id, reason, cause).map(|_| ()))
+    }
+    fn tx_pause(
+        tx: &crate::storage::StateSession<'_>,
+        run_id: &str,
+        reason: &str,
+        cause: &str,
+    ) -> Result<bool> {
+        let mut run: RunRecord = tx.get_record(run_id)?.context("run missing")?;
+        if run.status.terminal() || run.status == Status::BudgetPaused {
+            return Ok(false);
+        }
+        run.status = Status::BudgetPaused;
+        run.updated_at = now();
+        tx.save_record(&run)?;
+        for mut agent in tx.records::<AgentMetadata>(run_id)? {
+            if !agent.status.terminal() {
+                agent.status = Status::BudgetPaused;
+                agent.updated_at = now();
+                tx.save_record(&agent)?;
+            }
+        }
+        tx.event(
+            run_id,
+            None,
+            if cause == "budget" {
+                "run.budget_paused"
+            } else {
+                "run.paused"
+            },
+            json!({"reason":reason,"cause":cause}),
+        )?;
+        Ok(true)
+    }
+    /// Recover durable controller state after the operator has established that
+    /// the previous controller is gone. Worker records are deliberately untouched.
+    pub(crate) fn recover_orphaned(&self, run_id: &str, stop: bool) -> Result<RunRecord> {
         self.store.write(|tx| {
-            let mut run: RunRecord = tx.get_record(run_id)?.context("run missing")?;
-            if run.status.terminal() || run.status == Status::BudgetPaused {
-                return Ok(());
+            let run: RunRecord = tx.get_record(run_id)?.context("run missing")?;
+            if run.status.terminal() {
+                return Ok(run);
             }
-            run.status = Status::BudgetPaused;
-            run.updated_at = now();
-            tx.save_record(&run)?;
-            for mut agent in tx.records::<AgentMetadata>(run_id)? {
-                if !agent.status.terminal() {
-                    agent.status = Status::BudgetPaused;
-                    agent.updated_at = now();
-                    tx.save_record(&agent)?;
-                }
+            let previous_status = run.status;
+            if stop {
+                Self::tx_stop(
+                    tx,
+                    &run.root_id,
+                    "operator requested stop during orphaned-run recovery",
+                )?;
+            } else {
+                Self::tx_pause(
+                    tx,
+                    run_id,
+                    "controller process was lost; explicit orphaned-run recovery",
+                    "interrupted",
+                )?;
             }
+            let recovered: RunRecord = tx.get_record(run_id)?.context("run missing")?;
             tx.event(
                 run_id,
                 None,
-                if cause == "budget" {
-                    "run.budget_paused"
-                } else {
-                    "run.paused"
-                },
-                json!({"reason":reason,"cause":cause}),
+                "run.recovered",
+                json!({
+                    "action": if stop { "stop" } else { "continue" },
+                    "previous_status": previous_status.as_str(),
+                    "status": recovered.status.as_str(),
+                }),
             )?;
-            Ok(())
+            Ok(recovered)
         })
     }
     pub fn resume(&self, run_id: &str, budget: Option<Budget>) -> Result<()> {

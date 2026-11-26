@@ -2,9 +2,12 @@
     clippy::unwrap_used,
     reason = "a fixture that cannot be built should fail the test immediately"
 )]
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{fs, sync::Arc};
 use wukong::{
+    adapters::telemetry::TelemetryHandle,
+    application::AssessmentService,
+    config::AppConfig,
     coordinator::{ChildRequest, Coordinator},
     domain::*,
     store::Store,
@@ -34,6 +37,14 @@ fn request(scope: &str) -> ChildRequest {
         dependency_policy: Default::default(),
         contract: Default::default(),
     }
+}
+
+fn recovery_service(store: &Store) -> AssessmentService {
+    AssessmentService::new(
+        AppConfig::default(),
+        store.clone(),
+        TelemetryHandle::disabled(),
+    )
 }
 
 #[test]
@@ -711,6 +722,7 @@ fn unresolved_coverage_prevents_clean_finish() {
         outcome: "needs_follow_up".into(),
         notes: "runtime unavailable".into(),
         evidence_ids: vec![],
+        supersedes: vec![],
         created_at: now(),
         updated_at: now(),
     };
@@ -761,6 +773,190 @@ fn live_controller_lease_excludes_a_second_process() {
     assert!(!second.acquire_lease(&run.id, "controller-two", 30).unwrap());
     store.release_lease(&run.id, "controller-one").unwrap();
     assert!(second.acquire_lease(&run.id, "controller-two", 30).unwrap());
+}
+
+#[test]
+fn orphaned_run_recovery_pauses_then_resumes_without_touching_jobs() {
+    let (_dir, store, c, run) = fixture();
+    let child = c
+        .create_child(&run.root_id, request("orphaned child"))
+        .unwrap()
+        .agent;
+    for agent_id in [&run.root_id, &child.id] {
+        let mut agent: AgentMetadata = store.require("agent", agent_id).unwrap();
+        agent.status = Status::Running;
+        store.save_record(&agent).unwrap();
+    }
+    let job = json!({"id":"job-orphan","run_id":run.id,"agent_id":child.id,
+        "worker_resource_id":"worker-job","worker_id":"fixture","owner_generation":0,
+        "tool_name":"job_start","call_id":"fixture","worker_request_id":"request",
+        "parameters":{},"target_sha256":run.target_sha256,"created_at":now(),"updated_at":now(),
+        "status":{"job_id":"worker-job","state":"running"}});
+    store.put("job", "job-orphan", &run.id, &job).unwrap();
+
+    let recovered = recovery_service(&store)
+        .recover_orphaned(&run.id, false)
+        .unwrap();
+    assert_eq!(recovered.status, Status::BudgetPaused);
+    for agent_id in [&run.root_id, &child.id] {
+        assert_eq!(
+            store
+                .require::<AgentSnapshot>("agent", agent_id)
+                .unwrap()
+                .status,
+            Status::BudgetPaused
+        );
+    }
+    assert_eq!(
+        store.require::<Value>("job", "job-orphan").unwrap(),
+        job,
+        "controller recovery must not infer a worker job outcome"
+    );
+    let events = store.events(&run.id, 0, 100).unwrap();
+    let pause = events
+        .iter()
+        .find(|event| event.kind == "run.paused")
+        .expect("interrupted pause event");
+    assert_eq!(pause.data["cause"], "interrupted");
+    let recovery = events
+        .iter()
+        .find(|event| event.kind == "run.recovered")
+        .expect("operator recovery event");
+    assert_eq!(recovery.data["action"], "continue");
+    assert_eq!(recovery.data["previous_status"], "running");
+    assert!(!events.iter().any(|event| event.kind.starts_with("job.")));
+
+    c.resume(&run.id, None).unwrap();
+    assert_eq!(
+        store.require::<RunRecord>("run", &run.id).unwrap().status,
+        Status::Running
+    );
+    assert_eq!(
+        store
+            .require::<AgentSnapshot>("agent", &child.id)
+            .unwrap()
+            .status,
+        Status::Queued
+    );
+    assert_eq!(
+        store.require::<Value>("job", "job-orphan").unwrap(),
+        job,
+        "the following resume still owns worker reconciliation"
+    );
+}
+
+#[test]
+fn orphaned_run_recovery_rejects_a_live_controller() {
+    let (_dir, store, _c, run) = fixture();
+    assert!(store.acquire_lease(&run.id, "live-controller", 30).unwrap());
+    let error = recovery_service(&store)
+        .recover_orphaned(&run.id, false)
+        .unwrap_err();
+    assert!(error.to_string().contains("live controller"), "{error:#}");
+    assert_eq!(
+        store.require::<RunRecord>("run", &run.id).unwrap().status,
+        Status::Running
+    );
+    assert!(
+        !store
+            .events(&run.id, 0, 100)
+            .unwrap()
+            .iter()
+            .any(|event| event.kind == "run.recovered")
+    );
+    store.release_lease(&run.id, "live-controller").unwrap();
+}
+
+#[test]
+fn orphaned_run_recovery_preserves_terminal_runs() {
+    let (_dir, store, c, run) = fixture();
+    c.finish(&run.root_id, "all work complete").unwrap();
+    let stopped = c
+        .create_run(
+            &run.target_path,
+            "already stopped",
+            Budget::default(),
+            json!({}),
+        )
+        .unwrap();
+    c.stop(&stopped.root_id, "operator cancellation").unwrap();
+
+    for (terminal, status) in [(run, Status::Completed), (stopped, Status::Stopped)] {
+        let before = store.require::<RunRecord>("run", &terminal.id).unwrap();
+        let event_count = store.events(&terminal.id, 0, 100).unwrap().len();
+        for stop in [false, true] {
+            let recovered = recovery_service(&store)
+                .recover_orphaned(&terminal.id, stop)
+                .unwrap();
+            assert_eq!(recovered.status, status);
+        }
+        let after = store.require::<RunRecord>("run", &terminal.id).unwrap();
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(
+            store.events(&terminal.id, 0, 100).unwrap().len(),
+            event_count
+        );
+    }
+}
+
+#[test]
+fn explicit_orphaned_run_stop_uses_root_stop_semantics() {
+    let (_dir, store, c, run) = fixture();
+    let completed = c
+        .create_child(&run.root_id, request("already complete"))
+        .unwrap()
+        .agent;
+    c.finish(&completed.id, "terminal result").unwrap();
+    let child = c
+        .create_child(&run.root_id, request("child to stop"))
+        .unwrap()
+        .agent;
+    let grandchild = c
+        .create_child(&child.id, request("grandchild to stop"))
+        .unwrap()
+        .agent;
+
+    let recovered = recovery_service(&store)
+        .recover_orphaned(&run.id, true)
+        .unwrap();
+    assert_eq!(recovered.status, Status::Stopped);
+    for agent_id in [&run.root_id, &child.id, &grandchild.id] {
+        assert_eq!(
+            store
+                .require::<AgentSnapshot>("agent", agent_id)
+                .unwrap()
+                .status,
+            Status::Stopped
+        );
+    }
+    assert_eq!(
+        store
+            .require::<AgentSnapshot>("agent", &completed.id)
+            .unwrap()
+            .status,
+        Status::Completed
+    );
+    let events = store.events(&run.id, 0, 100).unwrap();
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.kind == "agents.stopped")
+            .unwrap()
+            .data["agents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.kind == "run.recovered")
+            .unwrap()
+            .data["action"],
+        "stop"
+    );
 }
 
 #[test]

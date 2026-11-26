@@ -275,6 +275,7 @@ impl<'a> DurableEffects<'a> {
                     WorkerErrorKind::InvalidRequest
                         | WorkerErrorKind::SessionLost
                         | WorkerErrorKind::Conflict
+                        | WorkerErrorKind::ResourceBusy
                 ) {
                     CallState::Failed
                 } else {
@@ -550,6 +551,22 @@ mod tests {
         assert!(matches!(
             effects.failure_state(policy, &agent, "call", &rejected)?,
             CallState::Failed
+        ));
+        let busy = anyhow::Error::new(WorkerError {
+            kind: WorkerErrorKind::ResourceBusy,
+            message: "localized message".into(),
+        });
+        assert!(matches!(
+            effects.failure_state(policy, &agent, "call", &busy)?,
+            CallState::Failed
+        ));
+        let unknown = anyhow::Error::new(WorkerError {
+            kind: WorkerErrorKind::OutcomeUnknown,
+            message: "localized message".into(),
+        });
+        assert!(matches!(
+            effects.failure_state(policy, &agent, "call", &unknown)?,
+            CallState::Uncertain
         ));
         effects.record_worker_reply(
             &agent,

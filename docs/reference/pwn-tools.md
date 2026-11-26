@@ -40,6 +40,8 @@ Limits: 16 candidates, 16 leaks, 32 MiB/file and 64 MiB total candidates. pyelft
 
 An independent verifier calls `poc_verify` for the producer's finding, then imports results through `verification_record`. Network mode requires host-prepared `files/challenge/launch.json`, service mode local_service/remote and a challenge binary matching the run's target hash. Services without local binary identity are not accepted.
 
+A valid passing record atomically becomes the finding's first valid `verification_id`, which `finding_get` resolves immediately. Replay can repair a missing link; a different valid passing link is rejected rather than overwritten. Failed verdicts leave the success pointer unset, and linking never promotes the finding stage.
+
 Production workers connect only to internal `challenge:<configured-port>`; remote mode uses the host-managed fixed relay. Replay cannot select another host/port. Trusted local tests use loopback. Admission and every trial recheck configuration, original files and target hashes. Network plans exclude input_mode/args/env/expected.
 
 `input` is the original send-byte file; this example contains `PING`:

@@ -58,6 +58,8 @@ TRACE 等返回还依赖外部参与者，不能解释成 syscall 最终成功�
 `files/challenge/launch.json`，其中服务模式必须为 local_service 或 remote，
 并有与本任务样本哈希匹配的题目 binary。当前不接受无本地 binary 身份的服务。
 
+有效通过记录会原子成为发现的首个有效 `verification_id`，`finding_get` 可立即解析。重放可以修复缺失关联；不同的有效通过关联会被拒绝而不是覆盖。失败判定不设置成功指针，关联也不会提升发现阶段。
+
 生产 worker 只连接内部 `challenge:<配置端口>`；remote 模式沿用宿主管理的固定
 转发。模型不能在 replay 中指定另一个 host/port。可信本地测试使用回环地址。
 配置、原始文件和目标哈希在准入及每次试验重新检查。网络计划与

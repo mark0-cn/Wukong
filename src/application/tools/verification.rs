@@ -7,6 +7,51 @@ pub(super) struct VerificationService {
     pub(super) jobs: jobs::JobService,
 }
 
+fn valid_passing_link(
+    tx: &crate::storage::StateSession<'_>,
+    finding: &Finding,
+    verification_id: &str,
+) -> Result<bool> {
+    let Some(verification) = tx.get_record::<Verification>(verification_id)? else {
+        return Ok(false);
+    };
+    let Some(verifier) = tx.get_record::<AgentMetadata>(&verification.verifier_agent_id)? else {
+        return Ok(false);
+    };
+    Ok(verification.run_id == finding.run_id
+        && verification.finding_id == finding.id
+        && verification.verifier_agent_id != finding.agent_id
+        && verification.passed
+        && verification.attempts > 0
+        && verification.successes == verification.attempts
+        && !verification.evidence_ids.is_empty()
+        && verifier.run_id == finding.run_id
+        && verifier.role == Role::Verifier)
+}
+
+fn link_passing_verification(
+    tx: &crate::storage::StateSession<'_>,
+    finding: &mut Finding,
+    verification: &Verification,
+) -> Result<bool> {
+    ensure!(
+        valid_passing_link(tx, finding, &verification.id)?,
+        "passing verification does not certify this finding"
+    );
+    if finding.verification_id.as_deref() == Some(verification.id.as_str()) {
+        return Ok(false);
+    }
+    if let Some(existing) = finding.verification_id.as_deref() {
+        ensure!(
+            !valid_passing_link(tx, finding, existing)?,
+            "finding already has a different valid passing verification"
+        );
+    }
+    finding.verification_id = Some(verification.id.clone());
+    finding.updated_at = now();
+    Ok(true)
+}
+
 impl VerificationService {
     pub(super) async fn admit(
         &self,
@@ -253,10 +298,34 @@ impl VerificationService {
             created_at: now(),
         };
         DurableEffects::new(&self.jobs.store,self.jobs.gateway.output_limit).commit(agent,call_id,|tx|{
-            if let Some(existing)=tx.get_record::<Verification>(&verification.id)?{return Ok(serde_json::to_value(existing)?);}
-            tx.save_record(&verification)?;
-            tx.event(&agent.run_id,Some(&agent.id),"verification.recorded",json!({"verification_id":verification.id,"finding_id":finding.id,"passed":passed,"attempts":attempts,"successes":successes,"impact":verification.impact}))?;
-            Ok(serde_json::to_value(verification)?)
+            let (record, is_new) = if let Some(existing) = tx.get_record::<Verification>(&verification.id)? {
+                (existing, false)
+            } else {
+                (verification.clone(), true)
+            };
+            if is_new {
+                tx.save_record(&record)?;
+            }
+            let mut finding: Finding = tx
+                .get_record(&finding.id)?
+                .context("finding missing")?;
+            ensure!(
+                finding.run_id == agent.run_id,
+                "finding belongs to another run"
+            );
+            if record.passed && link_passing_verification(tx, &mut finding, &record)? {
+                tx.save_record(&finding)?;
+                tx.event(
+                    &agent.run_id,
+                    Some(&agent.id),
+                    "finding.verification_linked",
+                    json!({"finding_id":finding.id,"verification_id":record.id}),
+                )?;
+            }
+            if is_new {
+                tx.event(&agent.run_id,Some(&agent.id),"verification.recorded",json!({"verification_id":record.id,"finding_id":finding.id,"passed":record.passed,"attempts":record.attempts,"successes":record.successes,"impact":record.impact}))?;
+            }
+            Ok(serde_json::to_value(record)?)
         })
     }
 }

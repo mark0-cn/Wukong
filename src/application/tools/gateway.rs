@@ -128,6 +128,7 @@ impl WorkerGateway {
                         WorkerErrorKind::InvalidRequest
                             | WorkerErrorKind::Conflict
                             | WorkerErrorKind::SessionLost
+                            | WorkerErrorKind::ResourceBusy
                     )
                 }) {
                     error

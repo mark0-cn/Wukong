@@ -141,6 +141,8 @@ struct HtmlFinding<'a> {
 struct HtmlReport<'a> {
     snapshot: &'a crate::queries::ReportSnapshot,
     findings: Vec<HtmlFinding<'a>>,
+    coverage: Vec<&'a Coverage>,
+    superseded_coverage: Vec<&'a Coverage>,
     summary: String,
     locale: Locale,
     status: String,
@@ -262,6 +264,10 @@ fn readable_report(
             evidence: finding.evidence_ids.join(", "),
         });
     }
+    let (current_coverage, superseded_coverage): (Vec<_>, Vec<_>) = snapshot
+        .coverage
+        .iter()
+        .partition(|coverage| !coverage.is_superseded());
     md.push_str(&format!(
         "## {}\n\n| {} | {} | {} | {} |\n|---|---|---|---|\n",
         tr("report-coverage"),
@@ -270,7 +276,7 @@ fn readable_report(
         tr("report-outcome"),
         tr("report-notes")
     ));
-    for coverage in &snapshot.coverage {
+    for coverage in &current_coverage {
         md.push_str(&format!(
             "| {} | {} | {} | {} |\n",
             markdown_text(&coverage.scope).replace('\n', " "),
@@ -278,6 +284,26 @@ fn readable_report(
             markdown_text(&coverage.outcome),
             markdown_text(&coverage.notes).replace('\n', " ")
         ));
+    }
+    if !superseded_coverage.is_empty() {
+        md.push_str(&format!(
+            "\n## {}\n\n{}\n\n| {} | {} | {} | {} |\n|---|---|---|---|\n",
+            tr("report-coverage-history"),
+            tr("report-coverage-history-note"),
+            tr("report-scope"),
+            tr("report-kind"),
+            tr("report-outcome"),
+            tr("report-notes")
+        ));
+        for coverage in &superseded_coverage {
+            md.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                markdown_text(&coverage.scope).replace('\n', " "),
+                markdown_text(&coverage.kind),
+                markdown_text(&coverage.outcome),
+                markdown_text(&coverage.notes).replace('\n', " ")
+            ));
+        }
     }
     if !snapshot.artifact_validations.is_empty() {
         md.push_str(&format!(
@@ -311,6 +337,8 @@ fn readable_report(
     let html = HtmlReport {
         snapshot,
         findings,
+        coverage: current_coverage,
+        superseded_coverage,
         summary,
         locale,
         status,
