@@ -242,6 +242,21 @@ wukong analyze --resume RUN_ID --max-tokens 1000000
 
 外部 jobs 和调试器需分别核对。持久化检查点不能恢复已经消失的调试进程；容器或 VM 丢失后，也不能凭检查点还原存活会话。
 
+<a id="orphaned-controller-recovery"></a>
+
+### 孤立控制端恢复
+
+控制端被终止（包括 `SIGKILL` 或宿主机断电）时无法执行清理代码，因此持久化状态可能仍为 `running`。确认原控制端已经退出后，可显式准备继续任务：
+
+```sh
+wukong recover RUN_ID
+wukong analyze --resume RUN_ID
+```
+
+`recover` 会取得短期恢复租约；若任务仍由存活控制端持有，则拒绝执行。默认操作记录中断暂停（`budget_paused`）和 `run.recovered` 事件，不会把任务或 Agent 标记为 failed 或 crashed。恢复不会调用模型或 worker，也不会改变 job 结果。随后执行的 `analyze --resume` 会在模型执行前核对 worker job。系统不会仅凭经过的时间或租约过期自动触发恢复。
+
+如需改为终止孤立任务，执行 `wukong recover RUN_ID --stop`。该选项按根任务停止语义处理根任务及未完成的后代，同时保留已终态 Agent。对已终态任务执行恢复是空操作。可通过 `runs --run RUN_ID --events 30` 核对最终生命周期事件。
+
 <a id="unresolved-external-calls"></a>
 
 ### 未决外部调用

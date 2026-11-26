@@ -169,6 +169,40 @@ mod tests {
     }
 
     #[test]
+    fn orphaned_recovery_help_and_stop_option_are_localized() {
+        for (locale, command_text, stop_text) in [
+            (
+                Locale::EnUs,
+                "Recover an assessment after confirming its controller is gone",
+                "Stop the root and unfinished descendants",
+            ),
+            (
+                Locale::ZhCn,
+                "确认原控制端已退出后恢复任务",
+                "停止根任务及未完成的后代",
+            ),
+        ] {
+            let mut command = localize(Cli::command(), locale, "");
+            let help = command
+                .find_subcommand_mut("recover")
+                .unwrap()
+                .render_long_help()
+                .to_string();
+            assert!(help.contains(command_text), "{help}");
+            assert!(help.contains(stop_text), "{help}");
+            let matches = localize(Cli::command(), locale, "")
+                .try_get_matches_from(["wukong", "recover", "run-orphaned", "--stop"])
+                .unwrap();
+            let cli = Cli::from_arg_matches(&matches).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(super::super::Command::Recover { run_id, stop })
+                    if run_id == "run-orphaned" && stop
+            ));
+        }
+    }
+
+    #[test]
     fn analyze_requires_a_target_or_resume_and_accepts_budget_overrides() {
         let command = localize(Cli::command(), Locale::EnUs, "");
         assert!(
