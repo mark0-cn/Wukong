@@ -33,19 +33,24 @@ impl AssessmentRunner {
         self.events.subscribe()
     }
     pub async fn drive(&self, run_id: &str, cancel: CancellationToken) -> Result<RunRecord> {
-        self.drive_with_budget(run_id, cancel, None).await
+        self.drive_with_budget(run_id, cancel, None, false).await
     }
     pub(crate) async fn drive_with_budget(
         &self,
         run_id: &str,
         cancel: CancellationToken,
         budget: Option<Budget>,
+        reconcile_jobs: bool,
     ) -> Result<RunRecord> {
-        crate::application::assessment::supervisor::RunSupervisor::drive(
-            self.clone(),
-            run_id,
-            cancel,
-            budget,
+        // Keep the supervisor and its recovery future off the CLI's main stack.
+        Box::pin(
+            crate::application::assessment::supervisor::RunSupervisor::drive(
+                self.clone(),
+                run_id,
+                cancel,
+                budget,
+                reconcile_jobs,
+            ),
         )
         .await
     }

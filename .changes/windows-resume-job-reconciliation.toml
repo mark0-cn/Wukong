@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Reconcile existing Windows worker jobs during resume only after the supervised controller lease is acquired and the runner store is fenced, so budget-paused native runs can recover instead of failing before model execution."
+zh_CN = "恢复任务时，在取得受监督的 controller lease 并围栏 runner store 后再调和现有 Windows Worker job，避免预算暂停的原生任务在模型执行前失败。"

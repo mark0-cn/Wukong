@@ -33,6 +33,7 @@ pub struct PreparedAssessment {
     runner: AssessmentRunner,
     run: RunRecord,
     budget: Option<Budget>,
+    reconcile_jobs: bool,
     telemetry: TelemetryHandle,
 }
 
@@ -71,7 +72,7 @@ impl PreparedAssessment {
         let _close = CloseTools(std::sync::Arc::clone(&self.runner.tools));
         let result = self
             .runner
-            .drive_with_budget(&self.run.id, cancel, self.budget)
+            .drive_with_budget(&self.run.id, cancel, self.budget, self.reconcile_jobs)
             .instrument(span.clone())
             .await;
         let outcome = match &result {
@@ -149,6 +150,7 @@ impl AssessmentService {
                 runner,
                 run,
                 budget: None,
+                reconcile_jobs: false,
                 telemetry: self.telemetry.clone(),
             }),
             Err(error) => {
@@ -170,18 +172,15 @@ impl AssessmentService {
         saved.validate()?;
         let runner =
             (self.runner_factory)(saved, self.store.clone(), self.telemetry.clone()).await?;
-        // Keep recovery work out of the CLI's main stack frame. An inline
-        // reconcile future overflowed the default Windows stack even for --version.
-        if let Err(error) = Box::pin(runner.tools.reconcile_jobs(run_id)).await {
-            runner.tools.close().await;
-            return Err(error.context("reconcile worker jobs before resuming"));
-        }
+        // Job reconciliation runs in RunSupervisor only after the controller
+        // lease is claimed and the runner store has been fenced to that owner.
         // Applying a budget is a supervised write, after ownership is acquired.
         Ok(PreparedAssessment {
             _maintenance: maintenance,
             runner,
             run,
             budget,
+            reconcile_jobs: true,
             telemetry: self.telemetry.clone(),
         })
     }
@@ -275,6 +274,39 @@ mod tests {
                 .is_err()
         );
         assert_eq!(store.runs()?.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resume_reconciles_jobs_only_inside_supervised_drive() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let store = Store::open(dir.path().join("state"))?;
+        let mut config = AppConfig::default();
+        config.model.provider = Provider::Ollama;
+        config.model.base_url = Some("http://127.0.0.1:1".into());
+        let target = dir.path().join("sample");
+        std::fs::write(&target, b"fixture")?;
+        let service = AssessmentService::new(config, store.clone(), TelemetryHandle::disabled());
+        let prepared = service.start(&target, "fixture").await?;
+        let run = prepared.run().clone();
+        drop(prepared);
+        let mut root: AgentMetadata = store.require("agent", &run.root_id)?;
+        root.environment_id = Some("missing".into());
+        store.save_record(&root)?;
+        service.pause(&run.id, "fixture")?;
+
+        // Preparation must succeed without touching a Windows worker before the
+        // controller lease exists. The fenced drive then performs reconciliation
+        // and exposes the selected environment error instead of an owner error.
+        let resumed = service.resume(&run.id, None).await?;
+        let error = resumed.drive(CancellationToken::new()).await.unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("environment is not registered"),
+            "{message}"
+        );
+        let after: RunRecord = store.require("run", &run.id)?;
+        assert_eq!(after.status, Status::BudgetPaused);
         Ok(())
     }
 }
