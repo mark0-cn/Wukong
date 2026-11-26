@@ -726,6 +726,31 @@ async fn coverage_supersedes_rejects_invalid_roles_runs_scopes_and_owners() -> R
             .unwrap()
             .contains("another run")
     );
+    let own = service
+        .execute(
+            &run.root_id,
+            "coverage-own-row",
+            "coverage_record",
+            json!({"scope":"root own","kind":"static analysis","outcome":"completed"}),
+        )
+        .await?;
+    assert!(!own.is_error, "{own:?}");
+    let own_id = result(&own)["id"].as_str().unwrap();
+    let self_supersession = service
+        .execute(
+            &run.root_id,
+            "coverage-self-supersession",
+            "coverage_record",
+            json!({"scope":"root own","kind":"static analysis","outcome":"completed","supersedes":[own_id]}),
+        )
+        .await?;
+    assert!(self_supersession.is_error);
+    assert!(
+        result(&self_supersession)["error"]
+            .as_str()
+            .unwrap()
+            .contains("own coverage")
+    );
     let reserved = service
         .execute(
             &run.root_id,
@@ -736,8 +761,16 @@ async fn coverage_supersedes_rejects_invalid_roles_runs_scopes_and_owners() -> R
         .await?;
     assert!(reserved.is_error);
     let rows = store.records::<Coverage>(&run.id)?;
-    assert!(rows.iter().all(|row| row.agent_id != run.root_id));
-    assert!(rows.iter().all(|row| row.outcome == "needs_follow_up"));
+    assert!(
+        rows.iter()
+            .filter(|row| row.scope == "parser input")
+            .all(|row| row.agent_id != run.root_id)
+    );
+    assert!(
+        rows.iter()
+            .filter(|row| row.scope == "parser input")
+            .all(|row| row.outcome == "needs_follow_up")
+    );
     service.close().await;
     Ok(())
 }

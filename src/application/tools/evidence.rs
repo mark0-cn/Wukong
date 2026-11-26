@@ -71,6 +71,10 @@ impl EvidenceService {
                     normalized(&previous.scope) == scope && normalized(&previous.kind) == kind,
                     "superseded coverage row must have the same normalized scope/kind"
                 );
+                ensure!(
+                    previous.agent_id != agent.id,
+                    "root cannot supersede its own coverage row"
+                );
                 let owner: AgentMetadata = tx
                     .get_record(&previous.agent_id)?
                     .context("superseded coverage owner missing")?;
