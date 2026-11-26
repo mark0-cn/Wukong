@@ -1,0 +1,3 @@
+kind = "fix"
+en = "Register remote Ghidra artifacts through the selected static worker and classify native resource_busy as a definite pre-effect rejection with resource-list and close/reuse guidance instead of an unknown effect."
+zh_CN = "通过选定的静态 worker 注册远程 Ghidra 产物，并将原生 resource_busy 归类为确定的效果前拒绝，提供资源列表及关闭/复用指引，而不是误报为未知效果。"
