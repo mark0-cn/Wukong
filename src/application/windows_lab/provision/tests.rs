@@ -935,6 +935,33 @@ fn wrapper_removes_the_boot_task_and_launcher_before_shutdown() {
     assert!(wrapper.contains("boot_task_removed"));
     assert!(wrapper.contains("launcher_deleted"));
     assert!(wrapper.contains("Remove-BootTask"));
+    assert!(wrapper.contains("Disable-WukongTargetDefender"));
+    for policy in [
+        "DisableAntiSpyware",
+        "DisableRealtimeMonitoring",
+        "DisableBehaviorMonitoring",
+        "DisableOnAccessProtection",
+        "DisableScanOnRealtimeEnable",
+        "DisableScriptScanning",
+        "DisableIOAVProtection",
+        "DisableBlockAtFirstSeen",
+    ] {
+        assert!(wrapper.contains(policy), "missing Defender policy {policy}");
+    }
+    assert!(wrapper.contains("Set-MpPreference"));
+    assert!(wrapper.contains("Get-MpPreference"));
+    assert!(!wrapper.contains("ImpersonateLoggedOnUser"));
+    assert!(!wrapper.contains("SetOwner"));
+    assert!(!wrapper.contains("Stop-Service -Name WinDefend"));
+    assert!(!wrapper.contains("Set-Service -Name WinDefend"));
+    let disable = wrapper
+        .find("Disable-WukongTargetDefender\n")
+        .expect("baseline creation invokes Defender disablement");
+    assert!(
+        disable < wrapper.find("verify-enrollment").unwrap()
+            && disable < wrapper.find("install-reviewed").unwrap(),
+        "Defender is disabled before installation and fixed-baseline creation"
+    );
     assert!(
         wrapper.contains("powercfg.exe /hibernate off")
             && wrapper.find("powercfg.exe /hibernate off").unwrap()
