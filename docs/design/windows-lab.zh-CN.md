@@ -145,7 +145,8 @@ timeout_seconds = 600
 ### 安全不变量
 
 - 控制器私钥保留在控制器：`--keys` 只被本地 finalize 步骤消费；只有已签名登记记录、密封载荷和 setup 可执行文件进入介质/ISO；模板和输出会被检查以排除密钥目录和私钥文件名；`--register` 只保存控制器侧客户端身份路径与由回执推导的 Worker 主机固定项。
-- 不使用客体管理员密码，也不经过管理通道：离线路径注入固定计划任务文件及其 TaskCache 注册，并从 CD 安装；已配置的 admin 通道和密码环境变量只用于管理安装脚本。部署不写入服务：`hivexsh` 只为固定 TaskCache 键编辑客体 SOFTWARE 配置单元，旧版一次性服务键由只读 SYSTEM 配置单元探测与显式客体清理命令处理。不触碰任何本地组策略文件；包装脚本在关机前注销固定任务，失败尝试留下的任务由 `clean-guest` 移除。
+- 离线基线部署会在 Worker 安装和固定／暂存快照创建之前，主动关闭专用可丢弃 VM 中的 Windows Defender 保护。启动包装脚本应用并验证 `DisableAntiSpyware` 及相关策略，使用受支持的 `Set-MpPreference` API 关闭实时、行为、访问、脚本、IOAV 和首次发现保护以及样本提交，随后通过 `Get-MpPreference` 验证生成的偏好值。不调用受保护的服务控制 API，也不写入受 Tamper Protection 保护的服务启动值。这是执行不可信漏洞样本所必需的，不会应用到控制器或任何非可丢弃环境。恢复该固定基线会清除之后由样本造成的修改，同时保留基线中经过验证的 Defender 关闭状态。此测试实验室行为不提供配置开关。
+- 不使用客体管理员密码，也不经过管理通道：离线路径注入固定计划任务文件及其 TaskCache 注册，并从 CD 安装；已配置的 admin 通道和密码环境变量只用于管理安装脚本。部署不注册服务：`hivexsh` 只为固定 TaskCache 键编辑客体 SOFTWARE 配置单元，旧版一次性服务键由只读 SYSTEM 配置单元探测与显式客体清理命令处理。不触碰任何本地组策略文件；包装脚本在关机前注销固定任务，失败尝试留下的任务由 `clean-guest` 移除。
 - 输入在端到端范围内按哈希固定：介质回执、签名登记记录和载荷清单会在 finalize 前后、启动前宿主侧以及客体包装脚本内分别校验；回读的客体回执绑定部署 id、安装 id、环境 id、代际、清单、安装程序生成的 Worker sshd 主机密钥及其重新计算的指纹。登记密钥只用于授权控制器作为 SSH 客户端；回执主机密钥会被独立校验并固定用于服务端认证。`production_isolation_verified` 始终为 false，因为客体回执不能证明 hypervisor 隔离。
 - VMX 总会恢复到挂载前的字节：这些字节在 CD 编辑前保存，成功时在创建固定/暂存基线快照前恢复，失败时由调和恢复；VM 开机时调和会拒绝执行。
 - 路径与命令固定：只寻址 `C:\ProgramData\WukongLab\provision\<32 位小写十六进制>` 路径、固定 `C:\Windows\System32\Tasks\WukongLabProvision` 任务文件、固定 `{A861DA08-B3C7-44C1-8BAC-579B48F54859}` TaskCache 身份与 `D:P(A;;FA;;;BA)(A;;FA;;;SY)` 安全描述符、固定 `launch.ps1` 启动器与固定任务计划程序动作、按操作的 `provision.ps1`/`provision-plan.json`，以及（仅供清理）退役的 `wukong-provision-<id>.cmd`/`scripts.ini.wukong-lab-<id>.bak`/`gpt.ini.wukong-lab-<id>.bak` 路径与旧版 `WukongLabProvision-<id>` 服务名；宿主工具接收固定 argv 且不经过 shell；介质、模板、密钥、ISO 与 VM 路径校验为绝对路径；工具与部署等待均有界；模型或实验输入永不进入该模块。
@@ -233,7 +234,7 @@ Ghidra 只探测和绑定选定的静态环境；普通执行/状态/清理只�
 
 当前回归覆盖过期/失败恢复、调用者/配置约束、包篡改、接口 schema 和原生/Python 源码准入。最终提交仍需重新进行真实 VMware 客体安装及重启验收。驱动覆盖不含 PnP/设备 I/O、生产签名或 PatchGuard 绕过。原生安装器测试应在隔离 runner 上运行，不能覆盖用户安装。
 
-离线 Worker 部署由使用 fake 宿主、磁盘、ISO、客体网络和环境适配器的单元与规划测试覆盖，包括 VMX CD/磁盘规划、规范化计划任务文件/TaskCache 夹具（固定尺寸、SHA-256 与 hivexsh 脚本）、包装脚本回执约定与 finally 顺序、显式客体清理命令（幂等、支持 dry-run、拒绝外部 id、按字节精确恢复策略并删除创建的文件）、已稳定完成的纯回执孤立记录准入及其拒绝矩阵、批量列举帧格式、遗留状态拒绝、介质/模板校验、部署状态恢复以及注册/配置写入。没有测试通过部署路径写入 SYSTEM 服务键或本地组策略启动条目。规范化任务布局已在真实 Windows 任务计划程序存储上离线验证（离线注入、服务重载、SYSTEM 执行与自注销），并与 Windows 10 参考系统卷交叉核对；该替代实现的真实 VM 启动验收仍需操作者执行，本次修订也没有由 CI 执行真实 WSL/libguestfs 注入、`mkisofs` 构建、VMware 启动、客体计划任务执行或 managed-SSH `doctor` 运行。
+离线 Worker 部署由使用 fake 宿主、磁盘、ISO、客体网络和环境适配器的单元与规划测试覆盖，包括 VMX CD/磁盘规划、规范化计划任务文件/TaskCache 夹具（固定尺寸、SHA-256 与 hivexsh 脚本）、包装脚本回执约定与 finally 顺序、显式客体清理命令（幂等、支持 dry-run、拒绝外部 id、按字节精确恢复策略并删除创建的文件）、已稳定完成的纯回执孤立记录准入及其拒绝矩阵、批量列举帧格式、遗留状态拒绝、介质/模板校验、部署状态恢复以及注册/配置写入。没有测试通过部署路径注册一次性服务或本地组策略启动条目；包装脚本测试覆盖 Defender 策略／偏好值及安装前顺序。规范化任务布局已在真实 Windows 任务计划程序存储上离线验证（离线注入、服务重载、SYSTEM 执行与自注销），并与 Windows 10 参考系统卷交叉核对；该替代实现的真实 VM 启动验收仍需操作者执行，本次修订也没有由 CI 执行真实 WSL/libguestfs 注入、`mkisofs` 构建、VMware 启动、客体计划任务执行或 managed-SSH `doctor` 运行。
 
 ## CLI
 

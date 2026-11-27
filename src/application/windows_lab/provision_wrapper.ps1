@@ -62,6 +62,37 @@ function Remove-BootTask {
     }
     return (Test-BootTaskGone)
 }
+function Disable-WukongTargetDefender {
+    # This runs only inside a dedicated disposable vulnerability-analysis VM.
+    # The fixed baseline is restored after untrusted targets execute.
+    $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender'
+    $realTime = Join-Path $policy 'Real-Time Protection'
+    $spynet = Join-Path $policy 'Spynet'
+    New-Item -Path $policy, $realTime, $spynet -Force | Out-Null
+    Set-ItemProperty -Path $policy -Name DisableAntiSpyware -Value 1 -Type DWord
+    foreach ($name in @('DisableRealtimeMonitoring', 'DisableBehaviorMonitoring', 'DisableOnAccessProtection', 'DisableScanOnRealtimeEnable', 'DisableScriptScanning', 'DisableIOAVProtection')) {
+        Set-ItemProperty -Path $realTime -Name $name -Value 1 -Type DWord
+    }
+    Set-ItemProperty -Path $spynet -Name DisableBlockAtFirstSeen -Value 1 -Type DWord
+    Set-ItemProperty -Path $spynet -Name SubmitSamplesConsent -Value 2 -Type DWord
+    # Use Defender's supported management API while its service is running;
+    # protected service-control and Tamper-Protected registry paths are not used.
+    Set-MpPreference -DisableRealtimeMonitoring $true -DisableBehaviorMonitoring $true -DisableScriptScanning $true -DisableIOAVProtection $true -DisableBlockAtFirstSeen $true -SubmitSamplesConsent 2
+    $preference = Get-MpPreference
+    foreach ($name in @('DisableRealtimeMonitoring', 'DisableBehaviorMonitoring', 'DisableScriptScanning', 'DisableIOAVProtection', 'DisableBlockAtFirstSeen')) {
+        if (-not $preference.$name) {
+            throw ('failed to disable Windows Defender feature ' + $name)
+        }
+    }
+    if ($preference.SubmitSamplesConsent -ne 2) {
+        throw 'failed to disable Windows Defender sample submission'
+    }
+    foreach ($entry in @(@($policy, 'DisableAntiSpyware'), @($realTime, 'DisableRealtimeMonitoring'), @($realTime, 'DisableBehaviorMonitoring'), @($realTime, 'DisableOnAccessProtection'), @($realTime, 'DisableScanOnRealtimeEnable'), @($realTime, 'DisableScriptScanning'), @($realTime, 'DisableIOAVProtection'), @($spynet, 'DisableBlockAtFirstSeen'))) {
+        if ((Get-ItemProperty -Path $entry[0] -Name $entry[1]).$($entry[1]) -ne 1) {
+            throw ('failed to disable Windows Defender policy ' + $entry[1])
+        }
+    }
+}
 # Wait until the attached WUKONG_OFFLINE volume is visible. A boot-trigger task
 # can start before the CD-ROM volume and WMI are ready.
 function Find-MediaRoot([string]$label) {
@@ -91,6 +122,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw ('failed to disable guest hibernation and Fast Startup: exit code ' + $LASTEXITCODE)
     }
+    # Baselines are created only after this point, so every restored target VM
+    # has the same Defender-disabled vulnerability-analysis policy.
+    Disable-WukongTargetDefender
     if ($existingReceipt) {
         $receipt.already_installed = $true
     } else {

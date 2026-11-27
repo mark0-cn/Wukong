@@ -1,0 +1,3 @@
+kind = "feature"
+en = "Disable Windows Defender protection by default during disposable-VM baseline provisioning through wrapper-applied policies and the supported Set-MpPreference API, with verified realtime/behavior/script/IOAV/first-seen settings and no protected service-control or Tamper-Protected service-start writes."
+zh_CN = "在可丢弃 VM 基线部署时，通过包装脚本应用策略和受支持的 Set-MpPreference API 默认关闭 Windows Defender 保护，验证实时／行为／脚本／IOAV／首次发现设置，不调用受保护的服务控制，也不写入受 Tamper Protection 保护的服务启动值。"
